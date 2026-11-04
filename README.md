@@ -80,7 +80,7 @@ WebSocket server relays positions, shots, damage and edits. Friends on the same 
 - **Combat** — three weapons with distinct damage, rate of fire, spread, recoil and range;
   hitscan with headshot multipliers, tracers, muzzle flash, impact particles, synthesized
   WebAudio gunshots, health with regeneration, kill feed, K/D, death and respawn.
-- **Building** — break and place 24 block types, inventory, hotbar and nine crafting recipes.
+- **Building** — break and place 21 block types, inventory, hotbar and nine crafting recipes.
 - **Networking** — one transport interface with two back ends: the LAN WebSocket server
   (`server.js`) and internet MQTT rooms. Remote players are interpolated with name tags and
   held weapons, block edits sync both ways, and late joiners get retained edits.
