@@ -25,10 +25,12 @@ async function boot() {
   playBtn.textContent = 'Carving terrain…';
   await nextFrame();
   generateTerrain();
+  if (BC.api.modes) BC.api.modes.prepareWorld();
   await nextFrame();
 
   // pick the spawn before meshing so any safety clearing is baked in
-  const spawn = findSpawn();
+  const spawn = BC.api.modes && BC.api.modes.activeDef.locked
+    ? BC.api.modes.respawnPoint(BC.api.modes.localTeam) : findSpawn();
   player.pos.set(spawn.x, spawn.y, spawn.z);
   resetPlayerMotion();
 
@@ -45,34 +47,24 @@ async function boot() {
   spawnDragons();
   updateBuilding(0);
 
-  // warm up the shader compiler before the first frame
-  renderer.compile(scene, camera);
-  const bootNow = performance.now();
-  updateDestruction(0, bootNow);
-  updateScoreboard(0, bootNow);
-  updateCharacterOutlines();
-  renderer.render(scene, camera);
-
-  loading = false;
-  playBtn.disabled = false;
-  playBtn.textContent = 'Click to play';
-  document.body.classList.add('combat');
-  if (onlineBtnEl) onlineBtnEl.disabled = false;
-  if (createBtnEl) createBtnEl.disabled = false;
-  if (location.search.includes('shot')) hintEl.classList.add('hidden');
-
   // handy for poking around in the console
   window.__blockcraft = {
+    BC, features: BC.api, settings: BC.settings,
+    modes: BC.api.modes, world: BC.api.world, physics: BC.api.physics,
+    jetpack: BC.api.jetpack, riding: BC.api.riding, killcam: BC.api.killcam,
+    combatFx: BC.api.combatFx, audio: BC.api.audio, hud: BC.api.hud, minimap: BC.api.minimap,
+    menus: BC.api.menus, dragonBodies: BC.api.dragons,
     THREE, renderer, scene, camera, player, getBlock, setBlock,
     raycast: raycastVoxel, breakBlock, placeBlock, selectSlot, HOTBAR,
     hovered: () => hovered,
-    inventory, addItem, takeItem, itemCount, RECIPES, doCraft, refreshCraft,
+    inventory, addItem, takeItem, itemCount,
     UNLIMITED_BUILDING, buildItemCount, takeBuildItems,
-    openCraft, closeCraft, craftEl,
+    cycleHotbarMaterial, getInputMouseDiagnostics,
     CHARACTERS, CHAR_KEYS, setCharacter, cycleCharacter, localAvatar: () => localAvatar,
-    makeHumanoid, makeChicken,
+    makeHumanoid, makeChicken, poseHumanoidStance,
     critters, net, connectNet, updateCritters, updateCamera, updateAvatar, buildAvatar,
     updatePlayer, resetPlayerMotion, updateAvatarWeaponPose,
+    playerBodyHeight: () => typeof playerBodyHeight === 'function' ? playerBodyHeight() : PH,
     addCharacterOutline, updateCharacterOutlines,
     dragons, spawnDragons, updateDragons, makeDragon,
     quickBuild, selectBuildPiece, cancelQuickBuild, rotateBuildPiece,
@@ -86,6 +78,7 @@ async function boot() {
     applyDamage, doRespawn, attachAvatarGun, makeGunModel, startOnline, createRoom,
     leaveOnline, updateCombat, updateCombatHud, mqtt, roomInput: roomInputEl,
     scoreboard, setScoreboardVisible, updateScoreboard,
+    get seed() { return SEED; },
     get combatMode() { return combatMode; },
     set combatMode(v) { setCombatMode(!!v); },
     get alive() { return alive; },
@@ -98,16 +91,43 @@ async function boot() {
     get charKey() { return charKey; },
     get playerName() { return playerName; }
   };
-  document.getElementById('tiny').textContent =
-    CHAR_KEYS.length + ' characters · ' + dragons.length + ' dragons · ' +
-    trees.length + ' trees · ' + villageSites.length + ' villages · ' +
-    critters.length + ' critters · ' + WORLD + '×' + WORLD + ' blocks · seed ' + SEED;
+  BC.flags.bootReady = true;
+  BC.emit('worldReady');
+  BC.markReady();
+  refreshWorldSummary();
+
+  // Compile after feature hooks have installed their reusable visual resources.
+  renderer.compile(scene, camera);
+  const bootNow = performance.now();
+  updateCamera(0);
+  updateDestruction(0, bootNow);
+  updateScoreboard(0, bootNow);
+  updateCharacterOutlines();
+  BC.emit('lateFrame', 0, bootNow);
+  renderer.render(scene, camera);
+
+  loading = false;
+  playBtn.disabled = false;
+  playBtn.textContent = 'Click to play';
+  if (BC.api.menus) BC.api.menus.refresh();
+  document.body.classList.add('combat');
+  if (onlineBtnEl) onlineBtnEl.disabled = false;
+  if (createBtnEl) createBtnEl.disabled = false;
+  if (location.search.includes('shot')) hintEl.classList.add('hidden');
   statsEl.textContent = 'ready';
   const roomParam = normalizeRoom(new URLSearchParams(location.search).get('room') || '');
   if (roomParam) startOnline(roomParam);
   else connectNet();
   requestAnimationFrame(loop);
 }
+
+function refreshWorldSummary() {
+  document.getElementById('tiny').textContent =
+    CHAR_KEYS.length + ' characters · ' + dragons.length + ' dragons · ' +
+    trees.length + ' trees · ' + villageSites.length + ' villages · ' +
+    critters.length + ' critters · ' + WORLD + '×' + WORLD + ' blocks · seed ' + SEED;
+}
+BC.on('worldReset', refreshWorldSummary);
 
 /* ---------------- menu accessibility ---------------- */
 function syncRosterAccessibility() {
@@ -144,9 +164,15 @@ window.addEventListener('focus', resetFrameClock);
 
 function loop(now) {
   requestAnimationFrame(loop);
-  const dt = last === null || document.hidden ? 0 : Math.max(0, Math.min(0.05, (now - last) / 1000));
+  // Keep the last complete frame while regeneration yields between chunk builds.
+  // No physics, held fire, or stale state may read a half-generated world.
+  if (BC.flags.worldBusy) { last = null; return; }
+  const frameElapsed = last === null || document.hidden ? 0 : Math.max(0, (now - last) / 1000);
+  const dt = Math.min(0.05, frameElapsed);
   last = document.hidden ? null : now;
-  const playing = !document.hidden && document.pointerLockElement === renderer.domElement && !craftOpen;
+  const playing = isGameplayInputActive();
+  BC.flags.playing = playing;
+  BC.emit('preFrame', dt, now, playing);
 
   if (playing) {
     updatePlayer(dt);
@@ -156,6 +182,7 @@ function loop(now) {
   updateAvatar(dt);
   updateCamera(dt);
   updateCombat(dt, now);
+  BC.emit('postPlayer', dt, now, playing);
   if (playing && alive && !combatMode && !quickBuild.active) {
     updateHover();
   } else {
@@ -166,27 +193,27 @@ function loop(now) {
   updateCritters(dt);
   updateDragons(dt, now);
   updateNetPlayers(dt);
-  sendNetState(now);
-  sky.position.set(camera.position.x, 0, camera.position.z);
+  BC.emit('frame', dt, now, playing);
 
   updateDestruction(dt, now);
   updateScoreboard(dt, now);
   updateCharacterOutlines();
+  BC.emit('lateFrame', dt, now);
+  sendNetState(now);
+  sky.position.set(camera.position.x, 0, camera.position.z);
   renderer.render(scene, camera);
 
-  if (dt > 0) { fpsAccum += dt; fpsFrames++; fpsTimer += dt; }
+  // Physics caps long frames for stability; diagnostics must use the uncapped
+  // wall clock or slow rendering would incorrectly report at least 20 FPS.
+  if (frameElapsed > 0) { fpsAccum += frameElapsed; fpsFrames++; fpsTimer += frameElapsed; }
   if (fpsTimer >= 0.4) {
     shownFps = Math.round(fpsFrames / fpsAccum);
     fpsAccum = 0; fpsFrames = 0; fpsTimer = 0;
-    const p = player.pos;
-    statsEl.textContent =
-      shownFps + ' fps · x ' + p.x.toFixed(1) + ' y ' + p.y.toFixed(1) + ' z ' + p.z.toFixed(1) +
-      ' · ' + CHARACTERS[charKey].name +
-      ' · ' + Math.ceil(health) + 'hp · ' + currentWeapon().name +
-      ' · ' + (isScopeActive() ? 'scope' : (thirdPerson ? 'shoulder' : '1st')) +
-      ' · ' + (net.online ? (net.mode === 'mqtt' ? 'room ' + net.room : netPlayerCount() + ' online') : 'solo') +
-      (quickBuild.active ? ' · quick ' + quickBuild.kind : (combatMode ? '' : ' · mine / build')) +
-      (player.fly ? ' · flying' : '');
+    if (BC.api.hud && typeof BC.api.hud.setDiagnostics === 'function') {
+      BC.api.hud.setDiagnostics(shownFps);
+    } else {
+      statsEl.textContent = shownFps + ' FPS';
+    }
   }
 }
 
