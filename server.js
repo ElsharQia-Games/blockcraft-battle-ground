@@ -67,9 +67,13 @@ const ALLOW_FORCE_RIDEABLE = process.env.BC_ALLOW_FORCE_RIDEABLE === '1';
 const SERVER_EPOCH = Date.now() - nodePerformance.now();
 const SERVER_SESSION = crypto.randomBytes(8).toString('hex');
 const SERVER_MODES = {
-  tdm: null, ffa: null, snipers: ['sniper'], shotguns: ['shotgun'],
-  lockdown: ['rifle', 'smg', 'shotgun', 'revolver']
+  tdm: null, ffa: null, gungame: null, moon: null, hardcore: null, snipers: ['sniper'], shotguns: ['shotgun'],
+  sidearms: ['pistol', 'revolver'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver']
 };
+// Keep in sync with MODES (src/15-modes.js) and src/90-net.js.
+const SERVER_TEAM_MODES = new Set(['tdm', 'lockdown', 'moon', 'hardcore']);
+const SERVER_MODE_DAMAGE = { hardcore: 1.5 };
+const SERVER_NO_REGEN_MODES = new Set(['hardcore']);
 // Only terrain-dependent centers/altitude come from the host. All class,
 // eligibility, scale, route and phase fields come from the shared seed rules.
 const SERVER_DRAGON_META = ['kind', 'type', 'role', 'routeFamily', 'size', 'rideable', 'ambient', 'indestructible', 'invulnerable'];
@@ -79,9 +83,10 @@ const SERVER_DRAGON_CATALOG_BOUNDS = ['minCX', 'maxCX', 'minCZ', 'maxCZ', 'minAl
 /* Minimum trigger interval per weapon (milliseconds). SERVER_WEAPONS.reload
    is a slow fallback only: these are fire cadences, not reload durations. */
 const SERVER_FIRE_MS = {
-  pistol: 160, rifle: 105, shotgun: 750, smg: 80,
-  sniper: 1150, revolver: 420, lmg: 90
+  pistol: 167, rifle: 94, shotgun: 800, smg: 68,
+  sniper: 1430, revolver: 353, lmg: 100
 };
+const MAX_HP = 150; // keep in sync with MAX_HEALTH in src/60-combat.js
 
 /** @type {Map<string, Client>} */
 const clients = new Map();
@@ -669,13 +674,13 @@ function publicPlayer(client) {
 
 // Match the classic-script weapon catalogue; the server has no browser imports.
 const SERVER_WEAPONS = {
-  pistol: { reload: 1.15, mag: 12, damage: 26, pellets: 1, range: 90 },
-  rifle: { reload: 1.85, mag: 30, damage: 17, pellets: 1, range: 130 },
-  shotgun: { reload: 2.35, mag: 6, damage: 10, pellets: 8, range: 36 },
-  smg: { reload: 1.45, mag: 32, damage: 12, pellets: 1, range: 68 },
-  sniper: { reload: 2.80, mag: 5, damage: 76, pellets: 1, range: 180 },
-  revolver: { reload: 2.40, mag: 6, damage: 46, pellets: 1, range: 105 },
-  lmg: { reload: 3.60, mag: 60, damage: 19, pellets: 1, range: 145 }
+  pistol: { reload: 1.15, mag: 14, damage: 30, pellets: 1, range: 90, head: 2.0 },
+  rifle: { reload: 1.85, mag: 30, damage: 23, pellets: 1, range: 130, head: 1.6 },
+  shotgun: { reload: 2.35, mag: 6, damage: 14, pellets: 9, range: 34, head: 1.5 },
+  smg: { reload: 1.45, mag: 32, damage: 15, pellets: 1, range: 70, head: 1.4 },
+  sniper: { reload: 2.80, mag: 5, damage: 115, pellets: 1, range: 180, head: 2.0 },
+  revolver: { reload: 2.40, mag: 6, damage: 58, pellets: 1, range: 105, head: 2.0 },
+  lmg: { reload: 3.60, mag: 75, damage: 21, pellets: 1, range: 145, head: 1.4 }
 };
 
 function cleanWeapon(value, fallback) {
@@ -777,7 +782,7 @@ function weaponAllowed(weapon) {
 // changed only by an explicit switch. Recomputing from the sorted roster
 // reshuffled everyone whenever a player joined or left.
 function teamFor(id) {
-  if (roomMode !== 'tdm' && roomMode !== 'lockdown') return null;
+  if (!SERVER_TEAM_MODES.has(roomMode)) return null;
   const client = clients.get(id);
   return client && (client.team === 'red' || client.team === 'blue') ? client.team : null;
 }
@@ -796,7 +801,7 @@ function setTeam(target, team, by) {
   target.team = team;
   releaseRide(target, 'team');
   if (target.hp > 0) {
-    target.hp = 100;
+    target.hp = MAX_HP;
     target.lastDamageAt = -Infinity;
     target.healthAt = nowMs();
   }
@@ -846,7 +851,7 @@ function changeConfig(mode, seed, reset = false) {
     client.editBatches.clear();
     client.shot = null;
     client.shots.clear();
-    client.hp = 100;
+    client.hp = MAX_HP;
     client.kills = client.deaths = 0;
     client.deathReported = false;
     client.deathEvent = null;
@@ -862,9 +867,9 @@ function changeConfig(mode, seed, reset = false) {
 
 function advanceHealth(client) {
   const now = nowMs();
-  if (client.hp > 0 && client.hp < 100) {
-    const from = Math.max(client.healthAt, client.lastDamageAt + 7000);
-    if (now > from) client.hp = Math.min(100, client.hp + (now - from) * 0.009);
+  if (client.hp > 0 && client.hp < MAX_HP && !SERVER_NO_REGEN_MODES.has(roomMode)) {
+    const from = Math.max(client.healthAt, client.lastDamageAt + 6000);
+    if (now > from) client.hp = Math.min(MAX_HP, client.hp + (now - from) * 0.014);
   }
   client.healthAt = now;
 }
@@ -1115,7 +1120,8 @@ function deathEvent(victim, killer, weapon, head) {
 function damageTarget(attacker, target, damage, weapon, head, eventId, shotId) {
   advanceHealth(target);
   if (target.hp <= 0 || !enemies(attacker, target)) return;
-  const amount = Math.min(SERVER_WEAPONS[weapon] ? SERVER_WEAPONS[weapon].damage * (head ? 2 : 1) : BREATH_DAMAGE, damage);
+  const base = Math.min(SERVER_WEAPONS[weapon] ? SERVER_WEAPONS[weapon].damage * (head ? SERVER_WEAPONS[weapon].head : 1) : BREATH_DAMAGE, damage);
+  const amount = Math.round(base * (SERVER_WEAPONS[weapon] ? SERVER_MODE_DAMAGE[roomMode] || 1 : 1));
   target.hp = Math.max(0, target.hp - amount);
   target.lastDamageAt = target.healthAt = nowMs();
   const kill = target.hp <= 0 ? deathEvent(target, attacker, weapon, head) : null;
@@ -1373,7 +1379,7 @@ function handleMessage(client, msg, bytes) {
     if (!weaponAllowed(weapon) || weapon !== client.weapon) { noteDrop(client); return; }
     const w = SERVER_WEAPONS[weapon];
     const head = poseFlag(msg.head, 0);
-    const maxDamage = w.damage * (head ? 2 : 1);
+    const maxDamage = w.damage * (head ? w.head : 1);
     const dmg = msg.dmg;
     const origin = shotFor(client, msg) || client;
     const distance = Math.hypot(target.x - origin.x, target.y + target.height * 0.55 - origin.y, target.z - origin.z);
@@ -1399,7 +1405,7 @@ function handleMessage(client, msg, bytes) {
     if (client.deathReported && nowMs() - client.deathAt < RESPAWN_MS - 700) { sendHealth(client); return; }
     if (!validPosition(msg.x, msg.y, msg.z) || !applyPosition(client, msg, false)) { noteDrop(client); return; }
     if (client.deathReported) {
-      client.hp = 100;
+      client.hp = MAX_HP;
       client.life++;
       client.lastDamageAt = -Infinity;
     }
@@ -1472,7 +1478,7 @@ server.on('upgrade', (req, socket, head) => {
     yaw: 0,
     pitch: 0,
     weapon: 'pistol',
-    hp: 100,
+    hp: MAX_HP,
     kills: 0,
     deaths: 0,
     deathReported: false,

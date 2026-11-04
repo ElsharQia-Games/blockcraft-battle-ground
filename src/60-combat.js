@@ -7,13 +7,13 @@
    ============================================================ */
 
 const WEAPONS = [
-  { id: 'pistol',   name: 'Pistol',   damage: 26, rpm: 330, mag: 12, spread: 0.008, recoil: 0.026, range: 90,  pellets: 1, auto: false, reload: 1.15, sound: 0.55, scopeFov: 64, adsSpread: 0.42, kickBack: 0.065, recover: 20, report: [0.17, 1800, 158, 3.0] },
-  { id: 'rifle',    name: 'Rifle',    damage: 17, rpm: 640, mag: 30, spread: 0.014, recoil: 0.013, range: 130, pellets: 1, auto: true,  reload: 1.85, sound: 0.42, scopeFov: 58, adsSpread: 0.36, kickBack: 0.048, recover: 25, report: [0.12, 2400, 176, 3.6] },
-  { id: 'shotgun',  name: 'Shotgun',  damage: 10, rpm: 78,  mag: 6,  spread: 0.075, recoil: 0.070, range: 36,  pellets: 8, auto: false, reload: 2.35, sound: 0.80, scopeFov: 70, adsSpread: 0.72, kickBack: 0.120, recover: 13, report: [0.30, 850, 105, 2.0] },
-  { id: 'smg',      name: 'SMG',      damage: 12, rpm: 870, mag: 32, spread: 0.023, recoil: 0.010, range: 68,  pellets: 1, auto: true,  reload: 1.45, sound: 0.34, scopeFov: 66, adsSpread: 0.48, kickBack: 0.038, recover: 30, report: [0.09, 3200, 215, 4.2] },
-  { id: 'sniper',   name: 'Sniper',   damage: 76, rpm: 44,  mag: 5,  spread: 0.032, recoil: 0.095, range: 180, pellets: 1, auto: false, reload: 2.80, sound: 0.95, scopeFov: 18, adsSpread: 0.025, kickBack: 0.135, recover: 10, report: [0.38, 1450, 84, 2.3] },
-  { id: 'revolver', name: 'Revolver', damage: 46, rpm: 185, mag: 6,  spread: 0.006, recoil: 0.055, range: 105, pellets: 1, auto: false, reload: 2.40, sound: 0.73, scopeFov: 60, adsSpread: 0.34, kickBack: 0.100, recover: 15, report: [0.25, 2050, 126, 2.7] },
-  { id: 'lmg',      name: 'LMG',      damage: 19, rpm: 560, mag: 60, spread: 0.022, recoil: 0.021, range: 145, pellets: 1, auto: true,  reload: 3.60, sound: 0.62, scopeFov: 62, adsSpread: 0.50, kickBack: 0.075, recover: 18, report: [0.19, 1250, 118, 3.2] }
+  { id: 'pistol',   name: 'Pistol',   damage: 30, rpm: 360, mag: 14, spread: 0.008, recoil: 0.026, range: 90, pellets: 1, head: 2.0, auto: false, reload: 1.15, sound: 0.55, scopeFov: 64, adsSpread: 0.42, kickBack: 0.065, recover: 20, report: [0.17, 1800, 158, 3.0] },
+  { id: 'rifle',    name: 'Rifle',    damage: 23, rpm: 640, mag: 30, spread: 0.014, recoil: 0.013, range: 130, pellets: 1, head: 1.6, auto: true,  reload: 1.85, sound: 0.42, scopeFov: 58, adsSpread: 0.36, kickBack: 0.048, recover: 25, report: [0.12, 2400, 176, 3.6] },
+  { id: 'shotgun',  name: 'Shotgun',  damage: 14, rpm: 75, mag: 6, spread: 0.075, recoil: 0.070, range: 34, pellets: 9, head: 1.5, auto: false, reload: 2.35, sound: 0.80, scopeFov: 70, adsSpread: 0.72, kickBack: 0.120, recover: 13, report: [0.30, 850, 105, 2.0] },
+  { id: 'smg',      name: 'SMG',      damage: 15, rpm: 880, mag: 32, spread: 0.023, recoil: 0.010, range: 70, pellets: 1, head: 1.4, auto: true,  reload: 1.45, sound: 0.34, scopeFov: 66, adsSpread: 0.48, kickBack: 0.038, recover: 30, report: [0.09, 3200, 215, 4.2] },
+  { id: 'sniper',   name: 'Sniper',   damage: 115, rpm: 42, mag: 5, spread: 0.032, recoil: 0.095, range: 180, pellets: 1, head: 2.0, auto: false, reload: 2.80, sound: 0.95, scopeFov: 18, adsSpread: 0.025, kickBack: 0.135, recover: 10, report: [0.38, 1450, 84, 2.3] },
+  { id: 'revolver', name: 'Revolver', damage: 58, rpm: 170, mag: 6, spread: 0.006, recoil: 0.055, range: 105, pellets: 1, head: 2.0, auto: false, reload: 2.40, sound: 0.73, scopeFov: 60, adsSpread: 0.34, kickBack: 0.100, recover: 15, report: [0.25, 2050, 126, 2.7] },
+  { id: 'lmg',      name: 'LMG',      damage: 21, rpm: 600, mag: 75, spread: 0.022, recoil: 0.021, range: 145, pellets: 1, head: 1.4, auto: true,  reload: 3.60, sound: 0.62, scopeFov: 62, adsSpread: 0.50, kickBack: 0.075, recover: 18, report: [0.19, 1250, 118, 3.2] }
 ];
 const WEAPON_BY_ID = Object.create(null);
 const COMBAT_OPTIC_TYPES = {
@@ -116,7 +116,18 @@ const gun = {
   mechanismCued: false
 };
 
-const MAX_HEALTH = 100;
+// 150 HP with per-weapon headshot multipliers: every gun needs several body
+// shots (roughly 0.55-0.8 s time-to-kill), precision rewards heads, and only
+// a sniper headshot is a one-shot kill.
+const MAX_HEALTH = 150;
+const COMBAT_MAX_HIT = 300;
+function combatRegenAllowed() {
+  try {
+    const def = BC.api && BC.api.modes && BC.api.modes.activeDef;
+    return !def || def.regen !== false;
+  } catch (e) { return true; }
+}
+function combatDamageCap(w, head) { return w ? w.damage * (head ? w.head || 2 : 1) : 0; }
 let health = MAX_HEALTH;
 let alive = true;
 let lastDamageAt = -9999;
@@ -267,7 +278,7 @@ function combatTeamMode() {
   try {
     if (!modes) return false;
     if (modes.activeDef && typeof modes.activeDef.teams === 'boolean') return modes.activeDef.teams;
-    return modes.active === 'tdm' || modes.active === 'lockdown' || modes.localTeam === 'red' || modes.localTeam === 'blue';
+    return modes.localTeam === 'red' || modes.localTeam === 'blue';
   } catch (e) { return false; }
 }
 
@@ -1997,7 +2008,7 @@ function fireOnce() {
       hitAny = true;
       if (ent.head) hitHead = true;
       if (!shotTargetId) { shotTargetId = ent.r.id; firstHitName = ent.r.name || ''; }
-      const dmg = Math.round(w.damage * (ent.head ? 2 : 1) * (ent.t > w.range * 0.65 ? 0.8 : 1));
+      const dmg = Math.round(combatDamageCap(w, ent.head) * (ent.t > w.range * 0.65 ? 0.8 : 1));
       netSend({ t: 'hit', target: ent.r.id, dmg, head: ent.head, weapon: w.id, byId: net.id, by: playerName });
       addImpact(end, '#b83030', impactInfo);
       impactInfo.silent = true;
@@ -2096,9 +2107,9 @@ function combatHitInfo(dmg, byName, head, byId, info, extra) {
   const pending = combatPendingHitPacket;
   if (!packet && pending && performance.now() - pending.at < 250) {
     const p = pending.msg;
-    const packetAmount = Math.max(1, Math.min(120, Number(p.dmg) || 0));
+    const packetAmount = Math.max(1, Math.min(COMBAT_MAX_HIT, Number(p.dmg) || 0));
     if ((!byId || p.byId === byId) && (!byName || safeName(p.by) === safeName(byName)) &&
-        packetAmount === Math.max(1, Math.min(120, Number(dmg) || 0)) &&
+        packetAmount === Math.max(1, Math.min(COMBAT_MAX_HIT, Number(dmg) || 0)) &&
         (head == null || !!p.head === !!head)) packet = p;
   }
   combatPendingHitPacket = null;
@@ -2163,7 +2174,7 @@ function applyDamage(dmg, byName, head, byId, info) {
     const hitWeapon = WEAPON_BY_ID[hit.weapon];
     if (hit.killerPos && hitWeapon && hit.killerPos.distanceTo(player.pos) > hitWeapon.range) return false;
   }
-  const amount = Math.max(1, Math.min(120, numeric));
+  const amount = Math.max(1, Math.min(COMBAT_MAX_HIT, numeric));
   health = hit.authoritativeHealth === null ? Math.max(0, health - amount) : hit.authoritativeHealth;
   combatLastHitInfo = hit;
   lastDamageAt = performance.now();
@@ -2543,8 +2554,8 @@ function updateCombat(dt, now) {
     if (gun.ammo[gun.index] < before) gun.cooldown = Math.max(0, gun.cooldown + cooldownCarry);
   }
 
-  if (now - lastDamageAt > 7000 && health < MAX_HEALTH) {
-    health = Math.min(MAX_HEALTH, health + dt * 9);
+  if (now - lastDamageAt > 6000 && health < MAX_HEALTH && combatRegenAllowed()) {
+    health = Math.min(MAX_HEALTH, health + dt * 14);
     setHealth(health);
   }
 

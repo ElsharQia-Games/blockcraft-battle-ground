@@ -360,11 +360,11 @@ function lifecycleCleanupProbe() {
       check(b.alive && !b.killcam.active && !b.BC.flags.killcamActive && !document.body.classList.contains('killcam') &&
         !document.getElementById('killcamCard'), 'Fixture cleanup leaks a death-camera lifecycle');
     };
-    k.state(() => b.applyDamage(120, 'Fixture killer'));
+    k.state(() => b.applyDamage(300, 'Fixture killer'));
     clean();
     let caught = false;
     try {
-      k.state(() => { b.applyDamage(120, 'Fixture killer'); throw new Error('Expected fixture failure'); });
+      k.state(() => { b.applyDamage(300, 'Fixture killer'); throw new Error('Expected fixture failure'); });
     } catch (error) { caught = error.message === 'Expected fixture failure'; }
     check(caught, 'Throwing fixture did not propagate its error'); clean();
     b.gun.cooldown = b.gun.reloading = 0;

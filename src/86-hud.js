@@ -27,7 +27,8 @@
   };
   var hudModeNames = {
     tdm: ['Team Deathmatch', 'TDM'], ffa: ['Free For All', 'FFA'],
-    snipers: ['Snipers', 'SNP'], shotguns: ['Shotguns', 'SHG'], lockdown: ['Lockdown', 'LCK']
+    snipers: ['Snipers', 'SNP'], shotguns: ['Shotguns', 'SHG'], lockdown: ['Lockdown', 'LCK'],
+    gungame: ['Gun Game', 'GUN'], moon: ['Low Gravity', 'LOW-G'], hardcore: ['Hardcore', 'HC'], sidearms: ['Sidearms', 'SIDE']
   };
 
   hudBC.style('bc-compact-hud-v2', `

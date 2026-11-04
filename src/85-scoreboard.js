@@ -37,7 +37,7 @@ function scoreboardCounter(value) {
 }
 
 function scoreboardHealth(value) {
-  return Number.isFinite(value) ? Math.ceil(Math.max(0, Math.min(100, value))) : 0;
+  return Number.isFinite(value) ? Math.ceil(Math.max(0, Math.min(MAX_HEALTH, value))) : 0;
 }
 
 function scoreboardCompareText(a, b) {

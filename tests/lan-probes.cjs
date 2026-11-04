@@ -159,7 +159,7 @@ async function lanProbe(lab, t) {
     }
     return page.evaluate(() => {
       const b = window.__blockcraft;
-      b.health = 100; b.gun.reloading = b.gun.cooldown = 0;
+      b.health = 150; b.gun.reloading = b.gun.cooldown = 0;
       b.gun.ammo = b.WEAPONS.map((w) => w.mag);
       return { y: b.player.pos.y, kills: b.kills, deaths: b.deaths, health: b.health };
     });
@@ -181,7 +181,7 @@ async function lanProbe(lab, t) {
   const shots = [await fireAtPeer()];
   let victim = await B.wait('aimed ray caused end-to-end damage', () => {
     const b = window.__blockcraft;
-    return b.health < 100 ? { health: b.health, alive: b.alive, deaths: b.deaths } : false;
+    return b.health < 150 ? { health: b.health, alive: b.alive, deaths: b.deaths } : false;
   });
   assert.ok(victim.health > 0, 'First body shot should damage, not skip directly to the death assertion');
   for (let i = 0; i < 24 && victim.alive; i++) {
@@ -198,12 +198,12 @@ async function lanProbe(lab, t) {
   assert.match(await A.evaluate(() => document.getElementById('killfeed').textContent), /BC-Bravo/);
   const respawn = await B.wait('automatic respawn restores health and magazines', () => {
     const b = window.__blockcraft;
-    return b.alive && b.health === 100 && b.gun.ammo.every((n, i) => n === b.WEAPONS[i].mag)
+    return b.alive && b.health === 150 && b.gun.ammo.every((n, i) => n === b.WEAPONS[i].mag)
       ? { health: b.health, position: b.player.pos.toArray(), ammo: [...b.gun.ammo] } : false;
   }, undefined, { timeout: 12_000 });
   await A.wait('respawn replicated as a visible living avatar', (id) => {
     const r = window.__blockcraft.net.players.get(id);
-    return r && r.hp === 100 && r.group.visible && (!r.deadUntil || r.deadUntil <= performance.now());
+    return r && r.hp === 150 && r.group.visible && (!r.deadUntil || r.deadUntil <= performance.now());
   }, b.id);
 
   const scoreRows = ({ kills, deaths }) => {

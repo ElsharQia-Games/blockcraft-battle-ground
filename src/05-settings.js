@@ -17,7 +17,7 @@
   var LEGACY_SEED_KEY = 'blockcraft.seed';
   var CROSSHAIRS = ['cross', 'dot', 'circle', 'brackets', 'chevron', 'tcross', 'none'];
   var THEMES = ['red', 'blue', 'auto'];
-  var MODE_IDS = ['tdm', 'ffa', 'snipers', 'shotguns', 'lockdown'];
+  var MODE_IDS = ['tdm', 'ffa', 'gungame', 'moon', 'hardcore', 'snipers', 'shotguns', 'sidearms', 'lockdown'];
   var DEFAULT_SENSITIVITY = 1;
   var DEFAULT_VOLUME = 0.8;
   // 60-combat.js loads later. Keep only the stable IDs / UI names here, never
@@ -32,8 +32,12 @@
   var FALLBACK_MODES = [
     { id: 'tdm', name: 'Team Deathmatch', short: 'TDM', desc: 'Red versus blue. First team to the score cap wins.', teams: true },
     { id: 'ffa', name: 'Free For All', short: 'FFA', desc: 'No teams. Every player for themselves.', teams: false },
+    { id: 'gungame', name: 'Gun Game', short: 'GUN', desc: 'Each kill swaps you to the next gun.', teams: false },
+    { id: 'moon', name: 'Low Gravity', short: 'LOW-G', desc: 'Huge jumps and aerial gunfights.', teams: true },
+    { id: 'hardcore', name: 'Hardcore', short: 'HC', desc: 'Harder hits, no regeneration.', teams: true },
     { id: 'snipers', name: 'Snipers', short: 'SNP', desc: 'One shot, one kill. Long rifles only.', teams: false },
     { id: 'shotguns', name: 'Shotguns', short: 'SHG', desc: 'Close quarters. Shotguns only.', teams: false },
+    { id: 'sidearms', name: 'Sidearms', short: 'SIDE', desc: 'Pistols and revolvers only.', teams: false },
     { id: 'lockdown', name: 'Lockdown', short: 'LCK', desc: 'Hold the tight arena and force every fight.', teams: true }
   ];
 

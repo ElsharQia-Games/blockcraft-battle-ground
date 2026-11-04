@@ -77,11 +77,11 @@ function weaponProbe(expected) {
 
       b.startReload(); step(duration * 0.35);
       b.gun.trigger = b.gun.aiming = true;
-      b.applyDamage(120, 'Regression');
+      b.applyDamage(300, 'Regression');
       check(!b.alive && b.gun.reloading === 0 && !b.gun.trigger && !b.gun.aiming, 'Death did not release combat/reload state', w.id);
       check(difference(neutral, poses()) < 0.002, 'Death left reload components displaced', w.id);
       b.doRespawn();
-      check(b.alive && b.health === 100 && b.gun.reloading === 0, 'Respawn did not reset combat state', w.id);
+      check(b.alive && b.health === 150 && b.gun.reloading === 0, 'Respawn did not reset combat state', w.id);
       check(b.gun.ammo.every((n, i) => n === b.WEAPONS[i].mag), 'Respawn did not refill every weapon');
       check(difference(neutral, poses()) < 0.002, 'Respawn kept stale reload component pose', w.id);
       rows.push({ weapon: w.id, duration, articulation, models });
@@ -203,7 +203,7 @@ function scopeProbe() {
     check(new Set(zoom.filter((r) => r.thirdPerson).map((r) => JSON.stringify(r.frame))).size >= 4,
       'Weapon sights still reuse one identical circular housing', zoom);
     b.gun.aiming = true; settle(); b.setCombatMode(false); clear('build mode');
-    b.setCombatMode(true); b.gun.aiming = true; settle(); b.applyDamage(120, 'Regression');
+    b.setCombatMode(true); b.gun.aiming = true; settle(); b.applyDamage(300, 'Regression');
     b.updateCombat(0, performance.now()); b.updateAvatar(0); b.updateCamera(0);
     check(!b.alive && !scope() && !document.body.classList.contains('scoped'), 'Death did not clear scope before respawn');
     b.doRespawn(); clear('respawn');

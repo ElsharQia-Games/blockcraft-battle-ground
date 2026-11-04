@@ -13,8 +13,14 @@ const NET_SEND_MS = 50;
 const NET_MAX_QUEUE = 48;
 const NET_MAX_EDITS = 6000;
 const NET_MAX_PEERS = 32;
-const NET_FIRE_MS = { pistol: 160, rifle: 105, shotgun: 750, smg: 80, sniper: 1150, revolver: 420, lmg: 90 };
-const NET_MODE_WEAPONS = { tdm: null, ffa: null, snipers: ['sniper'], shotguns: ['shotgun'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver'] };
+const NET_FIRE_MS = { pistol: 167, rifle: 94, shotgun: 800, smg: 68, sniper: 1430, revolver: 353, lmg: 100 };
+const NET_MODE_WEAPONS = { tdm: null, ffa: null, gungame: null, moon: null, hardcore: null, snipers: ['sniper'],
+  shotguns: ['shotgun'], sidearms: ['pistol', 'revolver'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver'] };
+// Authority-side mode rules; keep in sync with MODES (15-modes.js) and server.js.
+const NET_TEAM_MODES = new Set(['tdm', 'lockdown', 'moon', 'hardcore']);
+const NET_MODE_DAMAGE = { hardcore: 1.5 };
+const NET_NO_REGEN_MODES = new Set(['hardcore']);
+function netModeDamage() { return NET_MODE_DAMAGE[net.matchMode] || 1; }
 const NET_MAX_FRAME = 32 * 1024;
 const NET_MAX_BUFFER = 256 * 1024;
 const NET_SHOT_WINDOW = 1000;
@@ -1136,7 +1142,7 @@ function addRemote(p) {
       yaw: netPoseYaw(p.yaw, 0),
       tyaw: netPoseYaw(p.yaw, 0),
       pitch: 0, tpitch: 0,
-      phase: 0, speed: 0, weapon: 'pistol', hp: 100,
+      phase: 0, speed: 0, weapon: 'pistol', hp: MAX_HEALTH,
       aim: 0, deadUntil: 0, gun: null, jetpackRig: null, combat: 1, build: 0, firing: 0,
       firePose: 0, kick: 0, reload: -1, reloadAt: 0, reloadTotal: WEAPONS[0].reload,
       reloadRounds: WEAPONS[0].mag, crouch: 0, slide: 0, stance: 0, slidePose: 0,
@@ -1252,7 +1258,7 @@ function netRememberState(p) {
 // Every peer used to derive teams from its own sorted view of the roster, so
 // the host and a victim could disagree and silently drop hits as "friendly".
 function netTeamFor(id) {
-  if (net.matchMode !== 'tdm' && net.matchMode !== 'lockdown') return null;
+  if (!NET_TEAM_MODES.has(net.matchMode)) return null;
   const record = net.authPlayers.get(id);
   if (record && (record.team === 'red' || record.team === 'blue')) return record.team;
   if (record && net.mode === 'mqtt' && net.hostId === net.id && net.authorityReady) return netAssignTeam(record);
@@ -1592,7 +1598,7 @@ function handleNet(msg, from, nested) {
       if (msg.target === net.id) {
         if (!Number.isFinite(msg.dmg) || msg.dmg <= 0 || !netValidId(msg.byId)) break;
         const w = Object.prototype.hasOwnProperty.call(WEAPON_BY_ID, msg.weapon) ? WEAPON_BY_ID[msg.weapon] : null;
-        if (msg.weapon === 'dragon' ? msg.dmg > 55 : !w || msg.dmg > w.damage * (msg.head ? 2 : 1)) break;
+        if (msg.weapon === 'dragon' ? msg.dmg > 55 : !w || msg.dmg > combatDamageCap(w, msg.head) * netModeDamage() + 0.5) break;
         if (Number.isSafeInteger(msg.life) && msg.life < (net.localLife || 0)) break;
         if (Number.isSafeInteger(msg.sid) && msg.sid < net.healthSid) break;
         const previousDamage = net.damageContext, previousKill = net.killContext;
@@ -1601,7 +1607,7 @@ function handleNet(msg, from, nested) {
         try {
           const amount = Number.isFinite(msg.health) ? Math.max(0, health - Math.max(0, msg.health)) : msg.dmg;
           const accepted = amount > 0
-            ? applyDamage(Math.min(120, amount), msg.by, !!netPoseFlag(msg.head, 0), msg.byId, { ...msg, authoritative: true })
+            ? applyDamage(Math.min(COMBAT_MAX_HIT, amount), msg.by, !!netPoseFlag(msg.head, 0), msg.byId, { ...msg, authoritative: true })
             : alive && netEnemies(msg.byId, net.id);
           if (accepted !== false) {
             if (alive && Number.isFinite(msg.health) && msg.health > 0) setHealth(netPoseNumber(msg.health, health, 0, MAX_HEALTH));
@@ -1999,9 +2005,9 @@ function netMqttRecord(id, msg, create) {
 
 function netMqttAdvanceHealth(r) {
   const now = performance.now();
-  if (r.hp > 0 && r.hp < MAX_HEALTH) {
-    const from = Math.max(r.healthAt || now, r.lastDamageAt + 7000);
-    if (now > from) r.hp = Math.min(MAX_HEALTH, r.hp + (now - from) * 0.009);
+  if (r.hp > 0 && r.hp < MAX_HEALTH && !NET_NO_REGEN_MODES.has(net.matchMode)) {
+    const from = Math.max(r.healthAt || now, r.lastDamageAt + 6000);
+    if (now > from) r.hp = Math.min(MAX_HEALTH, r.hp + (now - from) * 0.014);
   }
   r.healthAt = now;
 }
@@ -2274,8 +2280,8 @@ function netMqttDeath(victim, killer, weapon, head) {
 function netMqttDamage(attacker, target, amount, weapon, head, eventId, origin) {
   netMqttAdvanceHealth(target);
   if (target.hp <= 0 || !netEnemies(attacker.id, target.id)) return;
-  const cap = weapon === 'dragon' ? 55 : WEAPON_BY_ID[weapon].damage * (head ? 2 : 1);
-  amount = Math.min(cap, amount);
+  const cap = weapon === 'dragon' ? 55 : combatDamageCap(WEAPON_BY_ID[weapon], head);
+  amount = Math.round(Math.min(cap, amount) * (weapon === 'dragon' ? 1 : netModeDamage()));
   target.hp = Math.max(0, target.hp - amount);
   target.lastDamageAt = target.healthAt = performance.now();
   const kill = target.hp <= 0 ? netMqttDeath(target, attacker, weapon, head) : null;
@@ -2371,7 +2377,7 @@ function netMqttProcess(msg, from, budgeted) {
       // The shot already passed the reload gate; pellets just ride on it.
       if (!target || !w || !shot || r.hp <= 0 || r.dragon >= 0 ||
           !netEnemies(r.id, target.id) || !netMqttWeaponAllowed(msg.weapon) || msg.weapon !== r.weapon ||
-          !Number.isFinite(msg.dmg) || msg.dmg <= 0 || msg.dmg > w.damage * (head ? 2 : 1) ||
+          !Number.isFinite(msg.dmg) || msg.dmg <= 0 || msg.dmg > combatDamageCap(w, head) ||
           Math.hypot(target.x - shot.x, target.y + target.bodyHeight * 0.55 - shot.y, target.z - shot.z) > Math.min(w.range, 120) + 2 ||
           !netMqttFireLock(r, msg, 'hit')) break;
       netMqttDamage(r, target, msg.dmg, msg.weapon, head, netToken(msg.eventId), shot);

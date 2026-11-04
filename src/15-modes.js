@@ -23,12 +23,18 @@
 'use strict';
 
 /* ---------------- mode table ---------------- */
+/* Optional per-mode rules (all read by the room authority as well):
+   gravity  — player gravity multiplier (client physics)
+   damage   — authority damage multiplier
+   regen    — false disables health regeneration
+   ladder   — Gun Game: each kill advances you to the next weapon */
+const MODES_GUN_LADDER = Object.freeze(['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'revolver', 'sniper']);
 const MODES = Object.freeze([
   Object.freeze({
     id: 'tdm', name: 'Team Deathmatch', short: 'TDM',
-    desc: 'Red vs Blue with the full arsenal on the full map. First team to 30 kills.',
+    desc: 'Red vs Blue with the full arsenal on the full map. First team to 40 kills.',
     teams: true, weapons: null, arenaRadius: null, locked: false,
-    scoreToWin: 30, respawnMs: 3200
+    scoreToWin: 40, respawnMs: 3200
   }),
   Object.freeze({
     id: 'ffa', name: 'Free For All', short: 'FFA',
@@ -37,22 +43,46 @@ const MODES = Object.freeze([
     scoreToWin: 20, respawnMs: 3200
   }),
   Object.freeze({
+    id: 'gungame', name: 'Gun Game', short: 'GUN GAME',
+    desc: 'Every kill swaps you to the next gun: pistol up to the sniper. First through all seven wins.',
+    teams: false, weapons: null, ladder: MODES_GUN_LADDER, arenaRadius: 60, locked: true,
+    scoreToWin: MODES_GUN_LADDER.length, respawnMs: 2600
+  }),
+  Object.freeze({
+    id: 'moon', name: 'Low Gravity', short: 'LOW-G',
+    desc: 'Red vs Blue at 45% gravity. Huge jumps, long slides, aerial gunfights. First to 30.',
+    teams: true, weapons: null, gravity: 0.45, arenaRadius: 72, locked: true,
+    scoreToWin: 30, respawnMs: 3200
+  }),
+  Object.freeze({
+    id: 'hardcore', name: 'Hardcore', short: 'HARDCORE',
+    desc: 'Red vs Blue. Weapons hit 50% harder and nobody regenerates health. First to 30.',
+    teams: true, weapons: null, damage: 1.5, regen: false, arenaRadius: null, locked: false,
+    scoreToWin: 30, respawnMs: 4200
+  }),
+  Object.freeze({
     id: 'snipers', name: 'Snipers Only', short: 'SNIPERS',
-    desc: 'Sniper rifles only inside a compact arena. First to 15 kills.',
-    teams: false, weapons: Object.freeze(['sniper']), arenaRadius: 52, locked: true,
+    desc: 'Sniper rifles only inside a long arena. First to 15 kills.',
+    teams: false, weapons: Object.freeze(['sniper']), arenaRadius: 64, locked: true,
     scoreToWin: 15, respawnMs: 3200
   }),
   Object.freeze({
     id: 'shotguns', name: 'Shotguns Only', short: 'SHOTGUNS',
     desc: 'Shotguns only inside a tight arena. First to 15 kills.',
-    teams: false, weapons: Object.freeze(['shotgun']), arenaRadius: 38, locked: true,
-    scoreToWin: 15, respawnMs: 3200
+    teams: false, weapons: Object.freeze(['shotgun']), arenaRadius: 42, locked: true,
+    scoreToWin: 15, respawnMs: 2600
+  }),
+  Object.freeze({
+    id: 'sidearms', name: 'Sidearms', short: 'SIDEARMS',
+    desc: 'Pistols and revolvers only in a compact arena. Aim for the head. First to 15.',
+    teams: false, weapons: Object.freeze(['pistol', 'revolver']), arenaRadius: 44, locked: true,
+    scoreToWin: 15, respawnMs: 2600
   }),
   Object.freeze({
     id: 'lockdown', name: 'Lockdown', short: 'LOCKDOWN',
-    desc: 'Red vs Blue lockdown in a tight arena with rifles, SMGs, shotguns and revolvers. First to 20.',
+    desc: 'Red vs Blue in a tight arena with rifles, SMGs, shotguns and revolvers. First to 25.',
     teams: true, weapons: Object.freeze(['rifle', 'smg', 'shotgun', 'revolver']),
-    arenaRadius: 30, locked: true, scoreToWin: 20, respawnMs: 3200
+    arenaRadius: 36, locked: true, scoreToWin: 25, respawnMs: 3200
   })
 ]);
 
@@ -572,8 +602,15 @@ function MODES_matchState() {
 }
 
 /* ---------------- weapons ---------------- */
+function MODES_ladderStep() {
+  let count = 0;
+  try { count = typeof kills === 'number' ? kills : 0; } catch (e) { /* combat not loaded yet */ }
+  return Math.max(0, Math.min(MODES_GUN_LADDER.length - 1, Math.floor(count)));
+}
+
 function MODES_allowedWeapons() {
   const def = MODES_activeDef || MODES[0];
+  if (def.ladder) return [def.ladder[Math.min(def.ladder.length - 1, MODES_ladderStep())]];
   return def.weapons || null;
 }
 
@@ -1753,6 +1790,13 @@ if (typeof BC !== 'undefined' && BC && typeof BC.on === 'function') {
     MODES_clampScores();
     MODES_applyLoadout();
   }, 5);
+
+  // Gun Game: the allowed gun depends on this player's kill count.
+  function MODES_refreshLadder() {
+    if ((MODES_activeDef || MODES[0]).ladder) Promise.resolve().then(MODES_applyLoadout);
+  }
+  BC.on('killfeed', MODES_refreshLadder, 0);
+  BC.on('respawn', MODES_refreshLadder, 0);
 
   BC.on('netPacket', function (msg) {
     if (!msg || typeof msg !== 'object') return;

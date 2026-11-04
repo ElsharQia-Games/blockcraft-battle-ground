@@ -527,7 +527,7 @@ body.killcam #killBanner[data-mode="death"] { display: none !important; }
     try {
       const def = modes.activeDef;
       const teams = def && typeof def.teams === 'boolean' ? def.teams
-        : modes.active === 'tdm' || modes.active === 'lockdown' || modes.localTeam === 'red' || modes.localTeam === 'blue';
+        : modes.localTeam === 'red' || modes.localTeam === 'blue';
       const team = peer.team || teamOf(peer.id);
       return teams && (modes.localTeam === 'red' || modes.localTeam === 'blue') && team === modes.localTeam;
     } catch (e) { return false; }

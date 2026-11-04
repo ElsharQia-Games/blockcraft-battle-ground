@@ -135,10 +135,10 @@ function weaponHandlingProbe() {
     const ranges = [];
     b.gun.aiming = false;
     for (const [weapon, distance] of [['rifle', 125], ['sniper', 145], ['lmg', 140]]) {
-      b.health = 100;
+      b.health = 150;
       const accepted = b.applyDamage(10, 'Long-range fixture', false, null,
         { weapon, killerPos: b.player.pos.clone().add(new b.THREE.Vector3(distance, 0, 0)) });
-      check(accepted && b.health === 90, 'Declared long-range damage is incorrectly rejected at 120m', { weapon, distance, accepted });
+      check(accepted && b.health === 140, 'Declared long-range damage is incorrectly rejected at 120m', { weapon, distance, accepted });
       ranges.push({ weapon, distance, accepted });
     }
     const sniper = b.WEAPONS.find((w) => w.id === 'sniper');
