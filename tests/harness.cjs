@@ -140,6 +140,7 @@ class Page {
     this.consoleErrors = [];
     this.log = [];
     this.frames = [];
+    this.events = [];
     this.listener = (message) => {
       if (message.sessionId !== sessionID) return;
       const p = message.params;
@@ -156,8 +157,13 @@ class Page {
       if (message.method === 'Network.webSocketFrameReceived' || message.method === 'Network.webSocketFrameSent') {
         try {
           const value = JSON.parse(p.response.payloadData);
-          this.frames.push({ direction: message.method.endsWith('Received') ? 'in' : 'out', value });
+          const frame = { direction: message.method.endsWith('Received') ? 'in' : 'out', value };
+          this.frames.push(frame);
           if (this.frames.length > 300) this.frames.shift();
+          if (!['state', 'states', 'ping', 'pong', 'tick', 'roster'].includes(value.t)) {
+            this.events.push(frame);
+            if (this.events.length > 100) this.events.shift();
+          }
         } catch { /* MQTT/binary payloads are not LAN JSON. */ }
       }
     };
@@ -166,11 +172,11 @@ class Page {
 
   send(method, params, timeout) { return this.lab.cdp.send(method, params, this.sessionID, timeout); }
 
-  async evaluate(code, arg) {
+  async evaluate(code, arg, { timeout = REQUEST_MS } = {}) {
     const expression = typeof code === 'function' ? `(${code.toString()})(${JSON.stringify(arg) ?? ''})` : code;
     const response = await this.send('Runtime.evaluate', {
-      expression, returnByValue: true, awaitPromise: true, userGesture: true, timeout: REQUEST_MS - 1_000
-    });
+      expression, returnByValue: true, awaitPromise: true, userGesture: true, timeout: timeout - 1_000
+    }, timeout);
     if (response.exceptionDetails) {
       throw new Error(`${this.label}: ${response.exceptionDetails.exception?.description || response.exceptionDetails.text}`);
     }
@@ -214,10 +220,19 @@ class Page {
   }
 
   async play() {
-    await this.click('#play');
+    const selector = await this.evaluate(() => {
+      const pause = document.getElementById('pauseMenu');
+      return pause && !pause.hidden && !pause.inert ? '#pauseResume' : '#play';
+    });
+    await this.click(selector);
     await this.wait('real pointer lock and ready gameplay', () =>
       document.pointerLockElement === window.__blockcraft.renderer.domElement &&
       window.__bcTest.api('isGameplayInputActive')() && !window.__bcTest.api('gameplayKeyboardCapture').starting);
+    await this.wait('fresh relative mouse stream settled', () => {
+      const k = window.__bcTest;
+      k.api('inputMouseMove')({ movementX: 0, movementY: 0, timeStamp: performance.now() });
+      return !k.api('getInputMouseDiagnostics')().settling;
+    });
   }
 
   async lock() {
@@ -232,19 +247,27 @@ class Page {
       await this.wait('previous input capture released', () => !document.pointerLockElement);
       // Re-enter through a real click so pointer/fullscreen/keyboard requests carry
       // transient user activation. Raw evaluate calls cannot do that reliably.
-      const menuUp = await this.evaluate(() => !document.getElementById('hint').classList.contains('hidden'));
-      if (menuUp) {
-        await this.click('#play');
-      } else {
-        // API-driven combat mode hides the menu without starting pointer lock.
-        // Restore the real resume surface, then use its activation path.
-        await this.evaluate(() => document.getElementById('hint').classList.remove('hidden'));
-        await this.click('#play');
-      }
+      const selector = await this.evaluate(() => {
+        const b = window.__blockcraft, menus = b.features.menus;
+        if (menus) {
+          if (menus.state.screen === 'settings') menus.closeSettings();
+          if (['characters', 'online', 'play'].includes(menus.state.screen)) menus.handleEscape({ code: 'Escape' });
+          if (b.BC.flags.hasPlayed) menus.showPause(); else menus.showHome(true);
+          return menus.state.screen === 'pause' ? '#pauseResume' : '#play';
+        }
+        document.getElementById('hint').classList.remove('hidden');
+        return '#play';
+      });
+      await this.click(selector);
     }
     try {
       await this.wait('active gameplay pointer lock', () =>
         window.__bcTest.api('isGameplayInputActive')() && !window.__bcTest.api('gameplayKeyboardCapture').starting);
+      await this.wait('resumed relative mouse stream settled', () => {
+        const k = window.__bcTest;
+        k.api('inputMouseMove')({ movementX: 0, movementY: 0, timeStamp: performance.now() });
+        return !k.api('getInputMouseDiagnostics')().settling;
+      });
     } catch (error) {
       const state = await this.evaluate(() => ({
         pointer: document.pointerLockElement === window.__blockcraft.renderer.domElement,
@@ -253,6 +276,7 @@ class Page {
         hasFocus: document.hasFocus(), hidden: document.hidden,
         alwaysOnTop: !!document.fullscreenElement,
         hintHidden: document.getElementById('hint').classList.contains('hidden'),
+        menus: window.__blockcraft.features.menus?.state,
         capture: { ...window.__bcTest.api('gameplayKeyboardCapture') }
       })).catch((e) => ({ unavailable: e.message }));
       error.message += `\nlock state: ${JSON.stringify(state)}`;
@@ -274,7 +298,8 @@ class Page {
     if (this.closed) return;
     this.closed = true;
     this.lab.record(`page:${this.label}`, {
-      exceptions: this.exceptions, consoleErrors: this.consoleErrors, log: this.log, frames: this.frames.slice(-30)
+      exceptions: this.exceptions, consoleErrors: this.consoleErrors, log: this.log,
+      frames: this.frames.slice(-30), events: this.events
     });
     this.lab.cdp.listeners.delete(this.listener);
     await this.lab.cdp.send('Target.disposeBrowserContext', { browserContextId: this.contextID });
@@ -393,11 +418,11 @@ class Lab {
       }, undefined, { timeout: READY_MS, interval: 200 });
       if (solo) {
         await page.evaluate(() => {
-          const n = window.__blockcraft.net;
-          n.closedByUs = true;
-          if (n.ws) n.ws.close();
+          // Leave Online intentionally returns to automatic LAN play. The
+          // public manual-disconnect API is the actual isolated-solo lifecycle.
+          window.__blockcraft.features.net.kick('Isolated solo regression');
         });
-        await page.wait('solo socket closed', () => !window.__blockcraft.net.ws);
+        await page.wait('solo transport left cleanly', () => !window.__blockcraft.net.ws && !window.__blockcraft.net.online);
       }
       const { installKit } = require('./page-kit.cjs');
       await page.evaluate(installKit);

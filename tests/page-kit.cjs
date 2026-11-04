@@ -45,6 +45,14 @@ function installKit() {
       code, key: names[code] || code.replace(/^Key/, '').toLowerCase(), bubbles: true, cancelable: true, repeat
     }));
   };
+  const primeMouse = () => {
+    const reset = optional('resetInputMouseStream'), move = optional('inputMouseMove');
+    if (!reset || !move) return;
+    // A synchronous scalar-input fixture starts AFTER a controlled settling
+    // epoch. Real capture/resume timing is tested separately through CDP.
+    reset('synchronous-fixture', performance.now() - 200);
+    move({ movementX: 0, movementY: 0, timeStamp: performance.now() });
+  };
   const focusField = () => {
     // The actual menu is deliberately inert while playing. Use a genuinely
     // focusable field to exercise focus-in cancellation instead of focusing it.
@@ -54,14 +62,26 @@ function installKit() {
     input.style.cssText = 'position:fixed;top:12px;left:12px;z-index:1000';
     document.body.appendChild(input);
     input.focus();
+    // Focus intentionally releases gameplay and opens the normal pause screen.
+    // Keep the injected test field inside that active dialog before refocusing;
+    // the product's hidden Home fields must remain inert during gameplay.
+    if (document.activeElement !== input && b.features.menus) {
+      const screen = b.features.menus.state.screen;
+      const root = document.getElementById(screen === 'settings' ? 'settingsMenu' : screen === 'pause' ? 'pauseMenu' : 'hint');
+      if (root && !root.hidden) root.appendChild(input);
+      input.focus();
+    }
     check(document.activeElement === input, 'Text-entry fixture did not receive focus');
     return input;
   };
 
   function state(run) {
+    check(!b.killcam?.active && !b.riding?.active && !b.riding?.pending,
+      'Synchronous fixtures require an inactive killcam and no active/pending ride; use an isolated page for lifecycle tests');
     const saved = {
       player: clone(b.player), gun: clone(b.gun), inventory: clone(b.inventory), hotbar: [...b.HOTBAR], keys: clone(api('keys')),
       motion: clone(optional('playerMotion')), selected: optional('selected'),
+      jet: clone(optional('jetState')),
       focused: optional('inputWindowFocused'), active: optional('inputWasActive'), buttons: clone(optional('inputButtonsDown')),
       heldAt: optional('buildingHeld')?.nextActionAt,
       building: optional('quickBuild') && { kind: optional('quickBuild').kind, rotation: optional('quickBuild').rotation, material: optional('quickBuild').material },
@@ -82,6 +102,11 @@ function installKit() {
       check(!result?.then, 'A controlled fixture must remain synchronous');
       return result;
     } finally {
+      // Scalars do not reconstruct feature closures. End lifecycles started by
+      // this fixture before restoring the living player, input and camera.
+      if (b.riding?.active || b.riding?.pending) b.riding.dismount('test-cleanup');
+      b.killcam?.hide();
+      b.combatFx?.hideBanner();
       optional('cancelQuickBuild')?.();
       resetKeys();
       alive = saved.alive;
@@ -111,6 +136,7 @@ function installKit() {
       b.camera.updateMatrixWorld(true);
       b.updateCombatHud();
       if (saved.motion) restoreObject(api('playerMotion'), saved.motion);
+      if (saved.jet) restoreObject(api('jetState'), saved.jet);
       if (typeof selected !== 'undefined') selected = saved.selected;
       if (typeof inputWindowFocused !== 'undefined') inputWindowFocused = saved.focused;
       if (typeof inputWasActive !== 'undefined') inputWasActive = saved.active;
@@ -126,6 +152,7 @@ function installKit() {
       document.body.className = saved.bodyClass;
       document.getElementById('killfeed').innerHTML = saved.feed;
       muted = saved.muted;
+      b.hud?.refresh();
     }
   }
 
@@ -262,7 +289,7 @@ function installKit() {
     return { counts, villages: b.villageSites.length, trees: b.trees.length };
   }
 
-  window.__bcTest = { b, check, optional, api, clone, restoreObject, resetKeys, key, focusField, state, graph, model, pose, poseDistance, world, pad, onPad, population };
+  window.__bcTest = { b, check, optional, api, clone, restoreObject, resetKeys, key, primeMouse, focusField, state, graph, model, pose, poseDistance, world, pad, onPad, population };
   return { api: Object.keys(b), population: population() };
 }
 
