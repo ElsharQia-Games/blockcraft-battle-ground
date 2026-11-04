@@ -1082,19 +1082,24 @@ function deathEvent(victim, killer, weapon, head) {
   return event;
 }
 
-function damageTarget(attacker, target, damage, weapon, head, eventId) {
+function damageTarget(attacker, target, damage, weapon, head, eventId, shotId) {
   advanceHealth(target);
   if (target.hp <= 0 || !enemies(attacker, target)) return;
   const amount = Math.min(SERVER_WEAPONS[weapon] ? SERVER_WEAPONS[weapon].damage * (head ? 2 : 1) : BREATH_DAMAGE, damage);
   target.hp = Math.max(0, target.hp - amount);
   target.lastDamageAt = target.healthAt = nowMs();
   const kill = target.hp <= 0 ? deathEvent(target, attacker, weapon, head) : null;
-  sendJSON(target, {
+  const hit = {
     t: 'hit', target: target.id, dmg: amount, health: target.hp, head, weapon,
     byId: attacker.id, by: attacker.name, eventId, kill, life: target.life, sid: target.seqOut++,
+    shotId: shotId || undefined,
     generation: worldGeneration, authoritative: true,
     from: { x: attacker.x, y: attacker.y, z: attacker.z }
-  });
+  };
+  sendJSON(target, hit);
+  // The shooter needs the accepted damage/HP too. Do not infer floating
+  // numbers from an optimistic hit or broadcast private hit feedback to all.
+  if (attacker !== target) sendJSON(attacker, hit);
   if (kill) broadcast(kill);
   broadcastState({ t: 'state', ...publicPlayer(target), sid: target.seqOut++ });
 }
@@ -1336,7 +1341,7 @@ function handleMessage(client, msg, bytes) {
       return;
     }
     if (!fireLock(client, weapon, 'hit', msg)) return;
-    damageTarget(client, target, dmg, weapon, head, cleanToken(msg.eventId) || SERVER_SESSION + ':hit:' + client.id + ':' + nowMs());
+    damageTarget(client, target, dmg, weapon, head, cleanToken(msg.eventId) || SERVER_SESSION + ':hit:' + client.id + ':' + nowMs(), cleanToken(msg.shotId));
     return;
   }
 

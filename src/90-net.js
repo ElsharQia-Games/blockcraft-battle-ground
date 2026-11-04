@@ -73,7 +73,12 @@ function netUrl() {
 }
 
 function normalizeRoom(v) {
-  return String(v == null ? '' : v).toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
+  let text = String(v == null ? '' : v).trim();
+  const invite = /[?&]room=([^&#\s]+)/i.exec(text);
+  if (invite) {
+    try { text = decodeURIComponent(invite[1]); } catch (e) { return ''; }
+  } else if (/[/:?]/.test(text)) return ''; // do not turn an unrelated URL into a bogus room
+  return text.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
 }
 function randomRoom() {
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -458,7 +463,7 @@ function netStatusPayload() {
     desync: !!net.desync,
     hostId: net.hostId, generation: net.generation, seed: net.seed,
     matchMode: net.matchMode, canConfigure: netCanConfigure(),
-    configPending: net.configPending, authorityReady: net.authorityReady,
+    configPending: net.configPending, configError: !!net.configError, authorityReady: net.authorityReady,
     id: net.id, epoch: net.epoch,
     dragonCount: netDragonCount(net.seed), catalogCount: net.dragonCatalog.size
   };
@@ -838,27 +843,43 @@ function updateRoomBadge() {
 }
 
 function copyRoom() {
-  const code = net.room || (document.getElementById('roomInput') || {}).value || '';
-  if (!code) return;
-  const done = () => toast('Room code copied — send it to a friend');
+  const code = net.room || normalizeRoom((document.getElementById('roomInput') || {}).value);
+  if (!code) return Promise.resolve(false);
+  const done = () => {
+    const hint = document.getElementById('roomHint');
+    if (hint && net.room === code) hint.textContent = 'Invite code ' + code + ' copied. Send it to your friend.';
+    toast('Invite code ' + code + ' copied');
+    return true;
+  };
+  const failed = () => {
+    const hint = document.getElementById('roomHint');
+    if (hint) hint.textContent = 'Copy was blocked. Select the invite code and copy it manually.';
+    toast('Copy blocked — room code: ' + code);
+    return false;
+  };
   const fallback = () => {
+    const previousFocus = document.activeElement;
+    let ta;
     try {
-      const ta = document.createElement('textarea');
+      ta = document.createElement('textarea');
       ta.value = code;
       ta.style.position = 'fixed';
       ta.style.opacity = '0';
       document.body.appendChild(ta);
       ta.select();
-      document.execCommand('copy');
-      ta.remove();
-      done();
-    } catch (e) { toast('Room code: ' + code); }
+      return document.execCommand('copy') ? done() : failed();
+    } catch (e) { return failed(); }
+    finally {
+      if (ta) ta.remove();
+      if (previousFocus && previousFocus.isConnected && !previousFocus.closest('[hidden], [inert]')) previousFocus.focus({ preventScroll: true });
+    }
   };
   try {
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(code).then(done, fallback);
-    } else fallback();
-  } catch (e) { fallback(); }
+      return navigator.clipboard.writeText(code).then(done, fallback);
+    }
+    return Promise.resolve(fallback());
+  } catch (e) { return Promise.resolve(fallback()); }
 }
 
 /* ---------------- shared world edits & remote avatars ---------------- */
@@ -1486,6 +1507,13 @@ function handleNet(msg, from, nested) {
             targetRecord.deathReported = true;
             targetRecord.deathEvent = msg.kill;
             if (!Number.isFinite(targetRecord.deathAt)) targetRecord.deathAt = rxNow;
+          }
+          if (remote && msg.byId === net.id && msg.authoritative === true) {
+            BC.emit('playerHit', {
+              targetId: msg.target, byId: msg.byId, damage: msg.dmg, health: targetRecord.hp,
+              head: !!netPoseFlag(msg.head, 0), weapon: msg.weapon, life: msg.life,
+              shotId: msg.shotId, eventId: msg.eventId, generation: net.generation, authoritative: true
+            });
           }
         }
       }
@@ -2177,6 +2205,7 @@ function netMqttDamage(attacker, target, amount, weapon, head, eventId, origin) 
   const kill = target.hp <= 0 ? netMqttDeath(target, attacker, weapon, head) : null;
   netMqttAuthority({ t: 'hit', target: target.id, dmg: amount, health: target.hp, weapon, head: !!head,
     byId: attacker.id, by: attacker.name, eventId, life: target.life, sid: ++target.outSid, kill,
+    shotId: weapon !== 'dragon' && origin ? origin.id : undefined,
     from: { x: origin.x, y: origin.y, z: origin.z } });
   if (kill) netMqttAuthority(kill);
   netMqttQueueState({ t: 'state', ...netMqttPublic(target) });
@@ -2633,6 +2662,8 @@ function mqttLoseConnection(ws) {
   mqtt.previousHost = null;
   updateRoomBadge();
   netEmitStatus();
+  const hint = document.getElementById('roomHint');
+  if (hint) hint.textContent = 'Connection lost. Reconnecting to room ' + net.room + '…';
   if (wasOnline) toast('Online link lost — reconnecting…');
   mqttScheduleReconnect();
 }
@@ -2960,6 +2991,8 @@ function startOnline(roomArg) {
 
   updateRoomBadge();
   netEmitStatus();
+  const hint = document.getElementById('roomHint');
+  if (hint) hint.textContent = 'Connecting to room ' + room + '…';
   toast('Joining room ' + room + '…');
   // Transport only: Home/Pause stays open until an explicit Play/Resume.
   mqttOpen(0);
@@ -2973,14 +3006,24 @@ function createRoom() {
   copyRoom();
 }
 
-function leaveOnline() {
+function leaveOnline(returnToLan = true) {
   if (net.mode === 'mqtt' && net.online) {
     mqttPublish('blockcraft/' + net.room + '/msg/' + net.id, JSON.stringify({ t: 'leave', id: net.id }), false);
     mqttPublish('blockcraft/' + net.room + '/presence/' + net.id, '', true);
     if (net.hostId === net.id) mqttPublish('blockcraft/' + net.room + '/match/' + net.id, '', true);
   }
-  netDisconnect(null, false);
-  connectNet();
+  netDisconnect(null, returnToLan === false);
+  if (returnToLan) connectNet();
+  else {
+    if (roomInputEl) roomInputEl.value = '';
+    try { localStorage.removeItem('blockcraft.room'); } catch (e) { /* optional storage */ }
+    try {
+      const url = new URL(location.href); url.searchParams.delete('room');
+      history.replaceState(history.state, '', url.href);
+    } catch (e) { /* file:// may restrict history */ }
+    const hint = document.getElementById('roomHint');
+    if (hint) hint.textContent = 'Disconnected. Play solo, create a room, or join another code.';
+  }
 }
 
 /* ---------------- remote muzzle flashes ---------------- */
@@ -3121,17 +3164,23 @@ function updateNetPlayers(dt) {
 const roomInputEl = document.getElementById('roomInput');
 const onlineBtnEl = document.getElementById('onlineBtn');
 const createBtnEl = document.getElementById('createBtn');
+const roomJoinFormEl = document.getElementById('roomJoinForm');
 try {
   const urlRoom = normalizeRoom(new URLSearchParams(location.search).get('room') || '');
   const savedRoom = normalizeRoom(localStorage.getItem('blockcraft.room') || '');
   if (roomInputEl) roomInputEl.value = urlRoom || savedRoom;
 } catch (e) { /* ignore */ }
-if (roomInputEl) {
+if (roomInputEl && !roomJoinFormEl) {
   roomInputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); startOnline(); }
   });
 }
-if (onlineBtnEl) onlineBtnEl.addEventListener('click', () => startOnline());
+if (roomJoinFormEl) roomJoinFormEl.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!onlineBtnEl || onlineBtnEl.disabled) return;
+  startOnline();
+});
+else if (onlineBtnEl) onlineBtnEl.addEventListener('click', () => startOnline());
 if (createBtnEl) createBtnEl.addEventListener('click', createRoom);
 const roomBadgeEl = document.getElementById('roomBadge');
 if (roomBadgeEl) roomBadgeEl.addEventListener('click', copyRoom);
