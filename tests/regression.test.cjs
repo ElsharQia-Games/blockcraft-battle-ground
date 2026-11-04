@@ -1,18 +1,29 @@
 'use strict';
 
-// Preparation entry point. Run after integration, or select a group with
-// Node's --test-name-pattern. Only test:syntax is used during preparation.
+// Isolated gameplay verification. Node's --test-name-pattern selects a group;
+// the user has approved browser/server checks for the corrective upgrade.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+const crypto = require('node:crypto');
 const { before, after, test } = require('node:test');
 const { Lab } = require('./harness.cjs');
 const { ROSTER, bootProbe, rosterProbe, rosterGallery, critterProbe, dragonProbe } = require('./scene-probes.cjs');
 const { WEAPONS, weaponProbe, hipfireProbe, scopeProbe } = require('./combat-probes.cjs');
 const { movementProbe, inputReleaseProbe } = require('./movement-probes.cjs');
-const { installBuildHelpers, buildingProbe, buildingInputProbe, singleBlockAndCraftProbe } = require('./building-probes.cjs');
+const { installBuildHelpers, buildingProbe, buildingInputProbe, singleBlockProbe } = require('./building-probes.cjs');
 const { menuProbe, hudProbe } = require('./ui-probes.cjs');
 const { lanProbe } = require('./lan-probes.cjs');
+const { multiplayerUpgradeProbe } = require('./multiplayer-upgrade.cjs');
 const { outlineProbe, destructionProbe } = require('./upgrade-probes.cjs');
 const { shortcutProbe, scoreboardRows } = require('./input-ui-probes.cjs');
+const { weaponSensitivityProbe, kneeProbe, stanceGallery, diagnosticsProbe, npcPhysicsProbe, minimapProbe,
+  resetHoldProbe, remotePlacementProbe, lifecycleCleanupProbe, fpsClockProbe } = require('./corrective-probes.cjs');
+const { audioProbe, remoteJetpackProbe, weaponHandlingProbe } = require('./media-motion-probes.cjs');
+const { menuFlowProbe } = require('./menu-probes.cjs');
+const { jumpAndWaterProbe, mouseStreamProbe } = require('./movement-corrections.cjs');
+const { solidDragonProbe, ridingProbe } = require('./dragon-probes.cjs');
 
 let lab;
 before(async () => { lab = new Lab(); await lab.start(); }, { timeout: 70_000 });
@@ -28,7 +39,14 @@ async function pageCase(t, label, run, options = {}) {
     page.assertHealthy();
     return value;
   } catch (error) {
-    lab.record(label, { error: error.stack });
+    const state = await page.evaluate(() => {
+      const b = window.__blockcraft;
+      return b ? { player: { position: b.player.pos.toArray(), yaw: b.player.yaw, pitch: b.player.pitch },
+        camera: { position: b.camera.position.toArray(), quaternion: b.camera.quaternion.toArray(), fov: b.camera.fov },
+        avatarVisible: b.localAvatar()?.visible, mode: b.modes.active, seed: b.seed,
+        online: b.net.online, generation: b.net.generation, hud: b.hud.state, minimap: b.minimap.state } : null;
+    }).catch(() => null);
+    lab.record(label, { error: error.stack, state });
     const screenshot = await page.screenshot(label + '-failure').catch(() => null);
     if (screenshot) t.diagnostic(`Failure screenshot: ${screenshot}`);
     throw error;
@@ -44,6 +62,9 @@ test('boot: file:// and HTTP classic scripts, API surface and population parity'
   assert.deepEqual(file.roster, http.roster, 'Boot protocol changed the roster');
   for (const result of [file, http]) {
     assert.deepEqual([...result.roster].sort(), [...ROSTER].sort());
+    assert.equal(result.dragonClasses.total, result.dragonClasses.expected);
+    assert.equal(result.dragonClasses.guardians, 4);
+    assert.ok(result.dragonClasses.mounts >= 2 && result.dragonClasses.mounts <= 3);
     for (const api of ['updatePlayer', 'resetPlayerMotion', 'quickBuild', 'selectBuildPiece', 'rotateBuildPiece', 'placeQuickBuild',
       'cancelQuickBuild', 'updateBuilding', 'resetBuildingInput', 'dragons', 'spawnDragons', 'updateDragons']) {
       assert.ok(result.api.includes(api), `window.__blockcraft does not expose ${api}`);
@@ -62,6 +83,70 @@ test('roster: all sixteen skeletons, atlas tiles, custom attachments and cycling
   });
 });
 
+test('corrective anatomy: all sixteen forward knee joints, planted crouch/slide feet and neutral recovery', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'corrective-knees', async (page) => {
+    const result = await page.evaluate(kneeProbe, ROSTER);
+    const galleries = [];
+    for (const phase of ['standing', 'crouch', 'slide']) {
+      galleries.push(await lab.image(`knees-${phase}-human-review`, await page.evaluate(stanceGallery, { keys: ROSTER, phase })));
+    }
+    t.diagnostic(`Stance galleries (human review): ${galleries.join(', ')}`);
+    return { result, galleries };
+  });
+});
+
+test('corrective settings: per-weapon hip/ADS mouse gains, defensive settings and persistence after reload', { timeout: 240_000 }, async (t) => {
+  await pageCase(t, 'corrective-sensitivity', async (page) => {
+    const result = await page.evaluate(weaponSensitivityProbe);
+    await page.evaluate(() => {
+      const settings = window.__blockcraft.settings;
+      settings.setWeaponSensitivity('pistol', 'hip', 0.71);
+      settings.setWeaponSensitivity('pistol', 'ads', 1.33);
+    });
+    await page.send('Page.reload');
+    const persisted = await page.wait('per-weapon settings survive an actual page reload', () => {
+      const b = window.__blockcraft;
+      if (!b || document.getElementById('play').disabled) return false;
+      const settings = b.settings;
+      return settings.getWeaponSensitivity('pistol', false) === 0.71 && settings.getWeaponSensitivity('pistol', true) === 1.33
+        ? { hip: settings.getWeaponSensitivity('pistol', false), ads: settings.getWeaponSensitivity('pistol', true) } : false;
+    }, undefined, { timeout: 90_000, interval: 200 });
+    return { ...result, reloaded: persisted };
+  }, { play: true });
+});
+
+test('corrective HUD: measured FPS/live ping readability and separation at desktop and narrow sizes', { timeout: 180_000 }, async (t) => {
+  await pageCase(t, 'corrective-readouts', async (page) => {
+    await page.wait('measured FPS ready', () => window.__blockcraft.hud.state.fps > 0);
+    const rows = [];
+    for (const [width, height] of [[1280, 720], [1024, 600], [390, 740]]) {
+      await page.viewport(width, height);
+      const result = await page.evaluate(diagnosticsProbe);
+      const screenshot = await page.screenshot(`readable-HUD-${width}x${height}`);
+      rows.push({ ...result, screenshot });
+    }
+    return rows;
+  }, { play: true });
+});
+
+test('corrective mechanics: NPC swept walls/gravity/water and genuinely cached topographic minimap', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'corrective-physics-map', async (page) => {
+    const minimap = await page.evaluate(minimapProbe);
+    const physics = await page.evaluate(npcPhysicsProbe);
+    return { minimap, physics };
+  }, { play: true });
+});
+
+test('corrective lifecycle: external resets release held building, remote bodies are protected and death fixtures clean up', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'corrective-lifecycle', async (page) => {
+    const holds = await page.evaluate(resetHoldProbe);
+    const placement = await page.evaluate(remotePlacementProbe);
+    const lifecycle = await page.evaluate(lifecycleCleanupProbe);
+    const fpsClock = await page.evaluate(fpsClockProbe);
+    return { holds, placement, lifecycle, fpsClock };
+  }, { play: true });
+});
+
 test('NPC: actual Fayoum forward travel, MJ backwards travel, phase and restored counts', { timeout: 120_000 }, async (t) => {
   await pageCase(t, 'NPC', (page) => page.evaluate(critterProbe));
 });
@@ -74,6 +159,14 @@ test('dragons: integrated spawn, moving wings/paths, finite models and idempoten
   });
 });
 
+test('dragon bodies: solid swept guardians/mounts, invulnerability and blocked bullet/build/mining rays', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'solid-dragons', (page) => page.evaluate(solidDragonProbe), { play: true });
+});
+
+test('dragon riding: every small mount, core/camera collisions, C/Space/boost, heat and 30-second limit', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'riding', (page) => page.evaluate(ridingProbe), { play: true });
+});
+
 test('outlines: character factories add depth-tested strokes without duplicate resource growth', { timeout: 120_000 }, async (t) => {
   await pageCase(t, 'outlines', (page) => page.evaluate(outlineProbe));
 });
@@ -84,6 +177,33 @@ test('destruction: real bullets, material resistance, multiple hits and protecte
 
 test('combat: seven weapons, real ammo consumption, reload articulation and clean interruptions', { timeout: 150_000 }, async (t) => {
   await pageCase(t, 'combat-weapons', (page) => page.evaluate(weaponProbe, WEAPONS), { play: true });
+});
+
+test('weapon identity: real ADS transitions, bloom/recovery, mechanisms and legal long-range damage', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'weapon-handling', (page) => page.evaluate(weaponHandlingProbe), { play: true });
+});
+
+test('audio: seven verified CC0 payloads, file-safe decode, unique reports and bounded directional voices', { timeout: 150_000 }, async (t) => {
+  const context = { window: {} };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '..', 'assets', 'audio', 'weapon-samples.js'), 'utf8'), context);
+  const entries = context.window.BCWeaponSamples.entries;
+  assert.deepEqual(Object.keys(entries).sort(), [...WEAPONS].sort());
+  for (const [id, entry] of Object.entries(entries)) {
+    assert.equal(crypto.createHash('sha256').update(Buffer.from(entry.base64, 'base64')).digest('hex'), entry.sha256, `${id} embedded payload hash`);
+  }
+  await pageCase(t, 'audio-file', async (page) => {
+    await page.evaluate(async () => {
+      const b = window.__blockcraft;
+      b.settings.set('muted', false); await b.audio.resume();
+    });
+    await page.wait('all seven embedded samples decoded once', () => window.__blockcraft.audio.stats().sampledWeapons === 7,
+      undefined, { timeout: 20_000 });
+    return page.evaluate(audioProbe);
+  }, { base: lab.fileURL, play: true });
+});
+
+test('jetpack: independent remote visuals, private flames and safe shared-resource disposal', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'remote-jetpacks', (page) => page.evaluate(remoteJetpackProbe));
 });
 
 test('combat: hipfire muzzle follows pitch and all yaw quadrants without aiming', { timeout: 120_000 }, async (t) => {
@@ -108,24 +228,32 @@ test('scope: revised shoulder/eye cameras, per-weapon optics and clearing transi
   }, { play: true });
 });
 
-test('movement: integrated timestep, coyote/buffer, Ctrl edges, collisions and Space/Shift/F/V', { timeout: 150_000 }, async (t) => {
+test('movement: integrated timestep, C crouch/slide, Ctrl character change, collisions and jetpack controls', { timeout: 150_000 }, async (t) => {
   await pageCase(t, 'movement', (page) => page.evaluate(movementProbe), { play: true });
 });
 
-test('building: unlimited placement, real crafting inventory, illegal transactions and rotation', { timeout: 150_000 }, async (t) => {
+test('movement corrections: higher tap/hold jump at 30/60/120 FPS, shore escape, roof clearance and diving', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'jump-water', (page) => page.evaluate(jumpAndWaterProbe), { play: true });
+});
+
+test('mouse: capture/resume warp rejection, finite input, epoch resets and unrestricted steady flicks', { timeout: 150_000 }, async (t) => {
+  await pageCase(t, 'mouse-stream', (page) => page.evaluate(mouseStreamProbe), { play: true });
+});
+
+test('building: unlimited placement, material cycling, removed crafting, illegal transactions and rotation', { timeout: 150_000 }, async (t) => {
   await pageCase(t, 'building', async (page) => {
     await page.evaluate(installBuildHelpers);
     const quickBuild = await page.evaluate(buildingProbe);
-    const singleBlockAndCraft = await page.evaluate(singleBlockAndCraftProbe);
-    return { quickBuild, singleBlockAndCraft };
+    const singleBlock = await page.evaluate(singleBlockProbe);
+    return { quickBuild, singleBlock };
   }, { play: true });
 });
 
-test('input: text focus, inventory and blur release real gameplay/build holds', { timeout: 180_000 }, async (t) => {
+test('input: text focus, normal Pause and blur release real gameplay/build holds', { timeout: 180_000 }, async (t) => {
   await pageCase(t, 'input-release', async (page) => {
     await page.evaluate(installBuildHelpers);
     const results = [];
-    for (const reason of ['focus', 'inventory', 'blur']) {
+    for (const reason of ['focus', 'pause', 'blur']) {
       await page.lock();
       results.push(await page.evaluate(inputReleaseProbe, reason));
       await page.wait('input event unlocked pointer', () => !document.pointerLockElement);
@@ -183,6 +311,7 @@ test('UI: real 1024×600 / 1280×720 / 390×740 viewports, reachable controls an
     const results = [];
     for (const [width, height] of [[1024, 600], [1280, 720], [390, 740]]) {
       await page.viewport(width, height);
+      await page.evaluate(() => window.__blockcraft.menus.showHome(true));
       const menu = await page.evaluate(menuProbe);
       await page.evaluate(() => document.querySelector('#hint h1').scrollIntoView({ block: 'start', behavior: 'instant' }));
       const top = await page.screenshot(`menu-${width}x${height}-top`);
@@ -195,7 +324,9 @@ test('UI: real 1024×600 / 1280×720 / 390×740 viewports, reachable controls an
         k.check(k.api('selectBuildPiece')('wall'), 'Blueprint input was not ready after entering play');
         k.api('updateBuilding')(1 / 60);
       });
-      await page.wait('HUD transition visible', () => Number(getComputedStyle(document.getElementById('hud')).opacity) > 0.95);
+      await page.wait('build HUD context and transition visible', () =>
+        window.__blockcraft.hud.state.layout === 'build' &&
+        Number(getComputedStyle(document.getElementById('hud')).opacity) > 0.95);
       const hud = await page.evaluate(hudProbe);
       const hudImage = await page.screenshot(`build-HUD-${width}x${height}`);
       await page.evaluate(() => window.__bcTest.api('cancelQuickBuild')());
@@ -236,13 +367,23 @@ test('UI: real 1024×600 / 1280×720 / 390×740 viewports, reachable controls an
       }
       results.push({ menu, hud, optics, screenshots: images });
       await page.evaluate(() => document.exitPointerLock());
-      await page.wait('return to menu', () => !document.pointerLockElement && !document.getElementById('hint').classList.contains('hidden'));
+      await page.wait('return to normal pause menu', () => !document.pointerLockElement &&
+        window.__blockcraft.menus.state.screen === 'pause' && !document.getElementById('pauseMenu').hidden);
     }
     return results;
   });
 });
 
+test('menus: separate Home/pages/Pause, persistent settings Back, Escape and trusted Resume at three sizes', { timeout: 180_000 }, async (t) => {
+  await pageCase(t, 'menu-flows', (page) => menuFlowProbe(lab, page));
+});
+
 test('LAN: state sync, aimed kill/respawn, scores and late-join build/destruction history', { timeout: 300_000 }, async (t) => {
   try { lab.record('LAN', await lanProbe(lab, t)); }
   catch (error) { lab.record('LAN', { error: error.stack }); throw error; }
+});
+
+test('LAN upgrade: host-only modes/seed zero, same-seed generations, legal edit bursts and concurrent reconciliation', { timeout: 480_000 }, async (t) => {
+  try { lab.record('LAN-upgrade', await multiplayerUpgradeProbe(lab, t)); }
+  catch (error) { lab.record('LAN-upgrade', { error: error.stack }); throw error; }
 });
