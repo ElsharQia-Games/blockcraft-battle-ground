@@ -46,6 +46,53 @@ const snowLineAt = (x, z) => 44 + (1 - biomeAt(x, z).heat) * 7;
 
 const trees = [];
 const villageSites = [];
+let WORLD_generation = 0;
+
+/* Population bodies/outline hulls use shared caches. Only each name/ride tag's
+   texture and material belong to the removed root; never dispose cached rigs. */
+function WORLD_releasePopulationRoot(root) {
+  if (!root) return;
+  const tags = new Set(), materials = new Set(), textures = new Set();
+  if (typeof root.traverse === 'function') {
+    root.traverse(function (node) {
+      if (node.userData && node.userData.tag) tags.add(node.userData.tag);
+    });
+  }
+  tags.forEach(function (tag) {
+    const list = Array.isArray(tag.material) ? tag.material : [tag.material];
+    for (let i = 0; i < list.length; i++) {
+      const material = list[i];
+      if (!material || materials.has(material)) continue;
+      materials.add(material);
+      if (material.map && !textures.has(material.map)) {
+        textures.add(material.map);
+        if (typeof material.map.dispose === 'function') material.map.dispose();
+      }
+      if (typeof material.dispose === 'function') material.dispose();
+    }
+  });
+  if (root.parent && typeof root.parent.remove === 'function') root.parent.remove(root);
+}
+
+function WORLD_clearCritters() {
+  const roots = new Set();
+  if (typeof critters !== 'undefined' && critters) {
+    for (let i = 0; i < critters.length; i++) if (critters[i] && critters[i].group) roots.add(critters[i].group);
+  }
+  if (typeof critterGroup !== 'undefined' && critterGroup && critterGroup.children) {
+    const children = critterGroup.children.slice();
+    for (let i = 0; i < children.length; i++) roots.add(children[i]);
+  }
+  roots.forEach(WORLD_releasePopulationRoot);
+  if (typeof critterGroup !== 'undefined' && critterGroup && critterGroup.children) {
+    if (typeof critterGroup.clear === 'function') critterGroup.clear();
+    else if (typeof critterGroup.remove === 'function') {
+      const children = critterGroup.children.slice();
+      for (let i = 0; i < children.length; i++) critterGroup.remove(children[i]);
+    }
+  }
+  if (typeof critters !== 'undefined' && critters) critters.length = 0;
+}
 
 function plantTree(x, z, h) {
   const th = 4 + Math.floor(hash2(x * 3, z * 5) * 3);
@@ -303,7 +350,13 @@ function createWaterfalls() {
   return made;
 }
 
-function generateTerrain() {
+function generateTerrain(reset = false) {
+  if (reset) {
+    trees.length = 0;
+    villageSites.length = 0;
+    WORLD_clearCritters();
+    blocks.fill(0);
+  }
   for (let x = 0; x < WORLD; x++) {
     for (let z = 0; z < WORLD; z++) {
       const h = terrainHeight(x, z);
@@ -334,4 +387,8 @@ function generateTerrain() {
   buildVillages();
   createWaterfalls();
   spawnCritters();
+  WORLD_generation++;
+  // Both boot and re-rolls bake the selected arena before any chunk is meshed.
+  if (typeof BC !== 'undefined' && BC.api && BC.api.modes &&
+      typeof BC.api.modes.prepareWorld === 'function') BC.api.modes.prepareWorld();
 }
