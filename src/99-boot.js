@@ -30,7 +30,7 @@ async function boot() {
   // pick the spawn before meshing so any safety clearing is baked in
   const spawn = findSpawn();
   player.pos.set(spawn.x, spawn.y, spawn.z);
-  player.vel.set(0, 0, 0);
+  resetPlayerMotion();
 
   playBtn.textContent = 'Building 0%';
   await buildWorldMeshes();
@@ -38,11 +38,19 @@ async function boot() {
 
   buildAvatar();
   refreshGunModels();
-  updateCamera();
+  updateCamera(1 / 60);
   updateCombatHud();
+  playBtn.textContent = 'Spawning dragons…';
+  await nextFrame();
+  spawnDragons();
+  updateBuilding(0);
 
   // warm up the shader compiler before the first frame
   renderer.compile(scene, camera);
+  const bootNow = performance.now();
+  updateDestruction(0, bootNow);
+  updateScoreboard(0, bootNow);
+  updateCharacterOutlines();
   renderer.render(scene, camera);
 
   loading = false;
@@ -59,14 +67,25 @@ async function boot() {
     raycast: raycastVoxel, breakBlock, placeBlock, selectSlot, HOTBAR,
     hovered: () => hovered,
     inventory, addItem, takeItem, itemCount, RECIPES, doCraft, refreshCraft,
+    UNLIMITED_BUILDING, buildItemCount, takeBuildItems,
     openCraft, closeCraft, craftEl,
     CHARACTERS, CHAR_KEYS, setCharacter, cycleCharacter, localAvatar: () => localAvatar,
     makeHumanoid, makeChicken,
     critters, net, connectNet, updateCritters, updateCamera, updateAvatar, buildAvatar,
+    updatePlayer, resetPlayerMotion, updateAvatarWeaponPose,
+    addCharacterOutline, updateCharacterOutlines,
+    dragons, spawnDragons, updateDragons, makeDragon,
+    quickBuild, selectBuildPiece, cancelQuickBuild, rotateBuildPiece,
+    placeQuickBuild, updateBuilding, resetBuildingInput,
+    BUILD_PIECES, setQuickBuildMaterial, buildPieceCells, preflightBuildPiece, commitBuildPiece,
+    setBuildingHeld, resetGameplayInput,
     terrainHeight, biomeAt, snowLineAt, villageSites, trees, WORLD, HEIGHT, SEA,
-    WEAPONS, gun, fireOnce, startReload, selectWeapon, cycleWeapon, setCombatMode,
+    WEAPONS, gun, fireOnce, startReload, selectWeapon, cycleWeapon, setCombatMode, isScopeActive,
+    voxelDamageMap, damageVoxelFromShot, applyVoxelDamage, updateDestruction, resetVoxelDamage,
+    VOXEL_DURABILITY, voxelDurability,
     applyDamage, doRespawn, attachAvatarGun, makeGunModel, startOnline, createRoom,
     leaveOnline, updateCombat, updateCombatHud, mqtt, roomInput: roomInputEl,
+    scoreboard, setScoreboardVisible, updateScoreboard,
     get combatMode() { return combatMode; },
     set combatMode(v) { setCombatMode(!!v); },
     get alive() { return alive; },
@@ -80,6 +99,7 @@ async function boot() {
     get playerName() { return playerName; }
   };
   document.getElementById('tiny').textContent =
+    CHAR_KEYS.length + ' characters · ' + dragons.length + ' dragons · ' +
     trees.length + ' trees · ' + villageSites.length + ' villages · ' +
     critters.length + ' critters · ' + WORLD + '×' + WORLD + ' blocks · seed ' + SEED;
   statsEl.textContent = 'ready';
@@ -89,34 +109,72 @@ async function boot() {
   requestAnimationFrame(loop);
 }
 
+/* ---------------- menu accessibility ---------------- */
+function syncRosterAccessibility() {
+  for (const button of charsEl.querySelectorAll('.char')) {
+    button.setAttribute('aria-pressed', String(button.classList.contains('active')));
+  }
+}
+syncRosterAccessibility();
+const rosterSelectionObserver = new MutationObserver(syncRosterAccessibility);
+rosterSelectionObserver.observe(charsEl, { attributes: true, attributeFilter: ['class'], subtree: true });
+
+// The scoreboard stays pointer-transparent while its long roster can still scroll.
+const scoreboardScroller = document.querySelector('#scoreboard .scoreboard-table-wrap');
+document.addEventListener('wheel', (event) => {
+  if (!scoreboard.visible) return;
+  const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? scoreboardScroller.clientHeight : 1;
+  scoreboardScroller.scrollTop += event.deltaY * unit;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}, { capture: true, passive: false });
+
 /* ---------------- main loop ---------------- */
-let last = performance.now();
+let last = null;
 let fpsAccum = 0, fpsFrames = 0, fpsTimer = 0;
 let shownFps = 0;
 
+function resetFrameClock() {
+  last = null;
+  fpsAccum = 0; fpsFrames = 0; fpsTimer = 0;
+}
+document.addEventListener('visibilitychange', resetFrameClock);
+window.addEventListener('pageshow', resetFrameClock);
+window.addEventListener('focus', resetFrameClock);
+
 function loop(now) {
   requestAnimationFrame(loop);
-  const dt = Math.min(0.05, (now - last) / 1000);
-  last = now;
+  const dt = last === null || document.hidden ? 0 : Math.max(0, Math.min(0.05, (now - last) / 1000));
+  last = document.hidden ? null : now;
+  const playing = !document.hidden && document.pointerLockElement === renderer.domElement && !craftOpen;
 
-  if (document.pointerLockElement === renderer.domElement && !craftOpen) {
+  if (playing) {
     updatePlayer(dt);
   } else {
     player.groundSpeed *= Math.max(0, 1 - dt * 10);
   }
   updateAvatar(dt);
-  updateCamera();
+  updateCamera(dt);
   updateCombat(dt, now);
-  if (combatMode) { if (highlight) highlight.visible = false; }
-  else updateHover();
+  if (playing && alive && !combatMode && !quickBuild.active) {
+    updateHover();
+  } else {
+    highlight.visible = false;
+    hovered = null;
+  }
+  updateBuilding(dt);
   updateCritters(dt);
+  updateDragons(dt, now);
   updateNetPlayers(dt);
   sendNetState(now);
   sky.position.set(camera.position.x, 0, camera.position.z);
 
+  updateDestruction(dt, now);
+  updateScoreboard(dt, now);
+  updateCharacterOutlines();
   renderer.render(scene, camera);
 
-  fpsAccum += dt; fpsFrames++; fpsTimer += dt;
+  if (dt > 0) { fpsAccum += dt; fpsFrames++; fpsTimer += dt; }
   if (fpsTimer >= 0.4) {
     shownFps = Math.round(fpsFrames / fpsAccum);
     fpsAccum = 0; fpsFrames = 0; fpsTimer = 0;
@@ -125,9 +183,9 @@ function loop(now) {
       shownFps + ' fps · x ' + p.x.toFixed(1) + ' y ' + p.y.toFixed(1) + ' z ' + p.z.toFixed(1) +
       ' · ' + CHARACTERS[charKey].name +
       ' · ' + Math.ceil(health) + 'hp · ' + currentWeapon().name +
-      ' · ' + (thirdPerson ? '3rd' : '1st') +
+      ' · ' + (isScopeActive() ? 'scope' : (thirdPerson ? 'shoulder' : '1st')) +
       ' · ' + (net.online ? (net.mode === 'mqtt' ? 'room ' + net.room : netPlayerCount() + ' online') : 'solo') +
-      (combatMode ? '' : ' · build') +
+      (quickBuild.active ? ' · quick ' + quickBuild.kind : (combatMode ? '' : ' · mine / build')) +
       (player.fly ? ' · flying' : '');
   }
 }
@@ -143,6 +201,6 @@ window.addEventListener('error', (e) => {
   if (loading && e.message) {
     const el = document.getElementById('err');
     el.style.display = 'flex';
-    el.innerHTML = 'Could not load three.js from the CDN.<br>Check your internet connection, then reload this page.';
+    el.textContent = 'Something went wrong while starting Blockcraft Battle Ground: ' + e.message;
   }
 });

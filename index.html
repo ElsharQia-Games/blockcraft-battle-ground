@@ -23,19 +23,101 @@
 
   #crosshair {
     position: fixed; left: 50%; top: 50%; width: 20px; height: 20px;
-    margin: -10px 0 0 -10px; pointer-events: none; opacity: .9;
-    mix-blend-mode: difference;
+    margin: -10px 0 0 -10px; pointer-events: none; opacity: 1; z-index: 2;
   }
-  #crosshair::before, #crosshair::after { content: ""; position: absolute; background: #fff; }
+  #crosshair::before, #crosshair::after {
+    content: ""; position: absolute; background: #f5fbff;
+    box-shadow: 0 0 0 1px rgba(5,12,18,.9);
+  }
   #crosshair::before { left: 9px; top: 0; width: 2px; height: 20px; }
   #crosshair::after { left: 0; top: 9px; width: 20px; height: 2px; }
+  body:not(.scoped) #crosshair { display: block; visibility: visible !important; opacity: 1; }
+
+  /* The optic and its etched aim point share the exact viewport centre. */
+  #scopeOverlay {
+    --scope-size: min(82vmin, max(96px, calc(100vh - 152px)));
+    --scope-radius: calc(var(--scope-size) / 2);
+    --reticle-tint: #e5f0e5;
+    --reticle-accent: #ffca8b;
+    position: fixed; inset: 0; z-index: 3; pointer-events: none; overflow: hidden;
+    opacity: 0; visibility: hidden; transition: opacity .1s ease-out;
+    background: radial-gradient(circle at 50% 50%,
+      transparent calc(var(--scope-radius) - 26px),
+      rgba(5,10,14,.12) calc(var(--scope-radius) - 12px),
+      rgba(4,8,12,.94) calc(var(--scope-radius) + 2px),
+      rgba(3,6,9,.98) calc(var(--scope-radius) + 18px));
+  }
+  body.scoped #scopeOverlay { opacity: 1; visibility: visible; }
+  body.scoped #crosshair { visibility: hidden !important; opacity: 0; }
+  #scopeOverlay[data-optic="reflex"] { --reticle-tint: #ffe0c4; --reticle-accent: #ffac7b; }
+  #scopeOverlay[data-optic="holo"] { --reticle-tint: #d7f2dd; }
+  #scopeOverlay[data-optic="chevron"] { --reticle-tint: #ffd994; }
+  #scopeOverlay[data-optic="precision"] { --reticle-tint: #f6e6c5; }
+  #scopeOverlay[data-optic="support"] { --reticle-tint: #d1ebd9; }
+  .scope-optic {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: var(--scope-size); height: var(--scope-size); border-radius: 50%;
+    border: 6px solid #172128;
+    box-shadow: 0 0 0 1px rgba(168,186,193,.58), 0 0 0 4px #070c10,
+      0 0 0 5px rgba(126,148,155,.22), inset 0 0 0 1px rgba(201,218,220,.32),
+      inset 0 0 22px rgba(2,7,10,.4);
+  }
+  .scope-optic::before {
+    content: ""; position: absolute; inset: 6px; border-radius: 50%;
+    border: 1px solid rgba(191,211,209,.2);
+  }
+  .scope-reticle { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+  .scope-reticle .scope-pattern { display: none; }
+  .scope-reticle .reticle-default { display: inline; }
+  /* Unknown or absent metadata keeps the fallback cross; each known optic replaces it. */
+  #scopeOverlay:is([data-optic="reflex"], [data-optic="holo"], [data-optic="spread"],
+    [data-optic="chevron"], [data-optic="mildot"], [data-optic="precision"], [data-optic="support"]) .reticle-default { display: none; }
+  #scopeOverlay[data-optic="reflex"] .reticle-reflex,
+  #scopeOverlay[data-optic="holo"] .reticle-holo,
+  #scopeOverlay[data-optic="spread"] .reticle-spread,
+  #scopeOverlay[data-optic="chevron"] .reticle-chevron,
+  #scopeOverlay[data-optic="mildot"] .reticle-mildot,
+  #scopeOverlay[data-optic="precision"] .reticle-precision,
+  #scopeOverlay[data-optic="support"] .reticle-support { display: inline; }
+  .scope-reticle .reticle-shadow { fill: none; stroke: rgba(5,12,17,.96); stroke-width: 4.4; stroke-linejoin: round; }
+  .scope-reticle .reticle-line { fill: none; stroke: var(--reticle-tint); stroke-width: 1.5; stroke-linejoin: round; }
+  .reticle-holo .reticle-bars, .reticle-spread .reticle-line { stroke-width: 2.1; }
+  .reticle-mildot .reticle-line { stroke-width: 1.05; }
+  .reticle-mildot .reticle-shadow { stroke-width: 3.4; }
+  .scope-reticle .mil-dot {
+    fill: var(--reticle-tint); stroke: #07121a; stroke-width: 1.1; vector-effect: non-scaling-stroke;
+  }
+  .scope-reticle .scope-aimpoint {
+    fill: var(--reticle-accent); stroke: #0a151c; stroke-width: 1.2; vector-effect: non-scaling-stroke;
+  }
+  .scope-reticle .graduations {
+    font: 600 11px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    fill: var(--reticle-tint); stroke: #07121a; stroke-width: 2.5px; paint-order: stroke;
+  }
+  .scope-reticle .rim-index { fill: rgba(212,229,224,.48); }
+  .scope-readout {
+    position: absolute; left: 50%; top: calc(50% + var(--scope-radius) + 18px);
+    transform: translateX(-50%); display: flex; align-items: baseline; justify-content: center; gap: 14px;
+    max-width: calc(100vw - 32px); white-space: nowrap; line-height: 1.3;
+    color: #c3ced3; font-size: 10px; letter-spacing: .14em; text-transform: uppercase;
+  }
+  .scope-readout::before {
+    content: "OPTIC"; padding-right: 13px; border-right: 1px solid rgba(196,216,223,.25);
+    color: #87999f; font-size: 9px; letter-spacing: .2em;
+  }
+  #scopeWeapon { font-weight: 600; }
+  #scopeZoom { color: #f0cb88; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .08em; }
+
+  /* Optics stay below damage feedback (4), HUD (5), and hit markers / rooms (6). */
+  #stats, #hotbar, #toast { z-index: 5; }
 
   #stats {
     position: fixed; left: 12px; top: 12px; pointer-events: none;
     font-size: 11px; letter-spacing: .04em; color: rgba(255,255,255,.92);
     background: rgba(15,26,35,.35); border: 1px solid rgba(255,255,255,.14);
     padding: 6px 9px; border-radius: 7px; backdrop-filter: blur(6px);
-    text-shadow: 0 1px 2px rgba(0,0,0,.35); white-space: nowrap;
+    text-shadow: 0 1px 2px rgba(0,0,0,.35); line-height: 1.5;
+    max-width: min(620px, calc(50vw - 116px)); font-variant-numeric: tabular-nums;
   }
 
   #hotbar {
@@ -63,13 +145,20 @@
 
   #hint {
     position: fixed; inset: 0; z-index: 10;
-    display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 18px; text-align: center;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+    padding: 24px 20px; overflow-y: auto; overflow-x: hidden; text-align: center;
+    overscroll-behavior: contain; scroll-padding-block: 24px; scrollbar-gutter: stable both-edges;
     background: radial-gradient(circle at 50% 45%, rgba(12,24,34,.55), rgba(8,14,20,.78));
     backdrop-filter: blur(3px);
     transition: opacity .22s ease;
   }
-  #hint.hidden { opacity: 0; pointer-events: none; }
+  /* Auto margins center a short menu and resolve to zero when it needs to scroll. */
+  #hint .intro {
+    width: min(760px, 100%); flex: none; margin-block: auto;
+    display: flex; flex-direction: column; align-items: center; gap: 12px;
+  }
+  #hint .intro > * { flex-shrink: 0; }
+  #hint.hidden { opacity: 0; pointer-events: none; visibility: hidden; }
   #hint h1 {
     margin: 0; display: flex; flex-direction: column; align-items: center; gap: 3px;
     font-weight: 800; text-transform: uppercase;
@@ -83,20 +172,22 @@
     font-size: clamp(28px, 5.6vw, 52px); letter-spacing: .1em; text-indent: .1em;
     line-height: 1.05;
   }
-  #hint .sub { margin: -8px 0 0; opacity: .7; letter-spacing: .3em; text-transform: uppercase; font-size: 11px; }
+  #hint .sub { margin: 0; opacity: .7; letter-spacing: .2em; text-transform: uppercase; font-size: 11px; line-height: 1.6; }
+  #hint .combatNote { margin: -4px 0 0; font-size: 10px; line-height: 1.5; color: rgba(255,255,255,.76); }
   #hint .keys {
-    display: grid; grid-template-columns: auto auto; gap: 7px 16px;
-    margin-top: 10px; font-size: 12px; color: rgba(255,255,255,.82);
+    display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px 12px;
+    width: 100%; margin-top: 2px; font-size: 11px; color: rgba(255,255,255,.86);
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.12);
-    padding: 16px 22px; border-radius: 12px; text-align: left;
+    padding: 12px 16px; border-radius: 12px; text-align: left;
   }
+  #hint .keys > span { display: flex; align-items: center; gap: 8px; min-width: 0; line-height: 1.5; }
   #hint .keys b {
-    display: inline-block; min-width: 74px; color: #fff;
+    display: inline-block; flex: none; min-width: 74px; color: #fff; font-size: 10px;
     background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.18);
-    border-radius: 5px; padding: 1px 7px; text-align: center; font-weight: 600;
+    border-radius: 5px; padding: 2px 5px; text-align: center; font-weight: 600;
   }
   #play {
-    margin-top: 6px; padding: 13px 30px; font: inherit; font-size: 13px;
+    margin-top: 0; min-height: 44px; padding: 12px 30px; font: inherit; font-size: 13px;
     letter-spacing: .16em; text-transform: uppercase; font-weight: 700;
     color: #08121a; background: linear-gradient(#ffffff, #cfe3f5);
     border: 0; border-radius: 9px; cursor: pointer;
@@ -112,7 +203,7 @@
     background: rgba(10,18,26,.62); border: 1px solid rgba(255,255,255,.16);
     padding: 7px 13px; border-radius: 8px; font-size: 11px; letter-spacing: .08em;
     opacity: 0; pointer-events: none; transition: opacity .25s ease, transform .25s ease;
-    backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px); max-width: min(520px, calc(100vw - 32px)); text-align: center; line-height: 1.5;
   }
   #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
@@ -123,19 +214,26 @@
   .slot.empty canvas { opacity: .22; }
   .slot.empty .count { color: rgba(255,255,255,.4); }
 
-  #hint .row { display: flex; gap: 7px; flex-wrap: wrap; justify-content: center; max-width: 560px; }
+  #hint .roster { width: 100%; max-width: 680px; }
+  #hint .sectionLabel {
+    margin: 0 0 7px; font-size: 10px; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: rgba(255,255,255,.72);
+  }
+  #hint .row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; width: 100%; }
   .char {
-    padding: 7px 13px; border-radius: 7px; cursor: pointer;
-    font: inherit; font-size: 11px; letter-spacing: .07em; color: #fff;
+    min-height: 32px; min-width: 0; padding: 6px 10px; border-radius: 7px; cursor: pointer;
+    font: inherit; font-size: 11px; line-height: 1.4; letter-spacing: .03em; color: #fff;
     background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.2);
     transition: background .12s ease, color .12s ease, transform .12s ease;
   }
   .char:hover { transform: translateY(-1px); background: rgba(255,255,255,.16); }
   .char.active { background: #fff; color: #0a1620; border-color: #fff; font-weight: 700; }
+  button:focus-visible, input:focus-visible { outline: 2px solid #a8ffd0; outline-offset: 3px; }
+  #hint .nameField { display: flex; align-items: center; gap: 10px; font-size: 10px; color: rgba(255,255,255,.8); }
   #nameInput {
-    width: 190px; padding: 8px 11px; border-radius: 7px; font: inherit; font-size: 12px;
+    width: 190px; max-width: 100%; padding: 8px 11px; border-radius: 7px; font: inherit; font-size: 12px;
     color: #fff; background: rgba(255,255,255,.08);
-    border: 1px solid rgba(255,255,255,.22); text-align: center; outline: none;
+    border: 1px solid rgba(255,255,255,.22); text-align: center;
   }
   #nameInput:focus { border-color: rgba(255,255,255,.6); }
 
@@ -196,12 +294,13 @@
 
   /* ---------------- shooter HUD ---------------- */
   body.combat #hotbar { display: none; }
-  body.combat #crosshair { width: 14px; height: 14px; margin: -7px 0 0 -7px; }
-  body.combat #crosshair::before { left: 6px; width: 2px; height: 14px; }
-  body.combat #crosshair::after { top: 6px; width: 14px; height: 2px; }
-  #hud { position: fixed; inset: 0; pointer-events: none; opacity: 0; transition: opacity .25s ease; }
+  body.quick-build #hotbar { display: flex; }
+  body.combat #crosshair { width: 18px; height: 18px; margin: -9px 0 0 -9px; }
+  body.combat #crosshair::before { left: 8px; width: 2px; height: 18px; }
+  body.combat #crosshair::after { top: 8px; width: 18px; height: 2px; }
+  #hud { position: fixed; inset: 0; z-index: 5; pointer-events: none; opacity: 0; transition: opacity .25s ease; }
   body.started #hud { opacity: 1; }
-  body.started.build #hud #weaponHud { opacity: .3; }
+  body.started.build #hud #weaponHud, body.started.quick-build #weaponHud { opacity: .3; }
   body.started.build #healthWrap { opacity: .55; }
 
   #healthWrap {
@@ -222,12 +321,12 @@
   #kd { margin-top: 6px; font-size: 9.5px; letter-spacing: .18em; color: rgba(255,255,255,.55); text-transform: uppercase; }
 
   #weaponHud {
-    position: fixed; right: 18px; bottom: 18px; min-width: 176px; text-align: right;
+    position: fixed; right: 18px; bottom: 18px; min-width: 184px; max-width: 238px; text-align: right;
     padding: 10px 13px; border-radius: 10px;
     background: rgba(10,18,26,.46); border: 1px solid rgba(255,255,255,.14);
     backdrop-filter: blur(7px); transition: opacity .2s ease;
   }
-  #weaponName { font-size: 9.5px; letter-spacing: .26em; text-transform: uppercase; color: rgba(255,255,255,.6); }
+  #weaponName { font-size: 9.5px; line-height: 1.5; letter-spacing: .18em; text-transform: uppercase; color: rgba(255,255,255,.72); }
   #ammoLine { margin-top: 1px; font-size: 32px; line-height: 1; font-weight: 800; letter-spacing: .03em; text-shadow: 0 2px 8px rgba(0,0,0,.4); }
   #ammoLine span { font-size: 14px; font-weight: 600; opacity: .55; }
   #ammoLine.low b { color: #ff8a6a; }
@@ -235,8 +334,32 @@
   #reloadBar.on { opacity: 1; }
   #reloadBar i { display: block; width: 0; height: 100%; background: #ffd166; box-shadow: 0 0 8px rgba(255,209,102,.6); }
   #weaponDots { display: flex; gap: 4px; justify-content: flex-end; margin-top: 7px; }
-  #weaponDots i { width: 16px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.18); transition: background .15s ease; }
-  #weaponDots i.on { background: #fff; box-shadow: 0 0 8px rgba(255,255,255,.5); }
+  #weaponDots > * {
+    flex: 1 1 0; min-width: 14px; max-width: 26px; height: 18px; border-radius: 3px;
+    font: inherit; font-size: 9px; line-height: 18px; text-align: center; color: rgba(255,255,255,.75);
+    background: rgba(255,255,255,.14); transition: opacity .12s ease;
+  }
+  #weaponDots > :empty { height: 3px; }
+  #weaponDots > .on { background: #fff; color: #0a1620; box-shadow: 0 0 8px rgba(255,255,255,.3); }
+
+  /* Quick construction shares the lower HUD without covering the nine block slots. */
+  #buildHud {
+    position: fixed; left: 50%; bottom: 104px; transform: translateX(-50%);
+    display: none; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px;
+    width: min(480px, calc(100vw - 32px)); padding: 9px 13px; border-radius: 10px;
+    background: rgba(10,18,26,.78); border: 1px solid rgba(255,255,255,.22);
+    backdrop-filter: blur(7px); pointer-events: none; text-align: left; line-height: 1.5;
+  }
+  #buildHud.show { display: grid; }
+  #buildHud.ready { border-color: rgba(114,226,183,.65); }
+  #buildHud.complete { border-color: #86cfff; }
+  #buildPiece { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  #buildCost { font-size: 11px; color: #c4efcc; font-variant-numeric: tabular-nums; text-align: right; }
+  #buildHint { grid-column: 1 / -1; font-size: 10.5px; color: rgba(255,255,255,.85); overflow-wrap: break-word; }
+  #buildHud.blocked { border-color: #f1a28a; }
+  #buildHud.blocked #buildHint, #buildHud.blocked[data-reason="materials"] #buildCost { color: #ffc7b6; }
+  #buildHud.complete #buildHint { color: #b6e5ff; }
+  body.quick-build #toast { bottom: 208px; }
 
   #killfeed { position: fixed; right: 14px; top: 12px; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; pointer-events: none; z-index: 5; }
   .kf {
@@ -273,6 +396,47 @@
   #roomBadge b { color: #8ef0a0; letter-spacing: .22em; }
   #roomBadge .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #8ef0a0; margin-right: 7px; box-shadow: 0 0 8px #8ef0a0; vertical-align: 1px; }
 
+  /* Hold-to-peek scoreboard: immediate visibility, no focus or pointer capture. */
+  #scoreboard {
+    position: fixed; inset: 0; z-index: 9; display: none; align-items: center; justify-content: center;
+    padding: 24px 16px; pointer-events: none; background: rgba(4,10,16,.32);
+  }
+  #scoreboard.show { display: flex; }
+  .scoreboard-panel {
+    display: flex; flex-direction: column; width: min(800px, 100%); min-width: 0;
+    max-height: min(620px, calc(100vh - 48px)); overflow: hidden; border-radius: 12px;
+    background: rgba(10,19,27,.95); border: 1px solid rgba(220,235,243,.22);
+    box-shadow: 0 18px 60px rgba(0,0,0,.4);
+  }
+  .scoreboard-head {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    flex: none; padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,.14);
+  }
+  .scoreboard-eyebrow { margin: 0 0 5px; color: #91a6b3; font-size: 9px; letter-spacing: .2em; text-transform: uppercase; }
+  #scoreboardRoom { margin: 0; font-size: 17px; line-height: 1.3; letter-spacing: .1em; overflow-wrap: anywhere; }
+  #scoreboardCount { flex: none; font-size: 11px; color: #bdd9c7; font-variant-numeric: tabular-nums; }
+  .scoreboard-table-wrap { min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; }
+  #scoreboard table { width: 100%; table-layout: fixed; border-collapse: collapse; font-size: 11px; line-height: 1.5; }
+  #scoreboard .col-player { width: 26%; }
+  #scoreboard .col-character { width: 24%; }
+  #scoreboard .col-weapon { width: 20%; }
+  #scoreboard .col-stat { width: 10%; }
+  #scoreboard th, #scoreboard td { padding: 10px 12px; text-align: left; overflow-wrap: anywhere; }
+  #scoreboard th { position: sticky; top: 0; z-index: 1; background: #14232e; color: #a9bdc9; font-size: 9px; letter-spacing: .12em; font-weight: 600; }
+  #scoreboard th:nth-child(n+4), #scoreboard td:nth-child(n+4) { text-align: right; padding-inline: 6px; font-variant-numeric: tabular-nums; }
+  #scoreboard td { border-bottom: 1px solid rgba(255,255,255,.07); color: #e5edf1; }
+  #scoreboard tbody tr:last-child td { border-bottom: 0; }
+  #scoreboard .is-local { background: rgba(124,222,163,.1); box-shadow: inset 3px 0 #9ce4b6; }
+  #scoreboard .is-local td:first-child { color: #c9f4d9; font-weight: 700; }
+  #scoreboard .is-dead td { color: #95a5b0; }
+  #scoreboard .is-dead td:last-child { color: #ffb69e; }
+  .scoreboard-foot {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px;
+    flex: none; padding: 11px 20px; border-top: 1px solid rgba(255,255,255,.12); color: #aebfc9; font-size: 10px;
+  }
+  .scoreboard-foot .local-key { color: #bdeccf; }
+  .scoreboard-foot kbd { padding: 1px 5px; border: 1px solid rgba(255,255,255,.24); border-radius: 4px; font: inherit; color: #f0f6fa; }
+
   #death {
     position: fixed; inset: 0; z-index: 13; display: flex; flex-direction: column;
     align-items: center; justify-content: center; gap: 6px;
@@ -284,38 +448,189 @@
   #death p { margin: 0; font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: rgba(255,255,255,.75); }
   #death b { color: #ffd166; }
 
-  #hint .online { display: flex; gap: 8px; align-items: stretch; margin-top: 2px; }
+  #hint .online { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; align-items: stretch; max-width: 100%; }
   #roomInput {
     width: 160px; padding: 8px 11px; border-radius: 7px; font: inherit; font-size: 12px;
     letter-spacing: .2em; text-transform: uppercase; text-align: center;
     color: #fff; background: rgba(255,255,255,.08);
-    border: 1px solid rgba(255,255,255,.22); outline: none;
+    border: 1px solid rgba(255,255,255,.22);
   }
   #roomInput:focus { border-color: rgba(255,255,255,.6); }
   #onlineBtn, #createBtn {
-    padding: 8px 14px; font: inherit; font-size: 10px; letter-spacing: .12em;
+    min-height: 34px; padding: 8px 14px; font: inherit; font-size: 10px; letter-spacing: .12em;
     text-transform: uppercase; font-weight: 700; cursor: pointer; border-radius: 7px;
     border: 0;
   }
   #onlineBtn { color: #0a1620; background: linear-gradient(#d7ffe2, #8ef0a0); }
   #createBtn { color: #fff; background: rgba(255,255,255,.13); border: 1px solid rgba(255,255,255,.24); }
   #onlineBtn:disabled, #createBtn:disabled { opacity: .35; cursor: progress; }
-  #roomHint { margin: -8px 0 0 !important; letter-spacing: .14em !important; font-size: 9.5px !important; }
+  #hint #roomHint { font-size: 9.5px; letter-spacing: .1em; }
+  #hint #tiny { max-width: 680px; font-size: 9px; letter-spacing: .08em; opacity: .6; }
 
   #err {
     position: fixed; inset: 0; z-index: 20; display: none;
     align-items: center; justify-content: center; padding: 30px;
     background: #101a22; font-size: 13px; line-height: 1.7; text-align: center;
+    overflow-y: auto; overflow-wrap: anywhere;
+  }
+
+  @media (max-height: 680px) {
+    #hint { padding-block: 16px; scroll-padding-block: 16px; }
+    #hint .intro { gap: 9px; }
+    #hint h1 .word { font-size: clamp(28px, 5.6vw, 44px); }
+    #hint .keys { gap: 5px 12px; padding-block: 10px; }
+    .char { min-height: 30px; padding-block: 5px; }
+  }
+  @media (max-width: 1100px) {
+    #healthWrap { left: 14px; bottom: 14px; width: 188px; }
+    #weaponHud { right: 14px; bottom: 14px; min-width: 166px; padding: 9px 11px; }
+    #hotbar { gap: 4px; padding: 6px; }
+    .slot { width: 42px; height: 42px; }
+    .slot canvas { width: 30px; height: 30px; }
+  }
+  @media (max-width: 860px) {
+    body.build #healthWrap, body.build #weaponHud,
+    body.quick-build #healthWrap, body.quick-build #weaponHud { bottom: 88px; }
+    body.build #toast { bottom: 210px; }
+    #buildHud { bottom: 218px; }
+    body.quick-build #toast { bottom: 340px; }
+  }
+  @media (max-width: 700px) {
+    #hint { padding-inline: 16px; }
+    #hint .keys { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #hint .row { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    #hint .sub { letter-spacing: .12em; }
+  }
+  @media (max-width: 560px) {
+    .scope-optic { border-width: 4px; }
+    .scope-readout {
+      top: calc(50% + var(--scope-size) * .34); width: calc(var(--scope-size) * .6);
+      justify-content: space-between; gap: 8px; font-size: 9px;
+      color: #e0e9e8; text-shadow: 0 1px 2px #000, 0 0 4px #000;
+    }
+    .scope-readout::before { display: none; }
+    #scopeZoom { font-size: 10px; }
+    #healthWrap { left: 12px; width: min(144px, calc(50vw - 20px)); }
+    #weaponHud { right: 12px; min-width: 154px; max-width: 180px; }
+    #ammoLine { font-size: 28px; }
+    #weaponDots { gap: 3px; }
+    #weaponDots > * { min-width: 12px; }
+    #buildHud { grid-template-columns: minmax(0, 1fr); }
+    #buildCost { text-align: left; }
+    #hotbar { gap: 3px; padding: 5px; }
+    .slot { width: clamp(26px, 7.6vw, 38px); height: 38px; }
+    .slot canvas { width: 75%; height: auto; }
+    #stats { max-width: calc(100vw - 24px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 10px; }
+    #roomBadge { top: 50px; }
+    #killfeed { top: 88px; max-width: calc(100vw - 28px); }
+    .kf { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+    #craftBody { flex-direction: column; }
+    #craftBody .col + .col { border-left: 0; border-top: 1px solid rgba(255,255,255,.1); }
+  }
+  @media (max-width: 480px) {
+    .scoreboard-head { padding: 12px; gap: 10px; }
+    #scoreboardRoom { font-size: 14px; }
+    #scoreboardCount { font-size: 10px; }
+    #scoreboard table { font-size: 9.5px; }
+    #scoreboard th, #scoreboard td { padding: 8px 6px; }
+    #scoreboard th { font-size: 8px; letter-spacing: .04em; }
+    #scoreboard th:nth-child(n+4), #scoreboard td:nth-child(n+4) { padding-inline: 4px; }
+    .scoreboard-foot { padding: 10px 12px; font-size: 9px; }
+    #hint .row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #hint #roomInput { width: 100%; }
+    #hint .online { width: 100%; max-width: 300px; }
+    #hint .online button { flex: 1; }
+  }
+  @media (max-width: 380px) {
+    #hint .keys { grid-template-columns: 1fr; }
+    #hint .nameField { flex-direction: column; gap: 5px; }
+    body.quick-build #toast { bottom: 372px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #hint, #hud, #play, .char, .slot, #toast, #weaponHud, #weaponDots > *, #death, #scopeOverlay { transition: none; }
+    #play:hover, .char:hover { transform: none; }
+    .kf { animation: none; }
   }
 </style>
 </head>
 <body>
 <div id="app"></div>
 <div id="vignette"></div>
+<div id="scopeOverlay" aria-hidden="true">
+  <div class="scope-optic">
+    <svg class="scope-reticle" viewBox="0 0 600 600" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+      <defs>
+        <path id="scopeFallback" fill="none" vector-effect="non-scaling-stroke" d="M244 300H288 M312 300H356 M300 244V288 M300 312V356" />
+        <circle id="scopeReflexRing" cx="300" cy="300" r="20" fill="none" vector-effect="non-scaling-stroke" />
+        <path id="scopeReflexIndex" fill="none" vector-effect="non-scaling-stroke" d="M300 270V275 M300 325V330 M270 300H275 M325 300H330" />
+        <circle id="scopeHoloRing" cx="300" cy="300" r="54" fill="none" vector-effect="non-scaling-stroke" />
+        <path id="scopeHoloBars" fill="none" vector-effect="non-scaling-stroke" d="M204 300H234 M366 300H396 M300 220V240 M300 360V380" />
+        <circle id="scopeSpreadRing" cx="300" cy="300" r="96" pathLength="360" stroke-dasharray="64 26" stroke-dashoffset="-13" fill="none" vector-effect="non-scaling-stroke" />
+        <path id="scopeSpreadIndex" fill="none" vector-effect="non-scaling-stroke" d="M180 300H194 M406 300H420 M300 180V194 M300 406V420" />
+        <path id="scopeChevron" fill="none" vector-effect="non-scaling-stroke" d="M278 318L300 300L322 318 M286 338L300 327L314 338 M242 318H260 M340 318H358" />
+        <path id="scopeEtching" fill="none" vector-effect="non-scaling-stroke" d="
+          M48 300H289 M311 300H552 M300 48V289 M300 311V552
+          M172 294V306 M204 296V304 M236 290V310 M268 294V306
+          M332 294V306 M364 290V310 M396 296V304 M428 294V306
+          M294 268H306 M296 236H304 M290 204H310 M296 172H304
+          M292 332H308 M288 364H312 M284 396H316 M280 428H320 M276 460H324
+          M297 348H303 M297 380H303 M297 412H303 M297 444H303" />
+        <path id="scopePrecision" fill="none" vector-effect="non-scaling-stroke" d="M300 278L322 300L300 322L278 300Z M300 244V268 M300 332V356 M244 300H268 M332 300H356" />
+        <path id="scopeSupport" fill="none" vector-effect="non-scaling-stroke" d="
+          M188 300H288 M312 300H412 M300 244V288 M300 312V476
+          M288 332H312 M278 364H322 M268 396H332 M258 428H342 M248 460H352
+          M174 272H162V328H174 M426 272H438V328H426" />
+      </defs>
+      <g class="scope-pattern reticle-default">
+        <use href="#scopeFallback" class="reticle-shadow" /><use href="#scopeFallback" class="reticle-line" />
+      </g>
+      <g class="scope-pattern reticle-reflex">
+        <use href="#scopeReflexRing" class="reticle-shadow" /><use href="#scopeReflexRing" class="reticle-line" />
+        <use href="#scopeReflexIndex" class="reticle-shadow" /><use href="#scopeReflexIndex" class="reticle-line" />
+      </g>
+      <g class="scope-pattern reticle-holo">
+        <use href="#scopeHoloRing" class="reticle-shadow" /><use href="#scopeHoloRing" class="reticle-line" />
+        <use href="#scopeHoloBars" class="reticle-shadow" /><use href="#scopeHoloBars" class="reticle-line reticle-bars" />
+      </g>
+      <g class="scope-pattern reticle-spread">
+        <use href="#scopeSpreadRing" class="reticle-shadow" /><use href="#scopeSpreadRing" class="reticle-line" />
+        <use href="#scopeSpreadIndex" class="reticle-shadow" /><use href="#scopeSpreadIndex" class="reticle-line" />
+      </g>
+      <g class="scope-pattern reticle-chevron">
+        <use href="#scopeChevron" class="reticle-shadow" /><use href="#scopeChevron" class="reticle-line" />
+      </g>
+      <g class="scope-pattern reticle-mildot">
+        <use href="#scopeEtching" class="reticle-shadow" /><use href="#scopeEtching" class="reticle-line" />
+        <circle class="mil-dot" cx="204" cy="300" r="2.6" /><circle class="mil-dot" cx="236" cy="300" r="2.6" />
+        <circle class="mil-dot" cx="268" cy="300" r="2.6" /><circle class="mil-dot" cx="332" cy="300" r="2.6" />
+        <circle class="mil-dot" cx="364" cy="300" r="2.6" /><circle class="mil-dot" cx="396" cy="300" r="2.6" />
+        <circle class="mil-dot" cx="300" cy="236" r="2.6" /><circle class="mil-dot" cx="300" cy="268" r="2.6" />
+        <g class="graduations" text-anchor="middle">
+          <text x="236" y="326">2</text><text x="364" y="326">2</text>
+          <text x="327" y="368">2</text><text x="336" y="432">4</text>
+        </g>
+      </g>
+      <g class="scope-pattern reticle-precision">
+        <use href="#scopePrecision" class="reticle-shadow" /><use href="#scopePrecision" class="reticle-line" />
+      </g>
+      <g class="scope-pattern reticle-support">
+        <use href="#scopeSupport" class="reticle-shadow" /><use href="#scopeSupport" class="reticle-line" />
+        <circle class="mil-dot" cx="266" cy="364" r="2.4" /><circle class="mil-dot" cx="334" cy="364" r="2.4" />
+        <circle class="mil-dot" cx="246" cy="428" r="2.4" /><circle class="mil-dot" cx="354" cy="428" r="2.4" />
+        <g class="graduations"><text x="340" y="368">2</text><text x="362" y="432">4</text></g>
+      </g>
+      <g class="rim-index">
+        <path d="M298 12H302V24H298Z M298 576H302V588H298Z M12 298H24V302H12Z M576 298H588V302H576Z" />
+      </g>
+      <circle class="scope-aimpoint" cx="300" cy="300" r="2.8" />
+    </svg>
+  </div>
+  <div class="scope-readout"><b id="scopeWeapon"></b><span id="scopeZoom"></span></div>
+</div>
 <div id="crosshair"></div>
 <div id="stats">booting…</div>
 <div id="hotbar"></div>
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <div id="hud">
   <div id="healthWrap">
@@ -327,7 +642,12 @@
     <div id="weaponName">Pistol</div>
     <div id="ammoLine"><b id="ammoNow">12</b><span> / ∞</span></div>
     <div id="reloadBar"><i id="reloadFill"></i></div>
-    <div id="weaponDots"><i></i><i></i><i></i></div>
+    <div id="weaponDots" role="group" aria-label="Weapons 1 through 7"></div>
+  </div>
+  <div id="buildHud" role="status" aria-live="polite" aria-atomic="true">
+    <b id="buildPiece">Wall</b>
+    <span id="buildCost"></span>
+    <span id="buildHint">Z wall · X ramp · G floor · T rotate</span>
   </div>
 </div>
 <div id="killfeed"></div>
@@ -336,28 +656,57 @@
 <div id="roomBadge" class="hidden"></div>
 <div id="death"><h2>Eliminated</h2><p>Respawning in <b id="respawnIn">3</b>…</p></div>
 
-<div id="hint">
-  <h1><span class="brand">Blockcraft</span><span class="word">Battle Ground</span></h1>
-  <p class="sub">online voxel gunfight · build · craft · survive</p>
-  <div class="keys">
-    <span><b>W A S D</b> move</span><span><b>Mouse</b> look</span>
-    <span><b>Left click</b> shoot</span><span><b>Right click</b> aim</span>
-    <span><b>R</b> reload</span><span><b>Q</b> / <b>1–3</b> swap gun</span>
-    <span><b>B</b> build mode</span><span><b>E</b> inventory &amp; crafting</span>
-    <span><b>Space</b> jump / swim</span><span><b>Shift</b> sprint</span>
-    <span><b>V</b> first / third person</span><span><b>C</b> swap character</span>
-    <span><b>F</b> toggle flying</span><span><b>Esc</b> pause</span>
+<div id="scoreboard" role="region" aria-label="Match scoreboard" aria-hidden="true">
+  <div class="scoreboard-panel">
+    <div class="scoreboard-head">
+      <div><p class="scoreboard-eyebrow">Match scoreboard</p><h2 id="scoreboardRoom">Solo</h2></div>
+      <span id="scoreboardCount">1 player</span>
+    </div>
+    <div class="scoreboard-table-wrap">
+      <table>
+        <colgroup>
+          <col class="col-player" /><col class="col-character" /><col class="col-weapon" />
+          <col class="col-stat" /><col class="col-stat" /><col class="col-stat" />
+        </colgroup>
+        <thead><tr>
+          <th scope="col">PLAYER</th><th scope="col">CHARACTER</th><th scope="col">WEAPON</th>
+          <th scope="col">K</th><th scope="col">D</th><th scope="col">HP</th>
+        </tr></thead>
+        <tbody id="scoreboardRows"></tbody>
+      </table>
+    </div>
+    <div class="scoreboard-foot"><span class="local-key">Highlighted row · you</span><span>Wheel to scroll · release <kbd>Tab</kbd> to return</span></div>
   </div>
-  <div class="row" id="chars"></div>
-  <input id="nameInput" maxlength="14" value="Wanderer" spellcheck="false" aria-label="Player name" />
-  <div class="online">
-    <input id="roomInput" maxlength="12" placeholder="ROOM CODE" spellcheck="false" aria-label="Room code" />
-    <button id="onlineBtn" type="button" disabled>Join room</button>
-    <button id="createBtn" type="button" disabled>Create room</button>
+</div>
+
+<div id="hint" role="region" aria-label="Game menu">
+  <div class="intro">
+    <h1><span class="brand">Blockcraft</span><span class="word">Battle Ground</span></h1>
+    <p class="sub">online voxel gunfight · unlimited builds · breakable cover</p>
+    <div class="keys" aria-label="Keyboard and mouse controls">
+      <span><b>W A S D</b> move</span><span><b>Mouse</b> look</span><span><b>Space</b> jump / swim</span>
+      <span><b>Shift</b> sprint</span><span><b>Ctrl</b> crouch / sneak</span><span><b>Shift+Ctrl</b> slide</span>
+      <span><b>Left click</b> shoot / place piece</span><span><b>Right click</b> scope / cancel piece</span><span><b>R</b> reload</span>
+      <span><b>1–7 / Q</b> guns · wheel</span><span><b>Z / X / G</b> wall / ramp / floor</span><span><b>T</b> rotate piece</span>
+      <span><b>B</b> mine / build mode</span><span><b>E</b> inventory / craft</span><span><b>V</b> shoulder / first person</span>
+      <span><b>F</b> toggle flying</span><span><b>C</b> swap character</span><span><b>Esc</b> cancel / pause</span>
+      <span><b>Tab (hold)</b> scoreboard</span><span><b>M</b> mute sound</span><span><b>P</b> copy room code</span>
+    </div>
+    <p class="combatNote">Shoot blocks to break cover · tougher materials take more hits</p>
+    <div class="roster">
+      <p class="sectionLabel" id="rosterLabel">Choose your character</p>
+      <div class="row" id="chars" role="group" aria-labelledby="rosterLabel"></div>
+    </div>
+    <label class="nameField"><span>Player name</span><input id="nameInput" maxlength="14" value="Wanderer" spellcheck="false" aria-label="Player name" /></label>
+    <div class="online">
+      <input id="roomInput" maxlength="12" placeholder="ROOM CODE" spellcheck="false" aria-label="Room code" />
+      <button id="onlineBtn" type="button" disabled>Join room</button>
+      <button id="createBtn" type="button" disabled>Create room</button>
+    </div>
+    <p class="sub" id="roomHint">create a room · send the code · same code = same gunfight</p>
+    <button id="play" type="button" disabled>Generating world…</button>
+    <p class="sub" id="tiny">built with three.js</p>
   </div>
-  <p class="sub" id="roomHint">create a room · send the code · same code = same gunfight</p>
-  <button id="play" disabled>Generating world…</button>
-  <p class="sub" id="tiny" style="opacity:.45;letter-spacing:.12em">built with three.js</p>
 </div>
 
 <div id="craft">
@@ -370,7 +719,7 @@
       <h3>Blocks</h3>
       <div id="invGrid"></div>
       <p class="tip">Click a block to load it into hotbar slot <b id="slotLabel">1</b>.<br>
-      Break blocks to collect them. Placing uses one item.</p>
+      Building materials are unlimited (∞).<br>Break blocks to collect ingredients for crafting.</p>
     </div>
     <div class="col">
       <h3>Crafting</h3>
@@ -379,7 +728,7 @@
   </div>
 </div>
 
-<div id="err"></div>
+<div id="err" role="alert"></div>
 
 <script>
   /* if the module (or the CDN copy of three.js) never starts, say so instead of hanging */
@@ -413,10 +762,15 @@ const SOURCES = [
   '20-world.js',
   '30-meshing.js',
   '40-characters.js',
+  '45-dragons.js',
+  '48-outline.js',
   '50-player.js',
+  '55-building.js',
   '60-combat.js',
+  '65-destruction.js',
   '70-inventory.js',
   '80-input.js',
+  '85-scoreboard.js',
   '90-net.js',
   '99-boot.js'
 ];
