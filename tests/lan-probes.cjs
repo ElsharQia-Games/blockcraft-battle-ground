@@ -47,6 +47,38 @@ function aimAndFire(id) {
   return { ammo: b.gun.ammo[b.gun.index], direction: direction.toArray(), target: id, weapon: b.WEAPONS[b.gun.index].id };
 }
 
+function teamView(ids) {
+  const api = window.__bcTest.b.BC.api.net;
+  return { host: api.isHost, teams: ids.map((id) => api.teamFor(id)) };
+}
+
+function teamsMatch(args) {
+  const view = window.__bcTest.b.BC.api.net;
+  return args.ids.every((id, i) => view.teamFor(id) === args.expected[i]);
+}
+
+// Every client must agree on every team (they used to derive teams from their
+// own roster views), a player can switch themself, and the host can move others.
+async function teamSwitchProbe(pages, ids) {
+  const views = await Promise.all(pages.map((p) => p.evaluate(teamView, ids)));
+  const initial = views[0].teams;
+  assert.ok(initial.every((team) => team === 'red' || team === 'blue'), 'A player has no team: ' + initial);
+  for (const view of views) assert.deepEqual(view.teams, initial, 'Clients disagree about teams');
+  assert.ok(initial.includes('red') && initial.includes('blue'), 'Teams were not balanced: ' + initial);
+  const hostIndex = views.findIndex((v) => v.host);
+  assert.ok(hostIndex >= 0, 'No client reports being the host');
+  const mover = (hostIndex + 1) % pages.length;
+  const flip = (team) => (team === 'red' ? 'blue' : 'red');
+  const switched = initial.slice(); switched[mover] = flip(initial[mover]);
+  await pages[mover].evaluate((target) => window.__bcTest.b.BC.api.net.requestTeam(null, target), switched[mover]);
+  for (const p of pages) await p.wait('self team switch replicated', teamsMatch, { ids, expected: switched });
+  const back = switched.slice(); back[mover] = initial[mover];
+  await pages[hostIndex].evaluate((args) => window.__bcTest.b.BC.api.net.requestTeam(args.id, args.team),
+    { id: ids[mover], team: back[mover] });
+  for (const p of pages) await p.wait('host team move replicated', teamsMatch, { ids, expected: back });
+  return { initial, switched, back, host: ids[hostIndex] };
+}
+
 async function lanProbe(lab, t) {
   const A = await lab.page('LAN-A', { base: lab.httpURL, solo: false, width: 1024, height: 600 });
   t.after(() => A.close());
@@ -270,6 +302,7 @@ async function lanProbe(lab, t) {
   await C.wait('late join received build and destruction edit history', hasCells, historyCells, { timeout: 25_000 });
   await C.wait('late join sees two independent existing players', () => window.__blockcraft.net.players.size === 2);
   await C.wait('late join gets new character/weapon', peer, { id: a.id, character: 'kratos', weapon: 'lmg' });
+  const teams = await teamSwitchProbe([A, B, C], [a.id, b.id, c.id]);
   await A.lock();
   await A.evaluate(() => window.__bcTest.api('setScoreboardVisible')(true));
   await A.wait('scoreboard includes late joiner', () => document.getElementById('scoreboardRows').children.length === 3);
@@ -281,7 +314,7 @@ async function lanProbe(lab, t) {
   await A.evaluate(() => window.__bcTest.api('setScoreboardVisible')(false));
   await A.evaluate(() => { window.__bcTest.api('cancelQuickBuild')(); window.__bcLanBuild.world.restore(); delete window.__bcLanBuild; });
   for (const page of [A, B, C]) page.assertHealthy();
-  return { players: [a, b, c], identities, activeReload, shots, victim, respawn, scores, scoreboardEviction: true,
+  return { players: [a, b, c], teams, identities, activeReload, shots, victim, respawn, scores, scoreboardEviction: true,
     built, destruction: { targetCell, shots: destroyShots }, historyCells };
 }
 
