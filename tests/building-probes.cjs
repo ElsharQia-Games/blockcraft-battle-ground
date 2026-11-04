@@ -206,7 +206,7 @@ function buildingInputProbe(reason) {
       check(k.api('buildingHeld').left, 'Held-build fixture never became active');
       if (reason === 'focus') input = k.focusField();
       if (reason === 'blur') window.dispatchEvent(new Event('blur'));
-      if (reason === 'inventory') k.key('KeyE');
+      if (reason === 'pause') b.menus.showPause();
       if (reason === 'reset') k.api('resetBuildingInput')();
       check(!k.api('quickBuild').active && !k.api('buildingHeld').left && !k.api('buildingHeld').right, 'Held building survived input release', reason);
       const before = world.snapshot(), inv = h.inventory();
@@ -217,7 +217,7 @@ function buildingInputProbe(reason) {
   });
 }
 
-function singleBlockAndCraftProbe() {
+function singleBlockProbe() {
   const k = window.__bcTest, { b, check } = k, h = window.__bcBuild;
   return k.state(() => {
     const world = k.world();
@@ -244,16 +244,17 @@ function singleBlockAndCraftProbe() {
       const airCells = world.changes(airBefore);
       check(airCells.length === 1 && airCells[0].from === k.api('AIR') && airCells[0].to === k.api('PLANKS'), 'Traditional RMB cannot place in open air', airCells);
       check(Object.keys(h.inventory()).length === 0, 'Floating single-block placement consumed actual stock');
-      const recipe = b.RECIPES.find((r) => r.req.every(([id]) => id !== r.out[0]));
-      check(recipe, 'No ordinary crafting recipe');
-      b.doCraft(recipe);
-      check(b.itemCount(recipe.out[0]) === 0, 'Unlimited building accidentally made crafting free');
-      for (const [id, n] of recipe.req) b.addItem(id, n);
-      b.doCraft(recipe);
-      check(b.itemCount(recipe.out[0]) === recipe.out[1] && recipe.req.every(([id]) => b.itemCount(id) === 0), 'Crafting did not consume real inventory and produce its output', { recipe, inventory: h.inventory() });
-      return { cells, airCells, recipe, inventory: h.inventory() };
+      check(!document.getElementById('craft') && k.optional('RECIPES') === undefined && k.optional('openCraft') === undefined,
+        'Retired crafting UI/recipes are still present');
+      const selected = k.api('selected'), oldMaterial = b.HOTBAR[selected];
+      b.cycleHotbarMaterial(1);
+      const nextMaterial = b.HOTBAR[selected];
+      check(nextMaterial !== oldMaterial && k.api('isBuildMaterial')(nextMaterial), 'No way to choose materials after crafting removal');
+      b.cycleHotbarMaterial(-1);
+      check(b.HOTBAR[selected] === oldMaterial, 'Material cycling does not wrap back to the prior material');
+      return { cells, airCells, inventory: h.inventory(), craftingRemoved: true, nextMaterial };
     } finally { world.restore(); }
   });
 }
 
-module.exports = { installBuildHelpers, buildingProbe, buildingInputProbe, singleBlockAndCraftProbe };
+module.exports = { installBuildHelpers, buildingProbe, buildingInputProbe, singleBlockProbe };

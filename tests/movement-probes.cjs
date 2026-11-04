@@ -8,7 +8,15 @@ function movementProbe() {
       const site = k.pad({ radius: 12 });
       world.dirty(site.writes);
       const flat = world.snapshot();
-      const update = k.api('updatePlayer');
+      const stepPlayer = k.api('updatePlayer');
+      let simNow = performance.now();
+      // Drive the same single-owner fuel/input clock as the real frame loop.
+      // These probes are not run by test:syntax.
+      const update = (dt) => {
+        simNow += dt * 1000;
+        b.BC.emit('preFrame', dt, simNow, true);
+        stepPlayer(dt);
+      };
       const keys = k.api('keys');
       const reset = () => {
         k.onPad(site);
@@ -81,13 +89,13 @@ function movementProbe() {
       let ledge = { covered: false };
       if (typeof k.optional('resetPlayerMotion') === 'function') {
         reset(); b.player.pos.z = edge + 1;
-        keys.KeyW = keys.ControlLeft = true;
+        keys.KeyW = keys.KeyC = true;
         for (let i = 0; i < 150; i++) update(1 / 120);
-        check(b.player.onGround && b.player.pos.y >= site.y - 0.05, 'Ctrl walked off the unsupported ledge', b.player.pos.toArray());
+        check(b.player.onGround && b.player.pos.y >= site.y - 0.05, 'C crouch walked off the unsupported ledge', b.player.pos.toArray());
         const held = b.player.pos.toArray();
-        keys.ControlLeft = false;
+        keys.KeyC = false;
         for (let i = 0; i < 120; i++) update(1 / 120);
-        check(!b.player.onGround && b.player.pos.y < site.y - 0.1, 'Ledge safety remained stuck after Ctrl release');
+        check(!b.player.onGround && b.player.pos.y < site.y - 0.1, 'Ledge safety remained stuck after C release');
         ledge = { covered: true, held };
       }
       world.restore(flat);
@@ -102,6 +110,66 @@ function movementProbe() {
       for (let i = 0; i < 18; i++) { update(1 / 120); buffered = Math.max(buffered, b.player.vel.y); }
       check(buffered > 1, 'Jump pressed before landing was lost', buffered);
 
+      // Ctrl is a logical character-change press, not crouch or an autorepeat.
+      reset();
+      const characterBefore = b.charKey;
+      k.key('ControlLeft');
+      const characterChanged = b.charKey;
+      update(1 / 60);
+      check(characterChanged !== characterBefore && !b.player.crouching, 'Ctrl did not change character without crouching');
+      k.key('ControlLeft', true, true);
+      k.key('ControlRight');
+      check(b.charKey === characterChanged, 'Held/both Ctrl keys repeatedly changed characters');
+      k.key('ControlRight', false); k.key('ControlLeft', false);
+
+      // Crouch changes the real body and can be jump-cancelled in clear space.
+      reset();
+      keys.KeyW = true;
+      k.key('KeyC');
+      for (let i = 0; i < 30; i++) update(1 / 60);
+      const crouch = { height: b.playerBodyHeight(), speed: Math.hypot(b.player.vel.x, b.player.vel.z) };
+      check(crouch.height <= 1.21 && crouch.speed > 2.8, 'Crouch is still tall or sluggish', crouch);
+      k.key('Space'); update(1 / 120); k.key('Space', false);
+      check(b.player.vel.y > 1 && !b.player.crouching && b.playerBodyHeight() > 1.7,
+        'Space did not jump-cancel crouch with headroom', b.player.vel.toArray());
+      update(1 / 120);
+      check(!b.player.crouching, 'Held C undid the crouch jump on the next physics slice');
+      k.key('KeyC', false);
+
+      // A strong slide continues for a useful distance, then jumps without
+      // retaining the low collision body or granting a second air jump.
+      reset();
+      keys.KeyW = keys.ShiftLeft = true;
+      for (let i = 0; i < 18; i++) update(1 / 60);
+      const slideStart = b.player.pos.clone();
+      k.key('KeyC'); update(1 / 120);
+      const slideSpeed = Math.hypot(b.player.vel.x, b.player.vel.z);
+      for (let i = 0; i < 18; i++) update(1 / 60);
+      const slideDistance = Math.hypot(b.player.pos.x - slideStart.x, b.player.pos.z - slideStart.z);
+      check(b.player.sliding && slideSpeed > 10.5 && slideDistance > 3,
+        'Sprint slide is still too short or slow', { slideSpeed, slideDistance });
+      k.key('Space'); update(1 / 120); k.key('Space', false);
+      check(!b.player.sliding && !b.player.crouching && b.player.vel.y > 1,
+        'Space failed to jump-cancel the slide');
+      k.key('KeyC', false);
+
+      // A low stance must not expand through a ceiling when C is released.
+      // A mid-air clearance fixture gives a 1.5 m gap in the integer voxel grid.
+      reset();
+      k.key('KeyC'); update(1 / 120);
+      b.player.pos.y = site.y + 0.5;
+      b.player.vel.set(0, 0, 0);
+      b.player.onGround = false;
+      for (let x = Math.floor(site.x) - 1; x <= Math.floor(site.x) + 1; x++) {
+        for (let z = Math.floor(b.player.pos.z) - 1; z <= Math.floor(b.player.pos.z) + 1; z++) {
+          b.setBlock(x, site.y + 2, z, k.api('STONE'));
+        }
+      }
+      k.key('KeyC', false); update(1 / 120);
+      check(b.player.crouching && b.playerBodyHeight() <= 1.21 && !k.api('collides')(...b.player.pos.toArray()),
+        'Crouch release expanded the player into a ceiling');
+      world.restore(flat);
+
       reset();
       b.player.pos.y += 4; // Leave enough air below to measure descent before landing.
       k.key('KeyF'); k.key('KeyF', true, true); k.key('KeyF', false);
@@ -109,9 +177,18 @@ function movementProbe() {
       keys.Space = true;
       for (let i = 0; i < 12; i++) update(1 / 60);
       check(b.player.vel.y > 0, 'Space did not ascend in flight');
-      keys.Space = false; keys.ShiftLeft = true;
+      keys.ShiftLeft = true;
+      for (let i = 0; i < 12; i++) update(1 / 60);
+      check(b.jetpack.boosting && b.player.vel.y > 0, 'Boost cancelled Space ascent');
+      k.key('KeyC'); update(1 / 60);
+      check(b.jetpack.dashing && b.player.vel.y > 0, 'Air dash cancelled Space ascent');
+      k.key('KeyC', false);
+      keys.Space = false;
+      const flightChar = b.charKey;
+      k.key('ControlLeft');
       for (let i = 0; i < 24; i++) update(1 / 60);
-      check(b.player.vel.y < 0, 'Shift did not descend in flight');
+      check(b.player.vel.y < 0 && b.charKey === flightChar, 'Held Ctrl did not descend in flight without cycling character');
+      k.key('ControlLeft', false);
       k.key('KeyF'); k.key('KeyF', false);
       check(!b.player.fly, 'F did not return to walking');
       const view = b.thirdPerson;
@@ -119,7 +196,8 @@ function movementProbe() {
       check(b.thirdPerson !== view, 'V did not change camera once');
       k.key('KeyV'); k.key('KeyV', false);
       check(b.thirdPerson === view, 'V did not restore camera');
-      return { acceleration, travel, walk, sprint, jumpVelocity, collision, coyote, buffered, ledge };
+      return { acceleration, travel, walk, sprint, jumpVelocity, collision, coyote, buffered, ledge,
+        crouch, slideSpeed, slideDistance };
     } finally { world.restore(); }
   });
 }
@@ -151,7 +229,7 @@ function inputReleaseProbe(reason) {
         for (const code of ['KeyF', 'KeyV', 'Space', 'Digit7']) { k.key(code); k.key(code, false); }
         check(b.player.fly === prior.fly && b.thirdPerson === prior.view && b.gun.index === prior.index, 'Typing in text field triggered gameplay');
       }
-      if (reason === 'inventory') { b.openCraft(); k.api('updateBuilding')(1 / 60); }
+      if (reason === 'pause') { b.menus.showPause(); k.api('updateBuilding')(1 / 60); }
       return released(reason);
     } finally { input?.remove(); focus?.focus({ preventScroll: true }); }
   });
