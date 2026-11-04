@@ -1,7 +1,7 @@
 /* Blockcraft Battle Ground — Cached, joint-local character silhouettes.
    48-outline.js
-   Two inverted hulls per rig joint: a 2 CSS-pixel ink edge and a thin pale
-   teal inner edge. Ordinary scene depth hides both behind opaque geometry.
+   Two inverted hulls per rig joint: a 2 CSS-pixel ink edge and a thin team
+   rim. Ordinary scene depth hides both behind opaque geometry.
    Cache entries own only geometry/statistics, never avatars. */
 'use strict';
 
@@ -76,6 +76,15 @@ const characterOutlineMaterials = [
   characterOutlineMaterial('ink', 0x0a1920, 2),
   characterOutlineMaterial('rim', 0xd1f3df, 0.8)
 ];
+// Geometry stays cached by character. Palettes are shared by TEAM, not mutated
+// per avatar: two players wearing the same skin can have different team rims.
+const characterOutlineTeamMaterials = {
+  neutral: characterOutlineMaterials,
+  red: [characterOutlineMaterial('red-ink', 0x701c30, 2),
+    characterOutlineMaterial('red-rim', BC.teamColor('red'), 1.1)],
+  blue: [characterOutlineMaterial('blue-ink', 0x163c74, 2),
+    characterOutlineMaterial('blue-rim', BC.teamColor('blue'), 1.1)]
+};
 
 function characterOutlineOptOut(object) {
   const data = object.userData || {};
@@ -264,7 +273,7 @@ function addCharacterOutline(root) {
   if (!joints.size || typeof key !== 'string') return null;
   let cached = characterOutlineCache.get(key);
   if (!cached) { cached = new Map(); characterOutlineCache.set(key, cached); }
-  const outline = { isCharacterOutline: true, key, joints: {}, meshes: [], sourceMeshes: 0, drawCalls: 0 };
+  const outline = { isCharacterOutline: true, key, team: 'neutral', joints: {}, meshes: [], sourceMeshes: 0, drawCalls: 0 };
   const attached = new Set();
   for (const name of CHARACTER_OUTLINE_JOINTS) {
     const joint = parts[name];
@@ -298,6 +307,17 @@ function addCharacterOutline(root) {
   return outline;
 }
 
+function setCharacterOutlineTeam(root, team) {
+  const outline = root && root.userData && root.userData.outline;
+  if (!outline || !outline.isCharacterOutline) return false;
+  const next = team === 'red' || team === 'blue' ? team : 'neutral';
+  if (outline.team === next) return true;
+  const materials = characterOutlineTeamMaterials[next];
+  for (const mesh of outline.meshes) mesh.material = materials[mesh.userData.layer];
+  outline.team = next;
+  return true;
+}
+
 /* Once before each render, including the initial warm-up render. No avatar
    registry, traversal, per-mesh callbacks, allocations or geometry rebuilds.
    getViewport is in logical/CSS pixels; DPR therefore cannot thicken the edge. */
@@ -309,4 +329,17 @@ function updateCharacterOutlines() {
     Number.isFinite(height) && height > 0 ? height : 1
   );
   characterOutlineUniforms.outlineNear.value = Number.isFinite(camera.near) && camera.near > 0 ? camera.near : 0.08;
+  const modes = BC.api && BC.api.modes;
+  if (typeof localAvatar !== 'undefined' && localAvatar) {
+    setCharacterOutlineTeam(localAvatar, modes && modes.localTeam);
+  }
+  if (typeof net !== 'undefined' && net && net.players) {
+    for (const peer of net.players.values()) {
+      // The authority may reassign teams on joins, departures or mode changes.
+      const team = typeof netTeamFor === 'function' ? netTeamFor(peer.id) : peer.team;
+      setCharacterOutlineTeam(peer.group, team);
+    }
+  }
 }
+
+BC.api.outlines = { setTeam: setCharacterOutlineTeam };
