@@ -24,11 +24,12 @@ function menuStateProbe(expected) {
     check(document.documentElement.scrollWidth <= innerWidth + 1, 'Menu needs horizontal scrolling');
   }
   if (expected === 'home') {
+    // The lobby dims the world behind Home for readable text, but the world
+    // must stay visible (translucent stops) and unblurred.
     const style = getComputedStyle(document.getElementById('hint'));
-    const wash = style.backgroundColor.match(/[\d.]+/g)?.map(Number);
-    check(wash?.length === 4 && wash[2] > wash[0] && wash[3] > 0 && wash[3] <= 0.3 &&
-      style.backgroundImage === 'none' && style.backdropFilter === 'none',
-      'Home must use only a faint, unblurred fullscreen blue wash', style.backgroundColor);
+    const alphas = [...style.backgroundImage.matchAll(/rgba\(([^)]+)\)/g)].map((m) => Number(m[1].split(',')[3]));
+    check(alphas.length >= 2 && alphas.every((a) => a > 0 && a < 0.9) && style.backdropFilter === 'none',
+      'Home must keep the world visible behind a translucent, unblurred dimming layer', style.backgroundImage);
     for (const el of document.querySelectorAll('.bc-home-id, .bc-home-nav, .bc-home-hero, .bc-home-foot > span')) {
       const local = getComputedStyle(el);
       check(local.backgroundColor === 'rgba(0, 0, 0, 0)' && local.boxShadow === 'none',
