@@ -48,16 +48,23 @@ function menuProbe() {
   try {
     menus.showHome(true);
     for (const id of ['play', 'menuPlaySetup', 'menuCharacters', 'menuOnline', 'menuSettings']) measure(document.getElementById(id));
+    // The common multiplayer actions belong on Home, not behind a separate
+    // Online screen. Validation only: do not contact a public relay.
+    room.value = 'UI-CHECK'; room.dispatchEvent(new Event('input', { bubbles: true }));
+    for (const id of ['roomInput', 'onlineBtn', 'createBtn']) {
+      const el = document.getElementById(id);
+      check(document.getElementById('hint').contains(el), 'Room-code action is not on Home', id);
+      measure(el);
+    }
     widthCheck();
     open('characters');
     for (const el of [...chars, document.getElementById('nameInput'), document.getElementById('charactersBack')]) measure(el);
     widthCheck();
     open('online');
-    // Reach/validation fixture only; never click Join/Create or contact brokers.
-    room.value = 'UI-CHECK'; room.dispatchEvent(new Event('input', { bubbles: true }));
-    for (const id of ['roomInput', 'onlineBtn', 'createBtn', 'onlineBack']) measure(document.getElementById(id));
+    measure(document.getElementById('onlineBack'));
     widthCheck();
     open('play');
+    check(document.getElementById('playSetupStart')?.hasAttribute('data-menu-play'), 'Mode & map has no direct Play action');
     for (const el of document.querySelectorAll('#playSetupScreen button:not([disabled])')) measure(el);
     widthCheck();
     open('settings');

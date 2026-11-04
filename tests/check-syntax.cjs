@@ -49,7 +49,9 @@ const dependencies = [
   ['10-textures.js', '20-world.js'], ['20-world.js', '15-modes.js'],
   ['20-world.js', '22-physics.js'], ['22-physics.js', '40-characters.js'],
   ['44-dragon-rules.js', '45-dragons.js'], ['45-dragons.js', '46-riding.js'], ['50-player.js', '52-jetpack.js'],
+  ['52-jetpack.js', '53-ground-marker.js'], ['53-ground-marker.js', '55-building.js'],
   ['50-player.js', '58-killcam.js'], ['60-combat.js', '62-combat-fx.js'],
+  ['62-combat-fx.js', '63-player-feedback.js'],
   ['85-scoreboard.js', '86-hud.js'], ['86-hud.js', '87-minimap.js'],
   ['05-settings.js', '88-menu.js'], ['80-input.js', '88-menu.js'], ['87-minimap.js', '88-menu.js'],
   ['90-net.js', '92-sync.js'], ['90-net.js', '94-audio.js']
