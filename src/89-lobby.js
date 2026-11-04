@@ -172,6 +172,24 @@
   refresh();
 
 
+  /* ---------------- graphics quality toggle (Pause) ---------------- */
+  (function () {
+    var actions = document.querySelector('.bc-pause-actions');
+    var graphics = BC.api.graphics;
+    if (!actions || !graphics) return;
+    var b = document.createElement('button');
+    b.id = 'pauseGraphics';
+    b.type = 'button';
+    b.className = 'bc-button bc-button-quiet';
+    function label() { b.textContent = 'Graphics: ' + (graphics.quality === 'high' ? 'High' : 'Fast'); }
+    b.addEventListener('click', function () {
+      graphics.setQuality(graphics.quality === 'high' ? 'low' : 'high');
+      label();
+    });
+    label();
+    actions.insertBefore(b, document.getElementById('pauseHome'));
+  })();
+
   BC.api.lobby = { refresh: refresh, roster: roster };
 })();
 

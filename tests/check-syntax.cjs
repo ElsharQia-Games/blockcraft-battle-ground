@@ -53,7 +53,7 @@ const dependencies = [
   ['50-player.js', '58-killcam.js'], ['60-combat.js', '62-combat-fx.js'],
   ['62-combat-fx.js', '63-player-feedback.js'],
   ['85-scoreboard.js', '86-hud.js'], ['86-hud.js', '87-minimap.js'],
-  ['05-settings.js', '88-menu.js'], ['80-input.js', '88-menu.js'], ['80-input.js', '82-touch.js'], ['55-building.js', '82-touch.js'], ['87-minimap.js', '88-menu.js'], ['88-menu.js', '89-lobby.js'],
+  ['05-settings.js', '88-menu.js'], ['80-input.js', '88-menu.js'], ['80-input.js', '82-touch.js'], ['55-building.js', '82-touch.js'], ['87-minimap.js', '88-menu.js'], ['88-menu.js', '89-lobby.js'], ['30-meshing.js', '41-graphics.js'], ['40-characters.js', '41-graphics.js'],
   ['90-net.js', '92-sync.js'], ['90-net.js', '94-audio.js']
 ];
 for (const [dependency, file] of dependencies) {

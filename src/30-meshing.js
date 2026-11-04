@@ -4,17 +4,17 @@
 'use strict';
 /* ---------------- meshing ---------------- */
 const FACES = [
-  { dir: [ 1, 0, 0], nAxis: 0, corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]], uvs: [[0,0],[0,1],[1,1],[1,0]], shade: 0.80 },
-  { dir: [-1, 0, 0], nAxis: 0, corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]], uvs: [[0,0],[0,1],[1,1],[1,0]], shade: 0.80 },
+  { dir: [ 1, 0, 0], nAxis: 0, corners: [[1,0,0],[1,1,0],[1,1,1],[1,0,1]], uvs: [[0,0],[0,1],[1,1],[1,0]], shade: 0.88 },
+  { dir: [-1, 0, 0], nAxis: 0, corners: [[0,0,1],[0,1,1],[0,1,0],[0,0,0]], uvs: [[0,0],[0,1],[1,1],[1,0]], shade: 0.88 },
   { dir: [ 0, 1, 0], nAxis: 1, corners: [[0,1,0],[0,1,1],[1,1,1],[1,1,0]], uvs: [[0,0],[0,1],[1,1],[1,0]], shade: 1.00 },
-  { dir: [ 0,-1, 0], nAxis: 1, corners: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], uvs: [[0,0],[1,0],[1,1],[0,1]], shade: 0.58 },
-  { dir: [ 0, 0, 1], nAxis: 2, corners: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], uvs: [[0,0],[1,0],[1,1],[0,1]], shade: 0.90 },
-  { dir: [ 0, 0,-1], nAxis: 2, corners: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], uvs: [[0,0],[1,0],[1,1],[0,1]], shade: 0.90 }
+  { dir: [ 0,-1, 0], nAxis: 1, corners: [[0,0,0],[1,0,0],[1,0,1],[0,0,1]], uvs: [[0,0],[1,0],[1,1],[0,1]], shade: 0.72 },
+  { dir: [ 0, 0, 1], nAxis: 2, corners: [[0,0,1],[1,0,1],[1,1,1],[0,1,1]], uvs: [[0,0],[1,0],[1,1],[0,1]], shade: 0.95 },
+  { dir: [ 0, 0,-1], nAxis: 2, corners: [[1,0,0],[0,0,0],[0,1,0],[1,1,0]], uvs: [[0,0],[1,0],[1,1],[0,1]], shade: 0.95 }
 ];
 const AO_LEVELS = [0.50, 0.67, 0.84, 1.0];
 
 function buildChunkGeometry(cx, cz, pass) {
-  const positions = [], uvs = [], colors = [], indices = [];
+  const positions = [], normals = [], uvs = [], colors = [], indices = [];
   let vc = 0;
   const X0 = cx * CHUNK, Z0 = cz * CHUNK;
 
@@ -47,6 +47,7 @@ function buildChunkGeometry(cx, cz, pass) {
             let py = y + corner[1];
             if (isWater && f.dir[1] !== -1 && corner[1] === 1) py = y + 0.88;
             positions.push(x + corner[0], py, z + corner[2]);
+            normals.push(f.dir[0], f.dir[1], f.dir[2]);
 
             const suv = f.uvs[c];
             uvs.push(tuv.u0 + suv[0] * (tuv.u1 - tuv.u0), tuv.v0 + suv[1] * (tuv.v1 - tuv.v0));
@@ -76,6 +77,7 @@ function buildChunkGeometry(cx, cz, pass) {
   if (vc === 0) return null;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geo.setIndex(indices);
@@ -83,14 +85,20 @@ function buildChunkGeometry(cx, cz, pass) {
   return geo;
 }
 
-const solidMaterial = new THREE.MeshBasicMaterial({ map: atlasTexture, vertexColors: true });
-const glassMaterial = new THREE.MeshBasicMaterial({
+// Lit materials: the sun/hemisphere lights (40-characters.js) and the shadow
+// map (41-graphics.js) shade the world, and the vertex colours keep the
+// baked per-corner ambient occlusion. Water and glass are glossy Phong
+// surfaces; 41-graphics.js gives them a sky environment map to reflect.
+const solidMaterial = new THREE.MeshLambertMaterial({ map: atlasTexture, vertexColors: true });
+const glassMaterial = new THREE.MeshPhongMaterial({
   map: atlasTexture, vertexColors: true, transparent: true,
-  side: THREE.DoubleSide, depthWrite: false
+  side: THREE.DoubleSide, depthWrite: false,
+  specular: 0xffffff, shininess: 120, reflectivity: 0.45, combine: THREE.MixOperation
 });
-const waterMaterial = new THREE.MeshBasicMaterial({
-  map: atlasTexture, vertexColors: true, transparent: true, opacity: 0.78,
-  side: THREE.DoubleSide, depthWrite: false
+const waterMaterial = new THREE.MeshPhongMaterial({
+  map: atlasTexture, vertexColors: true, transparent: true, opacity: 0.8,
+  side: THREE.DoubleSide, depthWrite: false,
+  specular: 0xcfe6ff, shininess: 90, reflectivity: 0.38, combine: THREE.MixOperation
 });
 
 const chunkMeshes = new Map();
@@ -118,6 +126,8 @@ function rebuildChunk(cx, cz) {
     if (geo) {
       const mesh = new THREE.Mesh(geo, material);
       mesh.renderOrder = order;
+      mesh.castShadow = mesh.receiveShadow = pass === 0;
+      if (pass === 2) mesh.receiveShadow = true;
       scene.add(mesh);
       rec[slot] = mesh;
     }
