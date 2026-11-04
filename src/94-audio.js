@@ -298,6 +298,7 @@
 
   var api = {
     available: false,
+    get recordedKinds() { return Object.keys(recordedBank).sort(); },
     play: function (info) { return play(info); },
     spatialize: function (kind, position, opts) {
       opts = opts || {};
@@ -616,6 +617,9 @@
     dragonRoar:  { playCut: 2200, vol: 0.85, variants: 2 },
     dragonBreath:{ playCut: 4200, vol: 0.80, variants: 2 },
     killcam:     { playCut: 1500, vol: 0.55, variants: 2 },
+    confirm:     { playCut: 9000, vol: 0.42, variants: 1 },
+    step:        { playCut: 5200, vol: 0.20, variants: 1 },
+    land:        { playCut: 4200, vol: 0.40, variants: 1 },
     ui:          { playCut: 6000, vol: 0.35, variants: 2 }
   };
 
@@ -632,7 +636,8 @@
     dragonroar: 'dragonRoar', roar: 'dragonRoar', growl: 'dragonRoar',
     dragonbreath: 'dragonBreath', breath: 'dragonBreath', firebreath: 'dragonBreath',
     killcam: 'killcam', heartbeat: 'killcam',
-    ui: 'ui', blip: 'ui', click: 'ui', beep: 'ui'
+    ui: 'ui', blip: 'ui', click: 'ui', beep: 'ui',
+    confirm: 'confirm', killconfirm: 'confirm', step: 'step', footstep: 'step', land: 'land', landing: 'land'
   };
 
   function weaponReport(id) {
@@ -1078,6 +1083,8 @@
   }
 
   function bufferFor(kind, weapon) {
+    var recorded = recordedBank[kind === 'reload' ? 'reload:' + (weapon || 'rifle') : kind === 'step' ? 'step:' + weapon : kind];
+    if (kind !== 'shot' && recorded && recorded.length) return recorded[(Math.random() * recorded.length) | 0];
     if (kind === 'shot' && recordedBuffers[weapon]) {
       var samples = recordedBuffers[weapon];
       return samples[(Math.random() * samples.length) | 0];
@@ -1196,7 +1203,84 @@
     }
     sampleState = 'loading';
     samplePending = WEAPON_IDS.length;
-    for (var n = 0; n < WEAPON_IDS.length; n++) decodeWeapon(WEAPON_IDS[n], asset.entries[WEAPON_IDS[n]]);
+    var sfx = window.BCSfxBank && window.BCSfxBank.version === 1 && window.BCSfxBank.licence === 'CC0-1.0'
+      ? window.BCSfxBank.entries : null;
+    for (var n = 0; n < WEAPON_IDS.length; n++) {
+      var id = WEAPON_IDS[n], fresh = sfx && sfx['shot:' + id] && sfx['shot:' + id][0];
+      decodeWeapon(id, fresh || asset.entries[id]);
+    }
+    if (sfx) decodeBank(sfx);
+  }
+
+  /* Recorded effects bank (assets/audio/sfx-bank.js): real CC0 recordings for
+     impacts, body hits, handling, UI ticks, footsteps and landings. Each
+     weapon's reload is assembled from real magazine/rack/pump/bolt clips
+     placed at that weapon's reload stages, so it lines up with the animation. */
+  var recordedBank = Object.create(null);
+  var RELOAD_CLIPS = [
+    [/out/, 'magOut'], [/gate|feed|shell|in\b|insert/, 'magIn'], [/pump/, 'pump'], [/bolt/, 'bolt'],
+    [/cylinder|eject|ejector/, 'cylinder'], [/slide/, 'slide'], [/charg|rack|release|handle/, 'rack']
+  ];
+
+  function decodeClip(entry, done) {
+    var settled = false;
+    function finish(buf) { if (!settled) { settled = true; done(buf && buf.duration > 0.01 && buf.duration < 2 ? buf : null); } }
+    try {
+      if (!entry || typeof entry.base64 !== 'string' || entry.base64.length > 40000) { finish(null); return; }
+      var binary = window.atob(entry.base64), bytes = new Uint8Array(binary.length);
+      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      var pending = ctx.decodeAudioData(bytes.buffer, finish, function () { finish(null); });
+      if (pending && typeof pending.then === 'function') pending.then(finish, function () { finish(null); });
+    } catch (e) { finish(null); }
+  }
+
+  function decodeBank(entries) {
+    var keys = Object.keys(entries).filter(function (k) { return k.indexOf('shot:') !== 0; });
+    var waiting = 0;
+    keys.forEach(function (key) {
+      var list = Array.isArray(entries[key]) ? entries[key] : [];
+      list.forEach(function (entry) {
+        waiting++;
+        decodeClip(entry, function (buf) {
+          if (buf) (recordedBank[key] = recordedBank[key] || []).push(buf);
+          if (--waiting === 0) assembleReloads();
+        });
+      });
+    });
+  }
+
+  function mixInto(out, clip, at, gain) {
+    var d = out.getChannelData(0), c = clip.getChannelData(0);
+    var start = Math.max(0, Math.floor(at * out.sampleRate)), ratio = clip.sampleRate / out.sampleRate;
+    for (var i = 0; start + i < d.length; i++) {
+      var j = Math.floor(i * ratio);
+      if (j >= c.length) break;
+      d[start + i] += c[j] * gain;
+    }
+  }
+
+  function assembleReloads() {
+    var handling = typeof COMBAT_HANDLING !== 'undefined' ? COMBAT_HANDLING : null;
+    for (var n = 0; n < WEAPON_IDS.length; n++) {
+      var id = WEAPON_IDS[n], w = typeof WEAPON_BY_ID !== 'undefined' ? WEAPON_BY_ID[id] : null;
+      var stages = handling && handling[id] && handling[id].reloadStages;
+      if (!w || !Array.isArray(stages) || !stages.length) continue;
+      var seconds = Math.min(4, Math.max(0.5, w.reload));
+      var out = ctx.createBuffer(1, Math.ceil(seconds * ctx.sampleRate), ctx.sampleRate), placed = 0;
+      for (var s2 = 0; s2 < stages.length; s2++) {
+        var name = String(stages[s2][1] || '').toLowerCase(), clipKey = null;
+        for (var k = 0; k < RELOAD_CLIPS.length && !clipKey; k++) if (RELOAD_CLIPS[k][0].test(name)) clipKey = RELOAD_CLIPS[k][1];
+        if (id === 'revolver' && clipKey === 'magOut') clipKey = 'cylinder';
+        if (id === 'pistol' && clipKey === 'rack') clipKey = 'slide';
+        var clips = clipKey && recordedBank[clipKey];
+        if (!clips || !clips.length) continue;
+        // Mechanism stages are cued slightly before the stage mark so the
+        // transient lands on the visible motion.
+        mixInto(out, clips[0], Math.max(0, stages[s2][0] * seconds - 0.04), 0.9);
+        placed++;
+      }
+      if (placed) recordedBank['reload:' + id] = [out];
+    }
   }
 
   /* ------------------------------------------------------------- playback */
@@ -1247,6 +1331,7 @@
       var weaponValue = info.weapon && typeof info.weapon === 'object' ? info.weapon.id : info.weapon;
       var weapon = SHOT_IDS[lower] === 1 ? lower : String(weaponValue || 'rifle').toLowerCase();
       if (SHOT_IDS[weapon] !== 1) weapon = 'rifle';
+      if (kind === 'step') weapon = info.surface === 'hard' ? 'hard' : 'soft';
       var spec = kind === 'shot' ? (SHOT_SPEC[weapon] || SHOT_SPEC.rifle) : (KIND_SPEC[kind] || KIND_SPEC.ui);
       var buf = bufferFor(kind, weapon);
       if (!buf) return false;
@@ -1492,6 +1577,52 @@
   try { BCR.api.audio = api; } catch (e) { /* ignore */ }
 
   BCR.on('sfx', onSfx);
+
+  /* Footsteps and landings for the local player, from real recordings. Steps
+     follow distance travelled (so sprinting steps faster), switch between
+     soft (grass, dirt, sand, snow, leaves) and hard surfaces, and a fall
+     faster than 7 m/s lands with a thud. */
+  var stepDistance = 0, stepWasGround = true, stepLastVy = 0, stepLastLand = 0;
+  var SOFT_BLOCKS = null;
+  function stepSurface() {
+    try {
+      if (!SOFT_BLOCKS) SOFT_BLOCKS = [GRASS, DIRT, SAND, SNOW, LEAVES, GRAVEL, MUD];
+      var b = getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.2), Math.floor(player.pos.z));
+      return SOFT_BLOCKS.indexOf(b) >= 0 ? 'soft' : 'hard';
+    } catch (e) { return 'soft'; }
+  }
+  BCR.on('postPlayer', function (dt) {
+    try {
+      if (typeof player === 'undefined' || typeof alive === 'undefined' || !alive || !isFinite(dt) || dt <= 0) return;
+      var riding = BCR.api && BCR.api.riding && BCR.api.riding.active;
+      if (riding || player.fly || player.swimming) { stepWasGround = false; stepDistance = 0; return; }
+      var t = now();
+      if (player.onGround && !stepWasGround && stepLastVy < -7 && t - stepLastLand > 250) {
+        stepLastLand = t;
+        play({ kind: 'land', volume: Math.min(0.7, 0.25 + (-stepLastVy - 7) * 0.03) });
+        stepDistance = 0;
+      }
+      stepWasGround = player.onGround;
+      stepLastVy = player.vel.y;
+      if (!player.onGround || player.sliding) return;
+      var speed = Math.hypot(player.vel.x, player.vel.z);
+      if (speed < 1.2) { stepDistance = Math.min(stepDistance, 1.2); return; }
+      stepDistance += speed * dt;
+      var stride = player.crouching ? 1.6 : speed > 7 ? 2.6 : 2.15;
+      if (stepDistance >= stride) {
+        stepDistance -= stride;
+        play({ kind: 'step', surface: stepSurface(), volume: player.crouching ? 0.08 : speed > 7 ? 0.24 : 0.17 });
+      }
+    } catch (e) { /* footsteps are cosmetic */ }
+  }, 60);
+  // Kill confirmation for the local player's eliminations.
+  BCR.on('killfeed', function (killer, victim, info) {
+    try {
+      var self = typeof net !== 'undefined' && net ? net.id : '';
+      var mine = info && (info.killerId === self || info.byId === self) && info.victimId !== self;
+      if (mine && info.confirmed !== false) play({ kind: 'confirm', volume: 0.5 });
+    } catch (e) { /* optional */ }
+  }, 40);
   BCR.on('respawn', function () {
     if (now() - lastRespawnSfx < 50) return;
     lastRespawnSfx = now();

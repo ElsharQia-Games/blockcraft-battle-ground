@@ -1,4 +1,64 @@
-# Weapon audio: licences and provenance
+# Game audio: licences and provenance
+
+**Current sound set (2026-11-05).** Gunshots, reloads, weapon handling, body hits,
+bullet impacts, hit and kill confirmation ticks, footsteps and landings now come
+from the real recordings in **Recorded effects bank** below
+(`assets/audio/sfx-bank.js`). Each weapon's reload is assembled in the browser
+from the recorded magazine, rack, slide, pump, bolt and cylinder clips, placed
+at that weapon's reload stages. `weapon-samples.js` (described further down)
+remains as a fallback for shots, and procedural synthesis remains for effects
+without a recording (jetpack, dragons, splash, death and respawn stingers).
+
+## Recorded effects bank
+
+Downloaded 2026-11-05. Every file is CC0 1.0, verified on the file's own page or
+in its pack's licence file. Each was converted to mono 22.05 kHz MP3 (32–56 kbit/s):
+leading silence trimmed, cut to the listed length with a 60 ms fade-out, and
+loudness-normalised (EBU R128, -16 LUFS integrated, -1.5 dBTP). The LMG report
+is the AR-15 recording pitched down 14% and low-passed at 6.5 kHz for a heavier
+sound. The hashes are of the downloaded source files. The embedded bytes have
+their own `sha256` in the bank.
+
+Rejected during sourcing: recordings whose source material appeared to belong
+to someone else (clips ripped from videos or games), unverified "authentic"
+recordings with no stated recordist, and any CC-BY, CC-BY-SA, OGA-BY or
+non-commercial files.
+
+| Bank key | Recording | Author | Source page | Download | Licence | Source SHA-256 | Embedded |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `shot:pistol` | Walther PPQ 9mm, near distance | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Prepared%20SFX/Walther%20PPQ/X_39P.wav> | CC0-1.0 | `797a2fba98b2be0df97b234c4f63457f1dac5d1b3b999c2862b0a4465401b55d` | 0.35 s, 3151 B |
+| `shot:rifle` | AK-47 7.62x39 single shot, near | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Prepared%20SFX/AK-47/C_28P.wav> | CC0-1.0 | `efee164b09ed7665eb87215a13c8fe716ead4cc5ec6ba1482016b93416e8a2e2` | 0.45 s, 3883 B |
+| `shot:shotgun` | Winchester Model 12, 12 gauge, near | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Prepared%20SFX/Model%2012/K_22P.wav> | CC0-1.0 | `98c5f9f47f7761421a26ef54dc3ad2cdde08323e8300ab1896fd02c007f9bfd3` | 0.7 s, 5528 B |
+| `shot:smg` | PPSh 7.62x25, near | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Prepared%20SFX/PPSh/P_30P.wav> | CC0-1.0 | `3c47507f5e85e0ecdf28192853986045e5480efe6bc53c6bd8d3344bb2cfb63a` | 0.4 s, 3517 B |
+| `shot:sniper` | Mosin Nagant 7.62x54R, near | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Prepared%20SFX/Mosin%20Nagant/M_21P.wav> | CC0-1.0 | `6018bdaea677df04511314871f76b0bb07e223381797ea02d15f5e2b0d2b4ed8` | 0.35 s, 3151 B |
+| `shot:revolver` | snub_nose_357_magnum_noisegate-17.80.wav (recorded by the author) | DarkShroom | <https://freesound.org/people/DarkShroom/sounds/645316/> | <https://cdn.freesound.org/previews/645/645316_3139426-hq.mp3> | CC0-1.0 | `59dd43cf8df01da3f2fd23178f75fb7b55db3ae4a2313c49b7f37522942b6673` | 0.33 s, 2968 B |
+| `shot:lmg` | AR-15 near (pitched down 14% for the LMG) | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Prepared%20SFX/AR-15/D_32P.wav> | CC0-1.0 | `92572b4c9bea7eed7985a19410f2e1c90b2554962a73e2f0be97b2de98e14226` | 0.49 s, 4066 B |
+| `magOut` | AR-15 detach loaded magazine | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks/AR-15/D_5.wav> | CC0-1.0 | `a09fd97938bdf1ee0e9b3e100820156d494ea4bda8a4607821074cd42c4f4acc` | 0.9 s, 5059 B |
+| `magIn` | AR-15 insert loaded magazine | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks/AR-15/D_4.wav> | CC0-1.0 | `85454c3562ccfcdf5972f5d6e784daab11f7db65d9abda14f70048c495ee3be0` | 0.9 s, 5059 B |
+| `rack` | AR-15 full rack | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks/AR-15/D_14.wav> | CC0-1.0 | `fa0e671120757be05d4a57bdbd473ea7393b0a624098775f338adb62c398ff19` | 0.5 s, 3099 B |
+| `slide` | 1911 full slide rack | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks/1911/A_24.wav> | CC0-1.0 | `3c38a85f55089bafb4b1e86f0177735860ef1afae3df85f8a5e8b6f7f172f8cd` | 0.32 s, 2185 B |
+| `bolt` | Tikka T3 full bolt cycle | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks/Tikka/W_16.wav> | CC0-1.0 | `9b8fb4f5c4f1acefc2c466f255928f0a4cfd81f047364f7a3971c8f0c67ff664` | 1.2 s, 6495 B |
+| `pump` | Benelli Nova full pump cycle | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks/Nova/O_6.wav> | CC0-1.0 | `e164c884433c99f2cddcdb3cf77aeb12280bcd89747cc491e9b73c654ee69426` | 0.7 s, 4014 B |
+| `cylinder` | S&W 642 flip cylinder closed | Ben Jaszczak and the Firearm Sound Library team | <https://github.com/buddingmonkey/FreeFirearmsSFXLibrary> | <https://raw.githubusercontent.com/buddingmonkey/FreeFirearmsSFXLibrary/beb2f4041f3d6740fa0aeaf0e71159bd65a78c1b/Master%20Tracks/Smith%20%26%20Wesson%20642/V_10.wav> | CC0-1.0 | `022e620d8ad3aa4086034be215b2ab4e4e064504b4f98a6d0e81fb5188d6ec25` | 0.6 s, 3491 B |
+| `hit` | Impact pack, meat01 | qubodup | <https://opengameart.org/content/impact> | <https://opengameart.org/sites/default/files/qubodupImpact.7z> | CC0-1.0 | `366c9a37e90a19980ef8f2dec02bbf964ed02d0b683ee6f5472b354a50e7ee0e` | 0.35 s, 2316 B |
+| `hit` | Impact pack, meat02 | qubodup | <https://opengameart.org/content/impact> | <https://opengameart.org/sites/default/files/qubodupImpact.7z> | CC0-1.0 | `c97ec34ab509cff9c43d8a5a43306e500ba235d9cc3d6be021cbc7b25218b3fe` | 0.35 s, 2316 B |
+| `impact` | Impact pack, stone | qubodup | <https://opengameart.org/content/impact> | <https://opengameart.org/sites/default/files/qubodupImpact.7z> | CC0-1.0 | `c882a6cff88a297099928a0c46e7146b311342d14319a17eca9c19719d5b237d` | 0.35 s, 2316 B |
+| `impact` | Single Rock hit dirt 2 | worthahep88 | <https://freesound.org/people/worthahep88/sounds/319229/> | <https://cdn.freesound.org/previews/319/319229_3443504-hq.mp3> | CC0-1.0 | `c1c978d57b9fcb1c3b09a055dfea2616395364daefa83e4681ed08527a5915cf` | 0.45 s, 2838 B |
+| `ui` | Interface Sounds 1.0, click_002 | Kenney | <https://opengameart.org/content/interface-sounds> | <https://opengameart.org/sites/default/files/kenney_interfaceSounds.zip> | CC0-1.0 | `adcd1f4adc35f1b41bc1b5bbefeff7aa44f2f3f0d96d3199b544140c7c1e761c` | 0.01 s, 618 B |
+| `confirm` | Interface Sounds 1.0, confirmation_001 | Kenney | <https://opengameart.org/content/interface-sounds> | <https://opengameart.org/sites/default/files/kenney_interfaceSounds.zip> | CC0-1.0 | `063564703b6094d70718a3e787a55cc9141611e4ecd6b6637f8828f79b4a8c3a` | 0.29 s, 2054 B |
+| `step:soft` | Fantozzi's Footsteps, SandL1 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `93a2630579a82507e3c6ceab9b012f71a50cf8922f4beadb14057dcc0636b099` | 0.3 s, 1689 B |
+| `step:soft` | Fantozzi's Footsteps, SandR1 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `3514d12f3369297233e915814364ed02902003d4103b010371c2ac15c2aa48fe` | 0.3 s, 1689 B |
+| `step:soft` | Fantozzi's Footsteps, SandL2 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `9bb57478cc96e1410cae27d926aa8d77d5f2d368d9776822f63cf0b37c6d2faf` | 0.3 s, 1689 B |
+| `step:soft` | Fantozzi's Footsteps, SandR2 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `0356f659313887f01a9f21fd5bedf57a77073d0d74d57b5621279ee453a80f3c` | 0.3 s, 1689 B |
+| `step:hard` | Fantozzi's Footsteps, StoneL1 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `7cfa4a2f500ae2bd19a961022296611d837c34ca2e556fe68deb692388f49971` | 0.3 s, 1689 B |
+| `step:hard` | Fantozzi's Footsteps, StoneR1 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `7073bddd2e3ba432e15a83844180c0ebc52835c2c6bab0fa902ee5952499c729` | 0.3 s, 1689 B |
+| `step:hard` | Fantozzi's Footsteps, StoneL2 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `dcbd6be44af4b3206daa36c5398035ca527bb057c51ce00482b9ca6356be2468` | 0.3 s, 1689 B |
+| `step:hard` | Fantozzi's Footsteps, StoneR2 | Fantozzi (posted by qubodup) | <https://opengameart.org/content/fantozzis-footsteps-grasssand-stone> | <https://opengameart.org/sites/default/files/Fantozzi-footsteps.7z> | CC0-1.0 | `d66330b4a32e93b0dfdcb8c53667654de8702a0fa48b2d06c48d94dc66b3e1cc` | 0.3 s, 1689 B |
+| `land` | Jump Landing 1 | macro | <https://opengameart.org/content/jump-landing> | <https://opengameart.org/sites/default/files/Jump%201.wav> | CC0-1.0 | `19a56499a8b46bdea815eb9aa7554e7aa5f4d3cd1f7f49f403c327d77fecc6c4` | 0.45 s, 2316 B |
+| `land` | Jump Landing 2 | macro | <https://opengameart.org/content/jump-landing> | <https://opengameart.org/sites/default/files/Jump%202.wav> | CC0-1.0 | `e7de86bd7f37918832849c1d4e8cff5e1db447e9e89949b0d9031cae67d6272f` | 0.45 s, 2316 B |
+
+## Shot fallback: weapon-samples.js
+
 
 Recorded excerpts were downloaded and prepared on **2026-11-04**. The seven
 in-game weapon ids have different cached sound treatments; these are excerpts
