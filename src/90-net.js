@@ -9,7 +9,7 @@ const MQTT_RELAYS = [
   'wss://broker.emqx.io:8084/mqtt',
   'wss://broker.hivemq.com:8884/mqtt'
 ];
-const NET_SEND_MS = 90;
+const NET_SEND_MS = 50;
 const NET_MAX_QUEUE = 48;
 const NET_MAX_EDITS = 6000;
 const NET_MAX_PEERS = 32;
@@ -1506,11 +1506,16 @@ function handleNet(msg, from, nested) {
       removeRemote(msg.id);
       netEmitStatus();
       break;
-    case 'state':
+    case 'state': {
       netRememberState(msg);
       if (msg.id === net.id) { netApplyOwnState(msg); break; }
-      addRemote(msg);
+      // A host relay is older than the peer's own direct pose. Take its
+      // authoritative fields but do not pull the avatar back in time.
+      const direct = net.mode === 'mqtt' ? net.players.get(msg.id) : null;
+      if (direct && rxNow - (direct.directAt || -Infinity) < 600) netApplyRemotePose(direct, msg);
+      else addRemote(msg);
       break;
+    }
     case 'states':
       for (const p of (msg.players || [])) if (p && p.t === 'state') handleNet(p, from, true);
       break;
@@ -1932,8 +1937,8 @@ function netMqttAction(type) {
 
 function netMqttBudget(id, bytes, control, authority) {
   const now = performance.now(), lane = control ? 'c' : authority ? 'a' : 'r';
-  const key = id + ':' + lane, rate = control ? 8 : authority ? 1000 : 50;
-  const burst = control ? 12 : authority ? 256 : 60;
+  const key = id + ':' + lane, rate = control ? 8 : authority ? 1000 : 100;
+  const burst = control ? 12 : authority ? 256 : 140;
   const byteRate = authority ? 1200 * 1024 : 180000;
   let bucket = mqtt.limiters.get(key);
   if (!bucket) {
@@ -2089,7 +2094,7 @@ function netMqttAuthority(packet, to) {
 
 function netMqttQueueState(packet) {
   mqtt.pendingStates.set(packet.id, packet);
-  if (!mqtt.stateTimer) mqtt.stateTimer = setTimeout(netMqttFlushStates, 50);
+  if (!mqtt.stateTimer) mqtt.stateTimer = setTimeout(netMqttFlushStates, 15);
 }
 
 function netMqttFlushStates() {
@@ -2989,7 +2994,25 @@ function mqttHandlePublish(first, body) {
   if (net.authorityReady && net.hostId === net.id) {
     mqtt.pendingJoins.delete(from);
     netMqttProcess(msg, from, true);
+  } else if (net.authorityReady && (msg.t === 'state' || msg.t === 'reload')) {
+    netApplyDirectPose(msg, from, now);
   }
+}
+
+// Visual-only movement straight from the peer, one broker hop instead of two
+// (peer -> host -> everyone). HP, teams, kills and deaths still come only from
+// the host: in MQTT mode netApplyRemotePose reads those from authPlayers.
+function netApplyDirectPose(msg, from, now) {
+  const r = net.players.get(from);
+  if (!r || msg.generation !== net.generation || msg.epoch !== net.epoch || !netValidPosition(msg)) return;
+  if (r.hp <= 0 || r.deadUntil > now || netRiderMounted(from)) return;
+  if (Number.isSafeInteger(msg.life) && msg.life < (r.life || 0)) return;
+  if (Number.isSafeInteger(msg.seq)) {
+    if (msg.seq <= (r.directSeq || 0)) return;
+    r.directSeq = msg.seq;
+  }
+  r.directAt = now;
+  addRemote({ ...msg, id: from, team: undefined, hp: undefined, kills: undefined, deaths: undefined });
 }
 
 function mqttStartTimers() {
