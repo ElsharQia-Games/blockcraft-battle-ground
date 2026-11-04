@@ -7,20 +7,91 @@
    ============================================================ */
 
 const WEAPONS = [
-  { id: 'pistol',   name: 'Pistol',   damage: 26, rpm: 330, mag: 12, spread: 0.008, recoil: 0.026, range: 90,  pellets: 1, auto: false, reload: 1.15, sound: 0.55, scopeFov: 44, adsSpread: 0.42, kickBack: 0.065, recover: 20, report: [0.17, 1800, 158, 3.0] },
-  { id: 'rifle',    name: 'Rifle',    damage: 17, rpm: 640, mag: 30, spread: 0.014, recoil: 0.013, range: 130, pellets: 1, auto: true,  reload: 1.85, sound: 0.42, scopeFov: 38, adsSpread: 0.36, kickBack: 0.048, recover: 25, report: [0.12, 2400, 176, 3.6] },
-  { id: 'shotgun',  name: 'Shotgun',  damage: 10, rpm: 78,  mag: 6,  spread: 0.075, recoil: 0.070, range: 36,  pellets: 8, auto: false, reload: 2.35, sound: 0.80, scopeFov: 48, adsSpread: 0.72, kickBack: 0.120, recover: 13, report: [0.30, 850, 105, 2.0] },
-  { id: 'smg',      name: 'SMG',      damage: 12, rpm: 870, mag: 32, spread: 0.023, recoil: 0.010, range: 68,  pellets: 1, auto: true,  reload: 1.45, sound: 0.34, scopeFov: 42, adsSpread: 0.48, kickBack: 0.038, recover: 30, report: [0.09, 3200, 215, 4.2] },
+  { id: 'pistol',   name: 'Pistol',   damage: 26, rpm: 330, mag: 12, spread: 0.008, recoil: 0.026, range: 90,  pellets: 1, auto: false, reload: 1.15, sound: 0.55, scopeFov: 64, adsSpread: 0.42, kickBack: 0.065, recover: 20, report: [0.17, 1800, 158, 3.0] },
+  { id: 'rifle',    name: 'Rifle',    damage: 17, rpm: 640, mag: 30, spread: 0.014, recoil: 0.013, range: 130, pellets: 1, auto: true,  reload: 1.85, sound: 0.42, scopeFov: 58, adsSpread: 0.36, kickBack: 0.048, recover: 25, report: [0.12, 2400, 176, 3.6] },
+  { id: 'shotgun',  name: 'Shotgun',  damage: 10, rpm: 78,  mag: 6,  spread: 0.075, recoil: 0.070, range: 36,  pellets: 8, auto: false, reload: 2.35, sound: 0.80, scopeFov: 70, adsSpread: 0.72, kickBack: 0.120, recover: 13, report: [0.30, 850, 105, 2.0] },
+  { id: 'smg',      name: 'SMG',      damage: 12, rpm: 870, mag: 32, spread: 0.023, recoil: 0.010, range: 68,  pellets: 1, auto: true,  reload: 1.45, sound: 0.34, scopeFov: 66, adsSpread: 0.48, kickBack: 0.038, recover: 30, report: [0.09, 3200, 215, 4.2] },
   { id: 'sniper',   name: 'Sniper',   damage: 76, rpm: 44,  mag: 5,  spread: 0.032, recoil: 0.095, range: 180, pellets: 1, auto: false, reload: 2.80, sound: 0.95, scopeFov: 18, adsSpread: 0.025, kickBack: 0.135, recover: 10, report: [0.38, 1450, 84, 2.3] },
-  { id: 'revolver', name: 'Revolver', damage: 46, rpm: 185, mag: 6,  spread: 0.006, recoil: 0.055, range: 105, pellets: 1, auto: false, reload: 2.40, sound: 0.73, scopeFov: 40, adsSpread: 0.34, kickBack: 0.100, recover: 15, report: [0.25, 2050, 126, 2.7] },
-  { id: 'lmg',      name: 'LMG',      damage: 19, rpm: 560, mag: 60, spread: 0.022, recoil: 0.021, range: 145, pellets: 1, auto: true,  reload: 3.60, sound: 0.62, scopeFov: 40, adsSpread: 0.50, kickBack: 0.075, recover: 18, report: [0.19, 1250, 118, 3.2] }
+  { id: 'revolver', name: 'Revolver', damage: 46, rpm: 185, mag: 6,  spread: 0.006, recoil: 0.055, range: 105, pellets: 1, auto: false, reload: 2.40, sound: 0.73, scopeFov: 60, adsSpread: 0.34, kickBack: 0.100, recover: 15, report: [0.25, 2050, 126, 2.7] },
+  { id: 'lmg',      name: 'LMG',      damage: 19, rpm: 560, mag: 60, spread: 0.022, recoil: 0.021, range: 145, pellets: 1, auto: true,  reload: 3.60, sound: 0.62, scopeFov: 62, adsSpread: 0.50, kickBack: 0.075, recover: 18, report: [0.19, 1250, 118, 3.2] }
 ];
 const WEAPON_BY_ID = Object.create(null);
 const COMBAT_OPTIC_TYPES = {
   pistol: 'reflex', rifle: 'holo', shotgun: 'spread', smg: 'chevron',
   sniper: 'mildot', revolver: 'precision', lmg: 'support'
 };
-for (const w of WEAPONS) { w.optic = COMBAT_OPTIC_TYPES[w.id]; WEAPON_BY_ID[w.id] = w; }
+/* Keep the old optic tags for integrations; view, not optic, selects geometry.
+   ADS times are time to 99.9% settled. These profiles NEVER change the legal
+   damage/rpm/mag/range/pellets/reload values used by the room authority. */
+const COMBAT_HANDLING = {
+  pistol: {
+    view: 'pistol-irons', sight: 'Open irons', role: 'Precision sidearm', adsInMs: 160, adsOutMs: 110, adsZ: -0.55,
+    openingShots: 0, openingScale: 1, burstGapMs: 320, bloomPerShot: 0.22, bloomMax: 0.95, bloomRecovery: 0.85,
+    moveSpread: 0.65, adsMoveSpread: 0.35, airSpread: 1.2, recoilScale: 0.88, recoilCap: 0.06,
+    recoilHoldMs: 65, recoilReturn: 13, lateral: 0.18, yawPattern: [-0.6, 0.35, -0.2, 0.45],
+    viewRise: 1.8, viewRoll: -0.028, cycle: 0.14, mechanism: 'slide', cueAt: -1,
+    reloadStages: [[0.14, 'magazine out'], [0.43, 'magazine in'], [0.72, 'slide rack']]
+  },
+  rifle: {
+    view: 'rifle-reflex', sight: 'Reflex window', role: 'Controlled bursts', adsInMs: 230, adsOutMs: 150, adsZ: -0.61,
+    openingShots: 3, openingScale: 0.62, burstGapMs: 260, bloomPerShot: 0.17, bloomMax: 1.35, bloomRecovery: 1.3,
+    moveSpread: 1, adsMoveSpread: 0.65, airSpread: 1.6, recoilScale: 0.82, recoilCap: 0.075,
+    recoilHoldMs: 110, recoilReturn: 10, lateral: 0.28, yawPattern: [0.2, 0.45, -0.15, 0.65, -0.25, 0.4],
+    viewRise: 1.4, viewRoll: 0.012, cycle: 0.085, mechanism: 'gas', cueAt: -1,
+    reloadStages: [[0.15, 'magazine out'], [0.44, 'magazine in'], [0.74, 'charging handle']]
+  },
+  shotgun: {
+    view: 'shotgun-rib', sight: 'Bead / barrel rib', role: 'Close-range breach', adsInMs: 200, adsOutMs: 135, adsZ: -0.58,
+    openingShots: 0, openingScale: 1, burstGapMs: 850, bloomPerShot: 0.18, bloomMax: 0.4, bloomRecovery: 0.9,
+    moveSpread: 0.25, adsMoveSpread: 0.15, airSpread: 0.65, recoilScale: 0.94, recoilCap: 0.10,
+    recoilHoldMs: 135, recoilReturn: 7.5, lateral: 0.12, yawPattern: [0.65, -0.35],
+    viewRise: 1.35, viewRoll: 0.038, cycle: 0.60, mechanism: 'pump', cueAt: 0.18,
+    reloadStages: [[0.12, 'loading gate'], [0.17, 'shell feed'], [0.82, 'pump chamber']]
+  },
+  smg: {
+    view: 'smg-hood', sight: 'CQB hood', role: 'Mobile close quarters', adsInMs: 130, adsOutMs: 95, adsZ: -0.54,
+    openingShots: 2, openingScale: 0.8, burstGapMs: 190, bloomPerShot: 0.17, bloomMax: 1.45, bloomRecovery: 1.6,
+    moveSpread: 0.4, adsMoveSpread: 0.2, airSpread: 0.9, recoilScale: 0.70, recoilCap: 0.055,
+    recoilHoldMs: 80, recoilReturn: 16, lateral: 0.45, yawPattern: [-0.65, 0.7, -0.3, 0.6],
+    viewRise: 1.1, viewRoll: -0.016, cycle: 0.060, mechanism: 'blowback', cueAt: -1,
+    reloadStages: [[0.12, 'magazine out'], [0.36, 'magazine in'], [0.65, 'bolt release']]
+  },
+  sniper: {
+    view: 'sniper-tube', sight: 'Magnified tube', role: 'Stationary long range', adsInMs: 360, adsOutMs: 200, adsZ: -0.64,
+    openingShots: 0, openingScale: 1, burstGapMs: 1500, bloomPerShot: 0.9, bloomMax: 1.2, bloomRecovery: 1.8,
+    moveSpread: 1.2, adsMoveSpread: 5.2, airSpread: 2.5, recoilScale: 0.96, recoilCap: 0.10,
+    recoilHoldMs: 190, recoilReturn: 5.8, lateral: 0.08, yawPattern: [0.4, -0.3],
+    viewRise: 1.0, viewRoll: -0.025, cycle: 1.08, mechanism: 'bolt', cueAt: 0.24,
+    reloadStages: [[0.10, 'bolt unlock'], [0.21, 'bolt back'], [0.34, 'magazine out'], [0.52, 'magazine in'], [0.74, 'bolt close']]
+  },
+  revolver: {
+    view: 'revolver-notch', sight: 'Notch / blade', role: 'Deliberate heavy shots', adsInMs: 220, adsOutMs: 145, adsZ: -0.59,
+    openingShots: 0, openingScale: 1, burstGapMs: 480, bloomPerShot: 0.38, bloomMax: 1.05, bloomRecovery: 0.7,
+    moveSpread: 0.8, adsMoveSpread: 0.45, airSpread: 1.4, recoilScale: 0.98, recoilCap: 0.085,
+    recoilHoldMs: 110, recoilReturn: 8, lateral: 0.2, yawPattern: [-0.65, -0.25, 0.35],
+    viewRise: 2.0, viewRoll: -0.052, cycle: 0.25, mechanism: 'cylinder', cueAt: 0.035,
+    reloadStages: [[0.08, 'cylinder open'], [0.25, 'case eject'], [0.50, 'speedloader'], [0.79, 'cylinder close']]
+  },
+  lmg: {
+    view: 'lmg-aperture', sight: 'Support aperture', role: 'Braced sustained fire', adsInMs: 310, adsOutMs: 185, adsZ: -0.60,
+    openingShots: 2, openingScale: 0.86, burstGapMs: 350, bloomPerShot: 0.21, bloomMax: 1.9, bloomRecovery: 0.95,
+    moveSpread: 1.75, adsMoveSpread: 1.15, airSpread: 2.0, recoilScale: 0.92, recoilCap: 0.09,
+    recoilHoldMs: 145, recoilReturn: 6.8, lateral: 0.35, yawPattern: [0.5, 0.7, -0.35, 0.8, -0.25],
+    viewRise: 1.6, viewRoll: 0.024, cycle: 0.10, mechanism: 'belt', cueAt: -1,
+    reloadStages: [[0.10, 'feed cover open'], [0.26, 'box out'], [0.47, 'box in'], [0.57, 'belt seat'], [0.79, 'cover latch'], [0.91, 'charging handle']]
+  }
+};
+for (const w of WEAPONS) {
+  w.optic = COMBAT_OPTIC_TYPES[w.id];
+  w.handling = COMBAT_HANDLING[w.id];
+  w.view = w.handling.view;
+  w.role = w.handling.role;
+  Object.freeze(w.handling.yawPattern);
+  for (const stage of w.handling.reloadStages) Object.freeze(stage);
+  Object.freeze(w.handling.reloadStages);
+  Object.freeze(w.handling);
+  WEAPON_BY_ID[w.id] = w;
+}
 
 const gun = {
   index: 0,
@@ -36,7 +107,13 @@ const gun = {
   firePose: 0,
   viewAim: 0,
   equip: 0,
-  sway: 0
+  sway: 0,
+  bloom: WEAPONS.map(() => 0),
+  shots: WEAPONS.map(() => 0),
+  lastSpread: 0,
+  recoilSide: 0,
+  shotAge: -1,
+  mechanismCued: false
 };
 
 const MAX_HEALTH = 100;
@@ -48,6 +125,23 @@ let kills = 0;
 let deaths = 0;
 let combatMode = true;
 let muted = false;
+
+/* Burst memory and ONLY the recoil we add. Recovery subtracts that contribution,
+   never the player's independent mouse motion. Climb stays bounded. */
+let combatRecoilAccum = 0;
+let combatRecoilStamp = -9999;
+let combatBurstShots = 0;
+let combatBurstStamp = -9999;
+const COMBAT_RECOIL_CAP = 0.10;
+const COMBAT_ASSIST_MAX_TURN = Math.PI / 720; // 0.25 degrees per shot
+const COMBAT_PEER_STALE_MS = 2000;
+const COMBAT_SOLID_RAY_EPS = 0.00001;
+const COMBAT_MAX_WEAPON_RANGE = WEAPONS.reduce((max, w) => Math.max(max, w.range), 0);
+/* undefined = not resolved yet, null = every weapon allowed. */
+let combatAllowedIds;
+let combatLastHitInfo = null;
+let combatPendingHitPacket = null;
+let combatPendingDeathPacket = null;
 
 const healthFillEl = document.getElementById('healthFill');
 const healthNumEl = document.getElementById('healthNum');
@@ -66,21 +160,262 @@ const respawnInEl = document.getElementById('respawnIn');
 const combatScopeOverlayEl = document.getElementById('scopeOverlay');
 const combatScopeWeaponEl = document.getElementById('scopeWeapon');
 const combatScopeZoomEl = document.getElementById('scopeZoom');
+const combatScopeSightEl = document.getElementById('scopeSight');
+const combatScopeRoleEl = document.getElementById('scopeRole');
+const combatScopeFrameEl = document.getElementById('scopeFrame');
 const combatCrosshairEl = document.getElementById('crosshair');
 let combatScopeShown = null;
 let combatScopeLabel = '';
+let combatScopeFrameWidth = -1, combatScopeFrameHeight = -1;
+let combatScopeFrameX = NaN, combatScopeFrameY = NaN;
 
 const currentWeapon = () => WEAPONS[gun.index];
 const safeName = (v) => String(v == null ? '' : v).replace(/[^\w \-'.]/g, '').trim().slice(0, 14) || '???';
+
+/* ---------------- optional cross-module bridges ---------------- */
+function combatApi(name) {
+  try {
+    return (typeof BC !== 'undefined' && BC && BC.api) ? BC.api[name] : null;
+  } catch (e) { return null; }
+}
+
+function combatEmit(name, a, b, c) {
+  try {
+    if (typeof BC !== 'undefined' && BC && typeof BC.emit === 'function') BC.emit(name, a, b, c);
+  } catch (e) { /* feedback must never break combat */ }
+}
+
+function combatWorldBusy() {
+  try {
+    const world = combatApi('world');
+    return !!((world && world.busy) || (typeof BC !== 'undefined' && BC && BC.flags && BC.flags.worldBusy));
+  } catch (e) { return true; }
+}
+
+function combatActionBlocked() {
+  try {
+    const riding = combatApi('riding'), killcam = combatApi('killcam');
+    return combatWorldBusy() || !!(riding && riding.active) || !!(killcam && killcam.active) ||
+      !!(typeof loading !== 'undefined' && loading) || !!(typeof craftOpen !== 'undefined' && craftOpen) ||
+      !!(typeof BC !== 'undefined' && BC && BC.flags && (BC.flags.paused || BC.flags.playerRepairBlocked)) ||
+      !!(typeof document !== 'undefined' && document.hidden);
+  } catch (e) { return true; } // Later classic-script globals may still be in their TDZ.
+}
+
+function combatReleaseGun(notify) {
+  combatClearGeneratedRecoil();
+  gun.trigger = gun.aiming = false;
+  gun.firePose = gun.kick = 0;
+  gun.recoilSide = 0;
+  gun.shotAge = -1;
+  gun.mechanismCued = false;
+  combatRecoilAccum = combatBurstShots = 0;
+  combatRecoilStamp = combatBurstStamp = -9999;
+  if (gun.reloading > 0) cancelReload(notify);
+}
+
+function combatAllowedWeapons() {
+  const modes = combatApi('modes');
+  if (!modes) return null;
+  try {
+    if (typeof modes.allowedWeapons === 'function') {
+      const list = modes.allowedWeapons();
+      return Array.isArray(list) ? list : null;
+    }
+    const def = modes.activeDef;
+    return def && Array.isArray(def.weapons) ? def.weapons : null;
+  } catch (e) { return null; }
+}
+
+function combatResolvedAllowed() {
+  // Consult the mode on every action, but copy only when the small list changes.
+  // This also catches late registration and callers that omit modeChanged.
+  const ids = combatAllowedWeapons();
+  let changed = combatAllowedIds === undefined || (ids === null) !== (combatAllowedIds === null);
+  if (ids && combatAllowedIds) {
+    changed = ids.length !== combatAllowedIds.length;
+    for (let i = 0; !changed && i < ids.length; i++) changed = ids[i] !== combatAllowedIds[i];
+  }
+  if (changed) combatAllowedIds = ids ? ids.slice() : null;
+  return combatAllowedIds;
+}
+
+function combatWeaponAllowed(w) {
+  if (!w) return false;
+  const ids = combatResolvedAllowed();
+  if (ids && ids.indexOf(w.id) < 0) return false;
+  const modes = combatApi('modes');
+  try {
+    return !(modes && typeof modes.canUseWeapon === 'function') || modes.canUseWeapon(w.id) !== false;
+  } catch (e) { return false; }
+}
+
+function combatFirstAllowedIndex() {
+  for (let i = 0; i < WEAPONS.length; i++) if (combatWeaponAllowed(WEAPONS[i])) return i;
+  return -1;
+}
+
+function combatSyncLoadout() {
+  const fx = combatApi('combatFx');
+  if (fx && typeof fx.setLoadout === 'function') {
+    try { fx.setLoadout(combatResolvedAllowed()); } catch (e) { /* overlay is optional */ }
+  }
+}
+
+function combatTeamMode() {
+  const modes = combatApi('modes');
+  try {
+    if (!modes) return false;
+    if (modes.activeDef && typeof modes.activeDef.teams === 'boolean') return modes.activeDef.teams;
+    return modes.active === 'tdm' || modes.active === 'lockdown' || modes.localTeam === 'red' || modes.localTeam === 'blue';
+  } catch (e) { return false; }
+}
+
+function combatTeamForId(id) {
+  if (!id || !combatTeamMode()) return '';
+  const modes = combatApi('modes');
+  try {
+    if (modes && (typeof modes.teamOf === 'function' || typeof modes.teamFor === 'function')) {
+      const exact = typeof modes.teamOf === 'function' ? modes.teamOf(id) : modes.teamFor(id);
+      if (exact === 'red' || exact === 'blue') return exact;
+    }
+    if (typeof net !== 'undefined' && net) {
+      if (id === net.id && modes) return modes.localTeam === 'red' || modes.localTeam === 'blue' ? modes.localTeam : '';
+      const peer = net.players && net.players.get(id);
+      if (peer && (peer.team === 'red' || peer.team === 'blue')) return peer.team;
+    }
+  } catch (e) { return ''; }
+  return '';
+}
+
+function combatIsFriendly(id, name, peer, explicitTeam) {
+  if (!combatTeamMode()) return false;
+  try {
+    const self = typeof net !== 'undefined' && net ? net.id : '';
+    if (id && id === self) return false; // Do not turn environmental/self damage into immunity.
+    const modes = combatApi('modes');
+    const localTeam = modes && (modes.localTeam === 'red' || modes.localTeam === 'blue')
+      ? modes.localTeam : combatTeamForId(self);
+    const resolved = id || combatIdByName(name);
+    const team = explicitTeam === 'red' || explicitTeam === 'blue' ? explicitTeam
+      : peer && (peer.team === 'red' || peer.team === 'blue') ? peer.team : combatTeamForId(resolved);
+    return (localTeam === 'red' || localTeam === 'blue') && team === localTeam;
+  } catch (e) { return false; }
+}
+
+function combatPeerEligible(peer, now) {
+  if (!peer || !Number.isFinite(peer.hp) || peer.hp <= 0 || peer.dead === true || peer.alive === false ||
+      peer.hidden === true || peer.visible === false || peer.stale === true || peer.deathNoted === true) return false;
+  if (peer.deadUntil > now || (peer.group && peer.group.visible === false)) return false;
+  const received = Number.isFinite(peer.lastRx) ? peer.lastRx : peer.recvAt;
+  if (Number.isFinite(received) && (now - received > COMBAT_PEER_STALE_MS || received - now > 1000)) return false;
+  try { if (typeof net !== 'undefined' && net && peer.id === net.id) return false; } catch (e) { /* ignore */ }
+  return !combatIsFriendly(peer.id, peer.name, peer);
+}
+
+function combatBodyHeight(actor) {
+  actor = actor || player;
+  const local = actor === player;
+  const low = !!(actor.crouching || actor.sliding || actor.crouch || actor.slide);
+  let height = Number.isFinite(actor.bodyHeight) ? actor.bodyHeight : actor.height;
+  if (!Number.isFinite(height) && actor.group && actor.group.userData) height = actor.group.userData.bodyHeight;
+  if (!Number.isFinite(height)) {
+    try {
+      if (typeof playerBodyHeight === 'function') {
+        const value = local ? playerBodyHeight() : playerBodyHeight(actor);
+        // A no-argument local-only helper must not shrink a standing enemy just
+        // because this player is crouching (or do the reverse).
+        if (Number.isFinite(value) && (local || (low ? value <= 1.45 : value >= 1.5))) height = value;
+      }
+    } catch (e) { /* Movement may not have registered its height helper yet. */ }
+  }
+  if (!Number.isFinite(height)) height = low ? 1.2 : (typeof PH === 'number' ? PH : 1.8);
+  return Math.max(0.8, Math.min(2.5, height));
+}
+
+function combatSourcePosition() {
+  const out = new THREE.Vector3();
+  try {
+    const model = combatMuzzleModel();
+    if (model && model.userData && model.userData.muzzle) {
+      model.updateWorldMatrix(true, true);
+      model.userData.muzzle.getWorldPosition(out);
+      if (Number.isFinite(out.x) && Number.isFinite(out.y) && Number.isFinite(out.z)) return out;
+    }
+  } catch (e) { /* A source position is still available before models are built. */ }
+  return out.copy(player.pos).addScaledVector(combatWorldUp, combatBodyHeight(player) * 2 / 3);
+}
+
+function combatSpatialAudioAvailable() {
+  const spatialAudio = combatApi('audio');
+  return !!(spatialAudio && spatialAudio.available);
+}
+
+function combatSettingsStore() {
+  const settings = combatApi('settings');
+  if (settings) return settings;
+  try {
+    const fallback = typeof BC !== 'undefined' && BC ? BC.settings : null;
+    return fallback && typeof fallback.get === 'function' && fallback.get('muted') !== undefined ? fallback : null;
+  } catch (e) { return null; }
+}
+
+function combatReadMute() {
+  const settings = combatSettingsStore();
+  try {
+    if (settings) {
+      const value = typeof settings.get === 'function' ? settings.get('muted') : settings.muted;
+      if (typeof value === 'boolean') return value;
+      if (typeof settings.muted === 'boolean') return settings.muted;
+    }
+    const spatialAudio = combatApi('audio');
+    if (spatialAudio && typeof spatialAudio.muted === 'boolean') return spatialAudio.muted;
+  } catch (e) { /* The legacy flag remains a valid fallback. */ }
+  return muted;
+}
+
+function combatSyncMute(value) {
+  muted = typeof value === 'boolean' ? value : combatReadMute();
+  const spatialAudio = combatApi('audio');
+  if (spatialAudio && typeof spatialAudio.setMuted === 'function') {
+    try { if (spatialAudio.muted !== muted) spatialAudio.setMuted(muted); } catch (e) { /* optional */ }
+  }
+}
+
+function combatIdByName(name) {
+  const clean = safeName(name);
+  try {
+    if (typeof net === 'undefined' || !net) return '';
+    if (typeof playerName !== 'undefined' && safeName(playerName) === clean && net.id) return net.id;
+    if (net.players) for (const [id, r] of net.players) if (r && safeName(r.name) === clean) return id;
+  } catch (e) { /* ignore */ }
+  return '';
+}
+
+/* Authoritative tokens, not predicted HP, identify a kill. Legacy rows without
+   a token use a bounded fallback; they never suppress a distinct supplied token. */
+const combatKfDedupe = new Map();
+
+function combatOnLoadoutChanged() {
+  combatResolvedAllowed();
+  const first = combatFirstAllowedIndex();
+  if (!combatWeaponAllowed(currentWeapon())) {
+    combatReleaseGun(false);
+    if (first >= 0) selectWeapon(first, true);
+  }
+  combatSyncLoadout();
+  updateCombatHud();
+}
 
 function combatQuickBuilding() {
   return typeof quickBuild !== 'undefined' && !!quickBuild.active;
 }
 
-// Shared with 50's shoulder/eye camera. Aim input is immediate; only the FOV
-// transition is damped. Reload remains timed normally while looking through it.
+// Shared with 50's shoulder/eye camera. Every ADS view uses the eye camera;
+// scope does NOT imply a circular mask or a hidden gun. Aim input is immediate.
 function isScopeActive() {
-  return !!(combatMode && gun.aiming && alive && !combatQuickBuilding());
+  return !!(combatMode && gun.aiming && alive && !combatQuickBuilding() &&
+    !combatActionBlocked() && combatWeaponAllowed(currentWeapon()));
 }
 
 function combatUpdateScopeHud() {
@@ -95,11 +430,23 @@ function combatUpdateScopeHud() {
     if (combatCrosshairEl) combatCrosshairEl.style.visibility = scoped ? 'hidden' : '';
     combatScopeShown = scoped;
   }
-  const label = w.id + ':' + w.scopeFov + ':' + w.optic;
+  const label = w.id + ':' + w.scopeFov + ':' + w.optic + ':' + w.view;
   if (combatScopeLabel !== label) {
-    if (combatScopeOverlayEl) combatScopeOverlayEl.dataset.optic = w.optic;
+    if (combatScopeOverlayEl) {
+      combatScopeOverlayEl.dataset.optic = w.optic;
+      combatScopeOverlayEl.dataset.view = w.view;
+      combatScopeOverlayEl.dataset.reticleSource = w.view === 'sniper-tube' ? 'tube' : 'model';
+    }
     if (combatScopeWeaponEl) combatScopeWeaponEl.textContent = w.name;
     if (combatScopeZoomEl) combatScopeZoomEl.textContent = (Math.tan(74 * Math.PI / 360) / Math.tan(w.scopeFov * Math.PI / 360)).toFixed(1) + '×';
+    if (combatScopeSightEl) combatScopeSightEl.textContent = w.handling.sight;
+    if (combatScopeRoleEl) combatScopeRoleEl.textContent = w.role;
+    if (combatScopeFrameEl) {
+      combatScopeFrameEl.dataset.geometrySource = w.view === 'sniper-tube' ? 'tube' : 'model';
+      combatScopeFrameEl.style.width = combatScopeFrameEl.style.height = combatScopeFrameEl.style.transform = '';
+      combatScopeFrameWidth = combatScopeFrameHeight = -1;
+      combatScopeFrameX = combatScopeFrameY = NaN;
+    }
     combatScopeLabel = label;
   }
 }
@@ -138,7 +485,14 @@ function updateCombatHud() {
         dotsEl.appendChild(dot);
       }
     }
-    for (let i = 0; i < dotsEl.children.length; i++) dotsEl.children[i].classList.toggle('on', i === gun.index);
+    const allowedDots = combatResolvedAllowed();
+    for (let i = 0; i < dotsEl.children.length; i++) {
+      const dot = dotsEl.children[i];
+      dot.classList.toggle('on', i === gun.index);
+      const off = !!(allowedDots && WEAPONS[i] && allowedDots.indexOf(WEAPONS[i].id) < 0);
+      dot.classList.toggle('off', off);
+      dot.style.display = off ? 'none' : '';
+    }
   }
   setHealth(health);
   setKd();
@@ -149,6 +503,7 @@ const combatMetalMats = new Map();
 const combatCylinderGeos = new Map();
 const combatOpticRingGeos = new Map();
 const combatReticleMats = new Map();
+const combatSightBeadGeo = new THREE.SphereGeometry(0.0075, 8, 6);
 const combatOpticGlass = new THREE.MeshStandardMaterial({
   color: '#83c5d2', transparent: true, opacity: 0.27, metalness: 0.08,
   roughness: 0.16, depthWrite: false
@@ -226,13 +581,14 @@ function combatOpticRing(parent, radius, thickness, color, x, y, z, glow) {
 }
 
 function combatOpticMarks(parent, type, y, z) {
-  const color = type === 'chevron' ? '#7affe0' : type === 'precision' ? '#ffe5a4' : '#ff765e';
+  const color = type === 'chevron' ? '#e7f2ff' : type === 'precision' ? '#e8edf1' : '#ff3556';
   if (type === 'holo') {
-    combatOpticRing(parent, 0.020, 0.0018, color, 0, y, z, true);
-    glowBox(parent, 0.005, 0.005, 0.003, color, 0, y, z);
+    // One actual projected dot in the rectangular glass, not a second HUD aim.
+    glowBox(parent, 0.005, 0.005, 0.002, color, 0, y, z);
   } else if (type === 'chevron') {
-    glowBox(parent, 0.019, 0.003, 0.003, color, -0.007, y, z).rotation.z = 0.65;
-    glowBox(parent, 0.019, 0.003, 0.003, color, 0.007, y, z).rotation.z = -0.65;
+    // Both halves meet exactly at (0,y); no extra dot below the apex.
+    glowBox(parent, 0.014, 0.002, 0.002, color, -0.005, y - 0.005, z).rotation.z = Math.PI / 4;
+    glowBox(parent, 0.014, 0.002, 0.002, color, 0.005, y - 0.005, z).rotation.z = -Math.PI / 4;
   } else if (type === 'precision' || type === 'mildot') {
     const width = type === 'mildot' ? 0.064 : 0.033;
     glowBox(parent, width, 0.0018, 0.002, '#f5e8c6', 0, y, z);
@@ -253,13 +609,71 @@ function combatOpticMarks(parent, type, y, z) {
   }
 }
 
+function combatSightLine(root, y, frontZ, rearZ) {
+  const u = root.userData;
+  u.adsAnchor.set(0, y, frontZ);
+  u.adsRear.set(0, y, rearZ);
+  // Real scene-graph points make alignment inspectable without inventing a
+  // second aiming state. All bores and sight lines use the authored -Z axis.
+  const front = new THREE.Object3D(), rear = new THREE.Object3D();
+  front.name = 'ads-aimline-front'; rear.name = 'ads-aimline-rear';
+  front.position.copy(u.adsAnchor); rear.position.copy(u.adsRear);
+  root.add(front, rear);
+  u.adsAimPoint = front; u.adsRearPoint = rear;
+}
+
 function combatAddOptic(root) {
-  const u = root.userData, type = WEAPON_BY_ID[u.weaponId].optic;
+  const u = root.userData, w = WEAPON_BY_ID[u.weaponId], type = w.optic;
   const optic = new THREE.Group();
   optic.name = 'optic-' + type;
   u.optic = optic;
   u.opticType = type;
-  if (type === 'mildot') {
+  u.adsView = w.view;
+  if (w.id === 'pistol') {
+    // Square rear notch, paired witness marks and a separate real front blade.
+    // Nothing covers peripheral vision; both sights ride the reciprocating slide.
+    optic.position.set(0, 0.060, 0);
+    u.reloadParts.slide.add(optic);
+    combatMetalBox(optic, 0.080, 0.013, 0.028, '#202a30', 0, -0.008, 0.135);
+    for (const x of [-0.028, 0.028]) {
+      combatMetalBox(optic, 0.020, 0.044, 0.026, '#26323a', x, 0.008, 0.135);
+      glowBox(optic, 0.005, 0.005, 0.003, '#d6e1e5', x, 0.021, 0.150);
+    }
+    combatMetalBox(optic, 0.015, 0.036, 0.024, '#dce6e5', 0, 0.012, -0.145);
+    combatMetalBox(optic, 0.029, 0.009, 0.037, '#253038', 0, -0.002, -0.145);
+    combatSightLine(root, 0.133, -0.180, 0.100);
+    return;
+  }
+  if (w.id === 'shotgun') {
+    // A vented rib with a single bead, not an optic or a spread-circle overlay.
+    optic.position.set(0, 0.090, 0);
+    root.add(optic);
+    combatMetalBox(optic, 0.024, 0.012, 0.61, '#354148', 0, 0, -0.378);
+    for (let i = 0; i < 4; i++) {
+      combatMetalBox(optic, 0.030, 0.012, 0.018, '#566268', 0, -0.010, -0.22 - i * 0.13);
+    }
+    const bead = new THREE.Mesh(combatSightBeadGeo, combatMetal('#f1f2df'));
+    bead.position.set(0, 0.013, -0.688);
+    optic.add(bead);
+    combatMetalBox(optic, 0.055, 0.011, 0.024, '#222c31', 0, -0.007, 0.070);
+    combatSightLine(root, 0.103, -0.688, 0.070);
+    return;
+  }
+  if (w.id === 'revolver') {
+    // Deep, slightly tapered steel V-notch and a long narrow front blade.
+    // Unlike pistol irons this has no pair of glowing rear dots or slide optic.
+    optic.position.set(0, 0.085, 0);
+    root.add(optic);
+    combatMetalBox(optic, 0.066, 0.012, 0.039, '#68736f', 0, -0.008, 0.145);
+    for (const side of [-1, 1]) {
+      combatMetalBox(optic, 0.020, 0.047, 0.034, '#303b3b', side * 0.025, 0.0125, 0.145).rotation.z = side * -0.12;
+    }
+    combatMetalBox(optic, 0.041, 0.012, 0.31, '#697571', 0, -0.006, -0.248);
+    combatMetalBox(optic, 0.012, 0.050, 0.026, '#e0e6df', 0, 0.011, -0.403);
+    combatSightLine(root, 0.121, -0.403, 0.145);
+    return;
+  }
+  if (w.id === 'sniper') {
     // The long tube, objective bell and turrets are authored with the sniper.
     // Add raised mounting rings and an actual rear lens with a fine mil reticle.
     optic.position.set(0, 0.17, 0);
@@ -271,43 +685,56 @@ function combatAddOptic(root) {
     combatOpticRing(optic, 0.053, 0.008, '#26322e', 0, 0, 0.205, false);
     combatCylinder(optic, 0.050, 0.004, '#83c5d2', 0, 0, 0.205).material = combatOpticGlass;
     combatOpticMarks(optic, type, 0, 0.209);
+    combatSightLine(root, 0.170, -0.311, 0.205);
     return;
   }
-  if (type === 'spread') {
-    optic.position.set(0, 0.15, 0.015);
+  if (w.id === 'rifle') {
+    // Compact rectangular reflex window. The only illumination is in its glass.
+    optic.position.set(0, 0.114, 0.042);
     root.add(optic);
-    combatMetalBox(optic, 0.11, 0.027, 0.105, '#3b4142', 0, -0.06, 0);
-    for (const z of [-0.035, 0.035]) combatOpticRing(optic, 0.061, 0.010, '#8b7960', 0, 0, z, false);
-    for (const x of [-0.061, 0.061]) combatMetalBox(optic, 0.011, 0.025, 0.078, '#454943', x, 0, 0);
-    combatCylinder(optic, 0.050, 0.004, '#83c5d2', 0, 0, 0.038).material = combatOpticGlass;
-    combatOpticMarks(optic, type, 0, 0.043);
+    combatMetalBox(optic, 0.136, 0.024, 0.079, '#303e43', 0, -0.010, 0);
+    for (const x of [-0.054, 0.054]) combatMetalBox(optic, 0.014, 0.10, 0.052, '#303e43', x, 0.044, 0);
+    combatMetalBox(optic, 0.122, 0.014, 0.052, '#627473', 0, 0.094, 0);
+    const glass = addBox(optic, 0.094, 0.083, 0.003, '#83c5d2', 0, 0.046, 0.026);
+    glass.material = combatOpticGlass;
+    combatOpticMarks(optic, type, 0.046, 0.029);
+    combatMetalBox(optic, 0.020, 0.020, 0.022, '#96a5a2', 0.075, 0.017, 0);
+    combatSightLine(root, 0.160, 0.071, 0.042);
     return;
   }
-  const mini = type === 'reflex' || type === 'precision';
-  const width = mini ? 0.079 : type === 'support' ? 0.134 : 0.116;
-  const height = mini ? 0.062 : type === 'support' ? 0.108 : 0.089;
-  const depth = mini ? 0.029 : 0.068;
-  if (type === 'reflex') {
-    optic.position.set(0, 0.065, 0.06);
-    u.reloadParts.slide.add(optic);
-  } else if (type === 'support') {
-    optic.position.set(0, 0.037, 0.25);
-    u.reloadParts.cover.add(optic);
-  } else {
-    optic.position.set(0, type === 'precision' ? 0.105 : 0.093, type === 'chevron' ? 0.008 : 0.065);
+  if (w.id === 'smg') {
+    // Deeper close-quarters hood, with chamfered shoulders instead of the
+    // rifle's flat rectangular roof. This is a small open window, not a tube.
+    optic.position.set(0, 0.103, 0.005);
     root.add(optic);
+    combatMetalBox(optic, 0.105, 0.019, 0.115, '#273b43', 0, -0.004, 0);
+    for (const side of [-1, 1]) {
+      combatMetalBox(optic, 0.014, 0.059, 0.10, '#344c55', side * 0.045, 0.028, 0);
+      combatMetalBox(optic, 0.035, 0.014, 0.10, '#68848c', side * 0.030, 0.065, 0).rotation.z = side * -0.55;
+    }
+    combatMetalBox(optic, 0.048, 0.012, 0.10, '#68848c', 0, 0.074, 0);
+    const glass = addBox(optic, 0.066, 0.049, 0.003, '#83c5d2', 0, 0.035, 0.051);
+    glass.material = combatOpticGlass;
+    combatOpticMarks(optic, type, 0.035, 0.055);
+    combatSightLine(root, 0.138, 0.060, 0.005);
+    return;
   }
-  const frame = mini ? '#303d45' : type === 'chevron' ? '#325253' : '#39483e';
-  combatMetalBox(optic, width + 0.012, 0.022, depth + 0.07, frame, 0, 0, 0);
-  for (const side of [-1, 1]) combatMetalBox(optic, 0.013, height, depth, frame, side * (width - 0.013) / 2, height / 2, 0);
-  combatMetalBox(optic, width, 0.013, depth, mini ? '#7e929b' : '#657468', 0, height, 0);
-  const glass = addBox(optic, width - 0.028, height - 0.020, 0.004, '#83c5d2', 0, height * 0.52, depth * 0.45);
-  glass.material = combatOpticGlass;
-  combatOpticMarks(optic, type, height * (type === 'support' ? 0.63 : 0.52), depth * 0.5 + 0.004);
-  if (!mini) {
-    combatMetalBox(optic, 0.026, 0.026, 0.028, '#a6afa1', width * 0.57, 0.027, 0);
-    addBox(optic, 0.008, 0.014, 0.032, '#222b25', width * 0.70, 0.027, 0);
+  // A wide octagonal support aperture and separate guarded front post. There
+  // is no glass, coloured dot, circular vignette or magnification tube here.
+  optic.position.set(0, 0.044, 0.255);
+  u.reloadParts.cover.add(optic);
+  combatMetalBox(optic, 0.230, 0.022, 0.069, '#3b493b', 0, -0.010, 0);
+  for (const side of [-1, 1]) {
+    combatMetalBox(optic, 0.021, 0.116, 0.045, '#465441', side * 0.105, 0.049, 0);
+    combatMetalBox(optic, 0.044, 0.018, 0.045, '#798570', side * 0.088, 0.116, 0).rotation.z = side * -0.62;
+    combatMetalBox(optic, 0.023, 0.10, 0.060, '#28372d', side * 0.138, -0.003, 0);
   }
+  combatMetalBox(optic, 0.160, 0.018, 0.045, '#798570', 0, 0.130, 0);
+  combatMetalBox(root, 0.080, 0.018, 0.052, '#3b483c', 0, 0.087, -0.650);
+  combatMetalBox(root, 0.026, 0.120, 0.024, '#465444', 0, 0.144, -0.650);
+  combatMetalBox(root, 0.012, 0.036, 0.020, '#dbe1d4', 0, 0.195, -0.650);
+  for (const x of [-0.031, 0.031]) combatMetalBox(root, 0.013, 0.043, 0.025, '#66745f', x, 0.193, -0.650);
+  combatSightLine(root, 0.213, -0.650, 0.045);
 }
 
 function makeGunModel(id) {
@@ -319,6 +746,9 @@ function makeGunModel(id) {
   u.reloadParts = Object.create(null);
   u.reloadNodes = [];
   u.reloadProgress = -1;
+  u.shotProgress = -1;
+  u.adsAnchor = new THREE.Vector3();
+  u.adsRear = new THREE.Vector3();
   u.grip = new THREE.Vector3(0, -0.12, 0.12);
   u.support = new THREE.Vector3(-0.055, -0.075, -0.18);
   u.supportTarget = new THREE.Vector3();
@@ -342,8 +772,6 @@ function makeGunModel(id) {
     for (let i = 0; i < 3; i++) addBox(mag, 0.068, 0.012, 0.108, '#3e454a', 0, -0.01 - i * 0.055, 0);
     combatReloadPart(root, 'charging', combatMetalBox(root, 0.09, 0.022, 0.035, '#a6adb1', 0.065, 0.045, 0.055));
     addBox(root, 0.06, 0.025, 0.20, dark, 0, 0.091, 0.025);
-    addBox(root, 0.022, 0.055, 0.022, dark, 0, 0.12, -0.36);
-    glowBox(root, 0.012, 0.012, 0.012, '#ff7152', 0, 0.15, -0.36);
     muzzleZ = -0.78;
   } else if (id === 'shotgun') {
     combatMetalBox(root, 0.105, 0.12, 0.39, '#454b50', 0, 0.015, 0.02);
@@ -360,7 +788,6 @@ function makeGunModel(id) {
     combatCylinder(shell, 0.023, 0.095, '#b84432', 0, 0, 0);
     combatCylinder(shell, 0.025, 0.02, brass, 0, 0, 0.047);
     shell.visible = shell.userData.combatBase.visible = false;
-    glowBox(root, 0.018, 0.018, 0.018, '#ffbd61', 0, 0.083, -0.67);
     muzzleZ = -0.76;
   } else if (id === 'smg') {
     combatMetalBox(root, 0.115, 0.13, 0.33, '#46565b', 0, 0.005, 0.005);
@@ -374,8 +801,6 @@ function makeGunModel(id) {
     combatReloadPart(root, 'bolt', combatMetalBox(root, 0.09, 0.025, 0.035, '#aab9b9', -0.06, 0.059, -0.01));
     for (const x of [-0.04, 0.04]) combatMetalBox(root, 0.018, 0.022, 0.23, metal, x, 0.025, 0.265);
     addBox(root, 0.105, 0.12, 0.025, dark, 0, -0.015, 0.38);
-    addBox(root, 0.067, 0.055, 0.07, dark, 0, 0.09, 0.02);
-    glowBox(root, 0.018, 0.012, 0.012, '#64daca', 0, 0.11, -0.22);
     u.support.z = -0.17;
     muzzleZ = -0.467;
   } else if (id === 'sniper') {
@@ -426,8 +851,6 @@ function makeGunModel(id) {
     loader.visible = loader.userData.combatBase.visible = false;
     combatReloadPart(root, 'ejector', combatMetalBox(cylinder, 0.017, 0.017, 0.16, '#c9d0cb', 0, 0, -0.035));
     combatReloadPart(root, 'hammer', combatMetalBox(root, 0.033, 0.05, 0.035, '#838d8b', 0, 0.082, 0.18));
-    addBox(root, 0.018, 0.035, 0.023, dark, 0, 0.085, -0.405);
-    glowBox(root, 0.009, 0.009, 0.009, '#ffd28d', 0, 0.104, -0.405);
     u.grip.set(0, -0.13, 0.15);
     u.support.set(-0.06, -0.13, 0.13);
     u.heldScale = 0.94;
@@ -466,8 +889,6 @@ function makeGunModel(id) {
     const slide = combatPartGroup(root, 'slide', root, 0, 0.043, -0.035);
     combatMetalBox(slide, 0.096, 0.085, 0.35, metal, 0, 0, 0);
     for (let i = 0; i < 4; i++) combatMetalBox(slide, 0.098, 0.040, 0.012, '#313a40', 0, 0, 0.055 + i * 0.023);
-    addBox(slide, 0.075, 0.02, 0.02, dark, 0, 0.056, 0.10);
-    glowBox(slide, 0.014, 0.014, 0.014, '#ffdd66', 0, 0.056, -0.17);
     combatCylinder(root, 0.024, 0.27, '#1b2228', 0, muzzleY, -0.20);
     addBox(root, 0.077, 0.19, 0.11, '#332c27', 0, -0.12, 0.10);
     const mag = combatPartGroup(root, 'mag', root, 0, -0.17, 0.10);
@@ -489,6 +910,10 @@ function makeGunModel(id) {
   u.supportTarget.copy(u.support);
   u.rightTarget.copy(u.grip);
   combatAddOptic(root);
+  // A stable DOM frame hook projects these REAL housing bounds. The browser
+  // draws no duplicate chrome over the 3D sights; sniper alone uses a DOM tube.
+  u.opticBounds = new THREE.Box3().setFromObject(u.optic);
+  u.opticBounds.applyMatrix4(u.optic.matrixWorld.clone().invert());
   return root;
 }
 
@@ -510,6 +935,7 @@ function combatResetGunParts(model) {
   u.supportTarget.copy(u.support);
   u.rightTarget.copy(u.grip);
   u.reloadProgress = -1;
+  u.shotProgress = -1;
 }
 
 function combatStage(p, a, b) {
@@ -638,6 +1064,58 @@ function updateWeaponReload(model, progress, rounds) {
   u.supportTarget.lerp(u.support, 1 - lift);
 }
 
+/* Shot actions sample one age, on the same articulated parts as reload. No
+   timers, promises, additional ammunition state or automatic semi-auto shots. */
+function combatSampleShotMechanism(model, age, serial) {
+  if (!model || !model.userData.reloadParts) return;
+  const u = model.userData, w = WEAPON_BY_ID[u.weaponId], h = w.handling;
+  const active = Number.isFinite(age) && age >= 0 && age < h.cycle;
+  if (!active && u.shotProgress === -1) return;
+  combatResetGunParts(model);
+  const parts = u.reloadParts;
+  if (!active) {
+    if (w.id === 'revolver') parts.cylinder.rotation.z = (Math.max(0, serial || 0) % 6) * Math.PI / 3;
+    return;
+  }
+  const p = combatClamp01(age / h.cycle), pose = u.reloadPose;
+  u.shotProgress = p;
+  if (w.id === 'pistol') {
+    parts.slide.position.z += 0.085 * combatPulse(p, 0, 0.08, 0.30, 0.76);
+  } else if (w.id === 'rifle') {
+    parts.charging.position.z += 0.065 * combatPulse(p, 0, 0.10, 0.25, 0.90);
+  } else if (w.id === 'shotgun') {
+    const pump = combatPulse(p, 0.26, 0.46, 0.66, 0.95);
+    parts.pump.position.z += 0.17 * pump;
+    u.supportTarget.z += 0.17 * pump;
+    parts.gate.rotation.x = -0.28 * pump;
+    pose.roll = 0.042 * pump; pose.y = -0.009 * pump;
+  } else if (w.id === 'smg') {
+    parts.bolt.position.z += 0.050 * combatPulse(p, 0, 0.12, 0.25, 0.92);
+  } else if (w.id === 'sniper') {
+    const lift = combatPulse(p, 0.19, 0.34, 0.85, 0.99);
+    const pull = combatPulse(p, 0.33, 0.51, 0.65, 0.86);
+    parts.boltHandle.rotation.z = 1.18 * lift;
+    parts.bolt.position.z += 0.17 * pull;
+    const hand = combatPulse(p, 0.16, 0.30, 0.87, 1);
+    u.rightTarget.x += (0.13 - u.rightTarget.x) * hand;
+    u.rightTarget.y += (0.055 + lift * 0.09 - u.rightTarget.y) * hand;
+    u.rightTarget.z += (parts.bolt.position.z + 0.06 - u.rightTarget.z) * hand;
+    pose.yaw = 0.065 * hand; pose.roll = -0.035 * hand;
+  } else if (w.id === 'revolver') {
+    const turn = combatStage(p, 0.02, 0.43);
+    const previous = Math.max(0, (serial || 1) - 1) % 6;
+    parts.cylinder.rotation.z = (previous + turn) * Math.PI / 3;
+    parts.hammer.rotation.x = -0.50 * combatPulse(p, 0, 0.08, 0.22, 0.41);
+  } else if (w.id === 'lmg') {
+    const feed = combatPulse(p, 0, 0.15, 0.45, 0.94);
+    parts.belt.position.x += 0.028 * feed;
+    parts.belt.position.y -= 0.009 * feed;
+    parts.feed.position.y += 0.006 * feed;
+    parts.charging.position.z += 0.065 * feed;
+    u.supportTarget.y -= 0.008 * feed;
+  }
+}
+
 /* first-person viewmodel */
 const vmRoot = new THREE.Group();
 camera.add(vmRoot);
@@ -734,11 +1212,19 @@ function updateAvatarWeaponPose(avatar, state, dt) {
   let pose = avatar.userData.combatPose;
   if (!pose) pose = avatar.userData.combatPose = { weight: 0 };
   const active = state.combat !== false && state.combat !== 0 && state.alive !== false && state.alive !== 0 &&
-    (avatar !== localAvatar || !combatQuickBuilding());
+    (avatar !== localAvatar || (!combatQuickBuilding() && !combatActionBlocked() && combatWeaponAllowed(currentWeapon())));
   const firing = !!state.firing;
   const reload = active && Number.isFinite(state.reload) ? state.reload : -1;
   const rounds = Number.isFinite(state.reloadRounds) ? state.reloadRounds : model.userData.reloadRounds;
   updateWeaponReload(model, reload, rounds);
+  if (reload < 0) {
+    const w = WEAPON_BY_ID[model.userData.weaponId];
+    // Remote kick already decays with w.recover, so its age is reconstructible
+    // without a new packet field or a separately running mechanism clock.
+    const age = avatar === localAvatar ? gun.shotAge
+      : state.kick > 0 ? -Math.log(Math.min(1, state.kick)) / w.recover : -1;
+    combatSampleShotMechanism(model, active ? age : -1, avatar === localAvatar ? gun.shots[gun.index] : 1);
+  }
   model.visible = active;
   const weight = active ? 1 : 0;
   if (dt === 0 || firing) pose.weight = weight;
@@ -814,6 +1300,9 @@ function shotBuffer(ctx, w) {
 }
 
 function playShot(w, vol) {
+  // This is also the network module's legacy entry point. Suppress it there
+  // as well as locally when the positional SFX engine owns playback.
+  if (combatSpatialAudioAvailable()) return;
   const ctx = audio();
   if (!ctx) return;
   const t = ctx.currentTime;
@@ -840,6 +1329,7 @@ function playShot(w, vol) {
 }
 
 function playTone(freq, dur, type, vol) {
+  if (combatSpatialAudioAvailable()) return;
   const ctx = audio();
   if (!ctx) return;
   const t = ctx.currentTime;
@@ -892,12 +1382,19 @@ function addTracer(from, to) {
 const PARTICLE_GEO = new THREE.BoxGeometry(0.055, 0.055, 0.055);
 const PARTICLE_MATS = new Map();
 const particles = [];
+let combatImpactSfxAt = -9999;
 function particleMat(color) {
   let m = PARTICLE_MATS.get(color);
   if (!m) { m = new THREE.MeshBasicMaterial({ color, toneMapped: false }); PARTICLE_MATS.set(color, m); }
   return m;
 }
-function addImpact(point, color) {
+function addImpact(point, color, info) {
+  // One positional event per impact cluster, not one per pellet/particle.
+  const sfxAt = performance.now();
+  if (!(info && info.silent) && sfxAt - combatImpactSfxAt > 28) {
+    combatImpactSfxAt = sfxAt;
+    combatEmit('sfx', { kind: 'impact', weapon: info && info.weapon, position: point.clone(), volume: 0.34 });
+  }
   const n = 6;
   for (let i = 0; i < n; i++) {
     if (particles.length > 160) break;
@@ -977,6 +1474,43 @@ function updateFx(dt) {
 }
 
 /* ---------------- hit tests ---------------- */
+const combatDragonRayOrigin = { x: 0, y: 0, z: 0 };
+const combatDragonRayDir = { x: 0, y: 0, z: 0 };
+const combatSolidRayOut = { distance: 0, block: null, dragon: null, dragonIndex: -1, kind: 'none' };
+
+function combatRaycastDragon(origin, dir, maxDistance, ignoreIndex) {
+  const api = combatApi('dragons');
+  if (!api || typeof api.raycast !== 'function' || !Number.isFinite(maxDistance) || maxDistance < 0) return null;
+  const hit = api.raycast(origin, dir, maxDistance, Number.isInteger(ignoreIndex) && ignoreIndex >= 0 ? ignoreIndex : -1);
+  return hit && Number.isFinite(hit.distance) && hit.distance >= 0 && hit.distance <= maxDistance + COMBAT_SOLID_RAY_EPS
+    ? hit : null;
+}
+
+// Camera, barrel obstruction and EVERY pellet select the same earliest solid.
+// Copy hit scalars immediately: the dragon owner may reuse its ray-hit object.
+function combatRaycastSolid(origin, dir, maxDistance, out) {
+  const result = out || {};
+  result.distance = maxDistance;
+  result.block = result.dragon = null;
+  result.dragonIndex = -1;
+  result.kind = 'none';
+  const block = raycastVoxel(maxDistance, origin, dir);
+  if (block) {
+    result.distance = block.dist;
+    result.block = block;
+    result.kind = 'voxel';
+  }
+  const dragon = combatRaycastDragon(origin, dir, result.distance);
+  if (dragon && dragon.distance <= result.distance + COMBAT_SOLID_RAY_EPS) {
+    result.distance = Math.min(maxDistance, dragon.distance);
+    result.block = null; // a voxel behind (or touching) the body is NOT a voxel impact
+    result.dragon = dragon.dragon || null;
+    result.dragonIndex = Number.isInteger(dragon.index) ? dragon.index : -1;
+    result.kind = 'dragon';
+  }
+  return result;
+}
+
 function rayBox(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX, maxY, maxZ) {
   let tmin = 0, tmax = Infinity;
   const axes = [[ox, dx, minX, maxX], [oy, dy, minY, maxY], [oz, dz, minZ, maxZ]];
@@ -995,18 +1529,30 @@ function rayBox(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX, maxY, maxZ) {
   return tmax < 0 ? -1 : tmin;
 }
 
-function raycastRemote(ox, oy, oz, dx, dy, dz, maxDist) {
+function raycastRemote(ox, oy, oz, dx, dy, dz, maxDist, ignoreDragonIndex) {
   let best = null;
-  if (!net || !net.players) return null;
+  if (typeof net === 'undefined' || !net || !net.players) return null;
+  maxDist = Math.min(COMBAT_MAX_WEAPON_RANGE, Math.max(0, Number(maxDist) || 0));
+  combatDragonRayOrigin.x = ox; combatDragonRayOrigin.y = oy; combatDragonRayOrigin.z = oz;
+  combatDragonRayDir.x = dx; combatDragonRayDir.y = dy; combatDragonRayDir.z = dz;
+  const dragon = combatRaycastDragon(combatDragonRayOrigin, combatDragonRayDir, maxDist, ignoreDragonIndex);
+  if (dragon) {
+    if (dragon.distance <= COMBAT_SOLID_RAY_EPS) return null;
+    maxDist = Math.min(maxDist, dragon.distance - COMBAT_SOLID_RAY_EPS);
+  }
   const now = performance.now();
   for (const r of net.players.values()) {
-    if (r.deadUntil && r.deadUntil > now) continue;
-    if (r.hp <= 0) continue;
-    if (r.group && !r.group.visible) continue;
+    if (!combatPeerEligible(r, now)) continue;
+    const pos = r.group && r.group.position ? r.group.position : r;
+    if (!Number.isFinite(pos.x) || !Number.isFinite(pos.y) || !Number.isFinite(pos.z)) continue;
+    // Preserve the standing 1.46/1.90 m split; lower both boxes for a crouch or
+    // slide, preferring the movement/network owner's runtime bodyHeight.
+    const top = combatBodyHeight(r) + 0.1;
+    const headBase = Math.max(0.4, top - 0.44);
     const body = rayBox(ox, oy, oz, dx, dy, dz,
-      r.x - 0.3, r.y + 0.05, r.z - 0.3, r.x + 0.3, r.y + 1.46, r.z + 0.3);
+      pos.x - 0.3, pos.y + 0.05, pos.z - 0.3, pos.x + 0.3, pos.y + headBase, pos.z + 0.3);
     const head = rayBox(ox, oy, oz, dx, dy, dz,
-      r.x - 0.24, r.y + 1.46, r.z - 0.24, r.x + 0.24, r.y + 1.9, r.z + 0.24);
+      pos.x - 0.24, pos.y + headBase, pos.z - 0.24, pos.x + 0.24, pos.y + top, pos.z + 0.24);
     if (body >= 0 && body <= maxDist && (!best || body < best.t)) best = { r, t: body, head: false };
     if (head >= 0 && head <= maxDist && (!best || head < best.t)) best = { r, t: head, head: true };
   }
@@ -1015,16 +1561,18 @@ function raycastRemote(ox, oy, oz, dx, dy, dz, maxDist) {
 
 /* ---------------- shooting ---------------- */
 function getReloadProgress() {
-  if (gun.reloading <= 0 || gun.reloadIndex !== gun.index || !alive || !combatMode || combatQuickBuilding()) return -1;
+  if (gun.reloading <= 0 || gun.reloadIndex !== gun.index || !alive || !combatMode || combatQuickBuilding() ||
+      combatActionBlocked() || !combatWeaponAllowed(currentWeapon())) return -1;
   return combatClamp01(1 - gun.reloading / Math.max(0.001, gun.reloadTotal));
 }
 
 function combatLocalPoseState() {
+  const ready = alive && combatMode && !combatQuickBuilding() && !combatActionBlocked() && combatWeaponAllowed(currentWeapon());
   return {
-    pitch: player.pitch, aim: gun.aiming && gun.reloading <= 0,
-    firing: gun.firePose > 0 || gun.trigger, reload: getReloadProgress(),
+    pitch: player.pitch, aim: ready && gun.aiming && gun.reloading <= 0,
+    firing: ready && (gun.firePose > 0 || gun.trigger), reload: getReloadProgress(),
     reloadRounds: gun.reloadRounds, weapon: currentWeapon().id,
-    combat: combatMode && !combatQuickBuilding(), alive, kick: gun.kick
+    combat: ready, alive, kick: ready ? gun.kick : 0
   };
 }
 
@@ -1037,7 +1585,7 @@ function combatRefreshLocalPose(dt) {
    sender's performance.now()/wall clock. */
 function combatNetState(type) {
   const building = !combatMode || combatQuickBuilding();
-  const ready = alive && !building && !craftOpen;
+  const ready = alive && !building && !combatActionBlocked() && combatWeaponAllowed(currentWeapon());
   return {
     t: type || 'state', x: player.pos.x, y: player.pos.y, z: player.pos.z,
     yaw: player.yaw, pitch: player.pitch, character: charKey, name: playerName,
@@ -1076,6 +1624,135 @@ const combatWorldUp = new THREE.Vector3(0, 1, 0);
 const combatVisualOrigin = new THREE.Vector3();
 const combatVisualDir = new THREE.Vector3();
 const combatVisualTarget = new THREE.Vector3();
+const combatSightAlignTemp = new THREE.Vector3();
+const combatScopeProjectTemp = new THREE.Vector3();
+
+function combatAdsRate(w, aiming, reduced) {
+  const ms = aiming ? w.handling.adsInMs : w.handling.adsOutMs;
+  return Math.log(1000) / (ms * 0.001 * (reduced ? 0.65 : 1));
+}
+
+function combatClearGeneratedRecoil() {
+  // Killcam, riding and world resets may already own the camera/player pose.
+  // Only remove a live, locally generated contribution when they do not.
+  if (alive && !combatActionBlocked()) {
+    const lim = Math.PI / 2 - 0.02;
+    player.pitch = Math.max(-lim, Math.min(lim, player.pitch - combatRecoilAccum));
+    player.yaw -= gun.recoilSide;
+  }
+  combatRecoilAccum = 0;
+  gun.recoilSide = 0;
+}
+
+function combatStepHandling(dt, now, w) {
+  for (let i = 0; i < WEAPONS.length; i++) {
+    gun.bloom[i] = Math.max(0, gun.bloom[i] - WEAPONS[i].handling.bloomRecovery * dt);
+  }
+  if (gun.shotAge >= 0) {
+    gun.shotAge += dt;
+    const h = w.handling;
+    if (!gun.mechanismCued && h.cueAt >= 0 && gun.shotAge >= h.cueAt && gun.shotAge < h.cycle) {
+      gun.mechanismCued = true;
+      combatEmit('sfx', {
+        kind: 'mechanism', action: h.mechanism, weapon: w.id,
+        position: combatSourcePosition(), volume: w.id === 'revolver' ? 0.24 : 0.36
+      });
+      playTone(w.id === 'shotgun' ? 185 : w.id === 'sniper' ? 360 : 510, 0.055, 'square', 0.035);
+    }
+    if (gun.shotAge >= h.cycle) gun.shotAge = -1;
+  }
+  if (now - combatRecoilStamp <= w.handling.recoilHoldMs || dt <= 0) return false;
+  const decay = Math.exp(-w.handling.recoilReturn * dt);
+  const pitchNext = combatRecoilAccum * decay, sideNext = gun.recoilSide * decay;
+  const pitchDelta = combatRecoilAccum - (pitchNext < 0.00001 ? 0 : pitchNext);
+  const sideDelta = gun.recoilSide - (Math.abs(sideNext) < 0.00001 ? 0 : sideNext);
+  combatRecoilAccum -= pitchDelta;
+  gun.recoilSide -= sideDelta;
+  if (pitchDelta === 0 && sideDelta === 0) return false;
+  const lim = Math.PI / 2 - 0.02;
+  player.pitch = Math.max(-lim, Math.min(lim, player.pitch - pitchDelta));
+  player.yaw -= sideDelta;
+  return true;
+}
+
+function combatSpreadForShot(w) {
+  const h = w.handling, a = isScopeActive() ? combatClamp01(gun.viewAim) : 0;
+  const speed = Math.max(Number.isFinite(player.groundSpeed) ? player.groundSpeed : 0,
+    Math.hypot(player.vel.x, player.vel.z));
+  const moving = Math.min(1.65, speed / 7.3);
+  const airborne = player.fly || (player.onGround === false && !player.swimming);
+  const braced = player.crouching && !player.sliding && moving < 0.12;
+  const opening = w.auto && combatBurstShots <= h.openingShots ? h.openingScale : 1;
+  const stance = braced ? (w.id === 'lmg' ? 0.72 : 0.88) : 1;
+  const movement = moving * (h.moveSpread + a * h.adsMoveSpread) + (airborne ? h.airSpread : 0);
+  // Bloom measures the current weapon, not trigger duration. Rapid taps also
+  // bloom; changing weapons cannot create automatic semi-auto fire.
+  return w.spread * (0.8 + (w.adsSpread - 0.8) * a) *
+    (opening + gun.bloom[gun.index] + movement) * stance;
+}
+
+function combatApplyShotRecoil(w, shotAt) {
+  const h = w.handling;
+  combatRecoilStamp = shotAt;
+  const a = isScopeActive() ? combatClamp01(gun.viewAim) : 0;
+  const recoilBase = w.recoil * 0.75 * h.recoilScale * (1 - 0.3 * a);
+  const recoilRoom = Math.max(0, Math.min(COMBAT_RECOIL_CAP, h.recoilCap) - combatRecoilAccum);
+  const oldPitch = player.pitch, lim = Math.PI / 2 - 0.02;
+  player.pitch = Math.max(-lim, Math.min(lim, oldPitch + Math.min(recoilBase, recoilRoom)));
+  combatRecoilAccum += Math.max(0, player.pitch - oldPitch);
+  const pattern = h.yawPattern[(combatBurstShots - 1) % h.yawPattern.length];
+  const sideNext = Math.max(-0.025, Math.min(0.025, gun.recoilSide + recoilBase * h.lateral * pattern));
+  player.yaw += sideNext - gun.recoilSide;
+  gun.recoilSide = sideNext;
+}
+
+function combatAlignViewSight(model, a) {
+  if (!model || !model.userData.adsAnchor || a <= 0) return;
+  const point = model.userData.adsAnchor;
+  combatSightAlignTemp.copy(point).multiply(model.scale).applyQuaternion(model.quaternion);
+  // Keep the real front blade/bead/dot on the eye's aim line as the model
+  // rotates. This compensates rotation, not the player's camera input.
+  model.position.x -= (combatSightAlignTemp.x - point.x * model.scale.x) * a;
+  model.position.y -= (combatSightAlignTemp.y - point.y * model.scale.y) * a;
+  model.updateWorldMatrix(true, true);
+}
+
+function combatProjectScopeHousing(model) {
+  if (!combatScopeFrameEl || !isScopeActive() || currentWeapon().view === 'sniper-tube' || !model) return;
+  const u = model.userData, box = u.opticBounds;
+  if (!box || !u.optic) return;
+  u.optic.updateWorldMatrix(true, false);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (let i = 0; i < 8; i++) {
+    combatScopeProjectTemp.set(i & 1 ? box.max.x : box.min.x,
+      i & 2 ? box.max.y : box.min.y, i & 4 ? box.max.z : box.min.z)
+      .applyMatrix4(u.optic.matrixWorld).project(camera);
+    const x = (combatScopeProjectTemp.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (0.5 - combatScopeProjectTemp.y * 0.5) * window.innerHeight;
+    if (x < minX) minX = x;
+    if (x > maxX) maxX = x;
+    if (y < minY) minY = y;
+    if (y > maxY) maxY = y;
+  }
+  const width = Math.max(1, maxX - minX), height = Math.max(1, maxY - minY);
+  if (!Number.isFinite(width + height)) return;
+  const x = (minX + maxX) * 0.5 - window.innerWidth * 0.5;
+  const y = (minY + maxY) * 0.5 - window.innerHeight * 0.5;
+  if (!Number.isFinite(x + y)) return;
+  // Idle, settled ADS must not allocate style strings or repaint every frame.
+  if (Math.abs(width - combatScopeFrameWidth) > 0.05) {
+    combatScopeFrameEl.style.width = width.toFixed(2) + 'px';
+    combatScopeFrameWidth = width;
+  }
+  if (Math.abs(height - combatScopeFrameHeight) > 0.05) {
+    combatScopeFrameEl.style.height = height.toFixed(2) + 'px';
+    combatScopeFrameHeight = height;
+  }
+  if (!Number.isFinite(combatScopeFrameX) || Math.abs(x - combatScopeFrameX) > 0.05 || Math.abs(y - combatScopeFrameY) > 0.05) {
+    combatScopeFrameEl.style.transform = 'translate(-50%, -50%) translate(' + x.toFixed(2) + 'px, ' + y.toFixed(2) + 'px)';
+    combatScopeFrameX = x; combatScopeFrameY = y;
+  }
+}
 
 function combatAimGunAt(model, target) {
   if (!model || !model.parent || !model.userData.muzzle) return;
@@ -1094,7 +1771,9 @@ function combatAimGunAt(model, target) {
 }
 
 function combatMuzzleModel() {
-  return !thirdPerson && !isScopeActive() && viewGun ? viewGun : localAvatar && localAvatar.userData.gun;
+  const scoped = isScopeActive();
+  const openAds = scoped && currentWeapon().view !== 'sniper-tube';
+  return viewGun && (openAds || (!thirdPerson && !scoped)) ? viewGun : localAvatar && localAvatar.userData.gun;
 }
 
 function combatGetMuzzle(out) {
@@ -1111,14 +1790,14 @@ function combatGetMuzzle(out) {
 }
 
 function combatCameraTarget(w, origin, dir) {
-  const block = raycastVoxel(w.range, origin, dir);
-  const blockT = block ? block.dist : w.range;
-  const ent = raycastRemote(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, blockT);
-  return origin.clone().addScaledVector(dir, ent ? ent.t : blockT);
+  const solid = combatRaycastSolid(origin, dir, w.range, combatSolidRayOut);
+  const ent = raycastRemote(origin.x, origin.y, origin.z, dir.x, dir.y, dir.z, solid.distance);
+  const entFirst = ent && (solid.kind === 'none' || ent.t < solid.distance - COMBAT_SOLID_RAY_EPS);
+  return origin.clone().addScaledVector(dir, entFirst ? ent.t : solid.distance);
 }
 
 function combatMuzzleObstruction(muzzle) {
-  const anchor = new THREE.Vector3(player.pos.x, player.pos.y + 1.3, player.pos.z);
+  const anchor = new THREE.Vector3(player.pos.x, player.pos.y + combatBodyHeight(player) * 13 / 18, player.pos.z);
   const parts = localAvatar && localAvatar.userData.parts;
   if (parts && parts.armR) {
     parts.armR.getWorldPosition(combatAimMuzzle);
@@ -1128,12 +1807,12 @@ function combatMuzzleObstruction(muzzle) {
   const distance = dir.length();
   if (distance < 0.0001) return null;
   dir.multiplyScalar(1 / distance);
-  const block = raycastVoxel(distance + 0.012, anchor, dir);
-  if (!block) return null;
+  const solid = combatRaycastSolid(anchor, dir, distance + 0.012, combatSolidRayOut);
+  if (solid.kind === 'none') return null;
   return {
-    block,
-    point: anchor.clone().addScaledVector(dir, block.dist),
-    from: anchor.addScaledVector(dir, Math.max(0, block.dist - 0.025))
+    block: solid.block, dragon: solid.dragon, dragonIndex: solid.dragonIndex, kind: solid.kind,
+    point: anchor.clone().addScaledVector(dir, solid.distance),
+    from: anchor.addScaledVector(dir, Math.max(0, solid.distance - 0.025))
   };
 }
 
@@ -1153,12 +1832,14 @@ function flashHitmarker(head) {
   void hitmarkerEl.offsetWidth;
   hitmarkerEl.classList.add('show');
   hitmarkerEl.style.filter = head ? 'drop-shadow(0 0 7px #ffb03c)' : '';
+  combatEmit('sfx', { kind: 'ui', action: 'hitConfirm', position: combatSourcePosition(), volume: 0.2, head: !!head });
   playTone(head ? 1180 : 860, 0.06, 'triangle', 0.07);
 }
 
 function startReload() {
-  if (!alive || !combatMode || combatQuickBuilding() || loading || craftOpen) return;
+  if (!alive || !combatMode || combatQuickBuilding() || combatActionBlocked()) { combatReleaseGun(); return; }
   const w = currentWeapon();
+  if (!combatWeaponAllowed(w)) { combatOnLoadoutChanged(); return; }
   if (gun.reloading > 0 || gun.ammo[gun.index] >= w.mag) return;
   gun.reloading = w.reload;
   gun.reloadTotal = w.reload;
@@ -1169,14 +1850,29 @@ function startReload() {
   gun.trigger = false;
   gun.kick = 0;
   gun.firePose = 0;
+  gun.shotAge = -1;
+  gun.mechanismCued = false;
+  combatResetGunParts(viewGun);
+  if (localAvatar) combatResetGunParts(localAvatar.userData.gun);
+  combatRefreshLocalPose(0);
+  updateGunVisual(0);
   playTone(300, 0.05, 'square', 0.06);
+  combatEmit('sfx', {
+    kind: 'reload', action: 'start', weapon: w.id, duration: w.reload, rounds: gun.reloadRounds,
+    position: combatSourcePosition(),
+    volume: 0.5
+  });
   netSend(combatNetState('reload'));
   updateCombatHud();
 }
 
 function fireOnce() {
-  if (!alive || !combatMode || combatQuickBuilding() || loading || craftOpen) return;
+  if (!alive || !combatMode || combatQuickBuilding() || combatActionBlocked()) { combatReleaseGun(); return; }
   const w = currentWeapon();
+  if (!combatWeaponAllowed(w)) {
+    combatOnLoadoutChanged();
+    return;
+  }
   if (gun.cooldown > 0 || gun.reloading > 0) return;
   if (gun.ammo[gun.index] <= 0) { startReload(); return; }
   if (combatLookNeedsSync && typeof updateCamera === 'function') updateCamera(0);
@@ -1185,96 +1881,311 @@ function fireOnce() {
   if (typeof updateAvatar === 'function') updateAvatar(0);
   combatRefreshLocalPose(0);
   camera.updateWorldMatrix(true, false);
+  updateGunVisual(0);
 
   const origin = camera.getWorldPosition(new THREE.Vector3());
-  const baseDir = camera.getWorldDirection(new THREE.Vector3());
-  const target = combatCameraTarget(w, origin, baseDir);
+  const cameraDir = camera.getWorldDirection(new THREE.Vector3()).normalize();
+  const target = combatCameraTarget(w, origin, cameraDir);
   const from = combatGetMuzzle(new THREE.Vector3());
   // A camera collision can put its target behind the held barrel. Do not twist
   // the wrist around or fire backward in that case.
-  if (target.clone().sub(from).dot(baseDir) < 0.1) target.copy(from).addScaledVector(baseDir, w.range);
+  if (target.clone().sub(from).dot(cameraDir) < 0.1) target.copy(from).addScaledVector(cameraDir, w.range);
   const source = combatMuzzleModel();
   combatAimGunAt(source, target);
   combatGetMuzzle(from);
   const obstruction = combatMuzzleObstruction(from);
 
+  // combatCameraTarget is a WORLD POSITION. Finish the camera/barrel solve,
+  // then convert it to a normalized MUZZLE DIRECTION before assisting once.
+  // Pellets use that direction directly; re-projecting from the camera would
+  // undo the assist or amplify it through close-range shoulder parallax.
+  const baseDir = target.clone().sub(from);
+  if (baseDir.lengthSq() < 0.01 || baseDir.dot(cameraDir) < 0.05) baseDir.copy(cameraDir);
+  else baseDir.normalize();
+  const fxApi = combatApi('combatFx');
+  if (!obstruction && fxApi && typeof fxApi.aimAssist === 'function') {
+    try {
+      const assisted = fxApi.aimAssist(from, baseDir, w.id);
+      if (assisted && assisted.isVector3 && Number.isFinite(assisted.x) && Number.isFinite(assisted.y) &&
+          Number.isFinite(assisted.z) && Math.abs(assisted.lengthSq() - 1) < 1e-6 &&
+          baseDir.dot(assisted) >= Math.cos(COMBAT_ASSIST_MAX_TURN) - 1e-12) {
+        baseDir.copy(assisted);
+      }
+    } catch (e) { /* aim assistance is optional */ }
+  }
+
   gun.ammo[gun.index]--;
   gun.cooldown = 60 / w.rpm;
   gun.kick = 1;
+  gun.shotAge = 0;
+  gun.mechanismCued = false;
+  gun.shots[gun.index]++;
   const helper = Math.abs(baseDir.y) > 0.95 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0);
   const right = new THREE.Vector3().crossVectors(baseDir, helper).normalize();
   const up = new THREE.Vector3().crossVectors(right, baseDir).normalize();
 
+  const shotAt = performance.now();
+  if (shotAt - combatBurstStamp > w.handling.burstGapMs) combatBurstShots = 0;
+  combatBurstStamp = shotAt;
+  combatBurstShots++;
+  const shotSpread = combatSpreadForShot(w);
+  gun.lastSpread = shotSpread;
+  gun.bloom[gun.index] = Math.min(w.handling.bloomMax, gun.bloom[gun.index] + w.handling.bloomPerShot);
+
   // Establish this shot's weapon/combat state before its hit messages. This is
   // important for firing immediately after cancelling a combat blueprint.
   netSend({ ...combatNetState('shot'), x: from.x, y: from.y, z: from.z });
-  let hitAny = false, hitHead = false;
+  let hitAny = false, hitHead = false, shotTargetId = '', firstHitName = '', shotEnd = null;
+  const impactInfo = { weapon: w.id, silent: false };
   for (let i = 0; i < w.pellets; i++) {
     if (obstruction) {
-      if (i === 0) { addTracer(obstruction.from, obstruction.point); addImpact(obstruction.point, '#cbb593'); }
-      if (typeof damageVoxelFromShot === 'function') damageVoxelFromShot(obstruction.block, w.id, w.damage);
+      if (i === 0) {
+        shotEnd = obstruction.point.clone();
+        addTracer(obstruction.from, obstruction.point);
+        addImpact(obstruction.point, obstruction.kind === 'dragon' ? '#e8af57' : '#cbb593', impactInfo);
+        impactInfo.silent = true;
+      }
+      if (obstruction.block && typeof damageVoxelFromShot === 'function') damageVoxelFromShot(obstruction.block, w.id, w.damage);
       continue;
     }
     const ang = Math.random() * Math.PI * 2;
-    const rad = Math.sqrt(Math.random()) * w.spread * (gun.aiming ? w.adsSpread : 1);
-    const cameraDir = baseDir.clone()
+    const rad = Math.sqrt(Math.random()) * shotSpread;
+    const dir = baseDir.clone()
       .addScaledVector(right, Math.cos(ang) * rad)
       .addScaledVector(up, Math.sin(ang) * rad)
       .normalize();
-    const aimPoint = combatCameraTarget(w, origin, cameraDir);
-    const dir = aimPoint.sub(from);
-    if (dir.dot(baseDir) <= 0.05) dir.copy(cameraDir);
-    dir.normalize();
     // Damage and the tracer use the same muzzle ray. The camera chooses the
     // crosshair target; it no longer lets a barrel bypass adjacent cover.
-    const block = raycastVoxel(w.range, from, dir);
-    const blockT = block ? block.dist : w.range;
-    const ent = raycastRemote(from.x, from.y, from.z, dir.x, dir.y, dir.z, Math.min(blockT, w.range));
-    const end = ent
-      ? from.clone().addScaledVector(dir, ent.t)
-      : from.clone().addScaledVector(dir, blockT);
+    const solid = combatRaycastSolid(from, dir, w.range, combatSolidRayOut);
+    // Each weapon's declared range is the combat envelope, including long-range
+    // rifle/sniper/LMG hits accepted by the room authority.
+    const ent = raycastRemote(from.x, from.y, from.z, dir.x, dir.y, dir.z, solid.distance);
+    const liveEnt = ent && combatPeerEligible(ent.r, shotAt) &&
+      (solid.kind === 'none' || ent.t < solid.distance - COMBAT_SOLID_RAY_EPS);
+    const end = from.clone().addScaledVector(dir, liveEnt ? ent.t : solid.distance);
     addTracer(from, end);
+    if (!shotEnd) shotEnd = end.clone();
 
-    if (ent) {
+    // No knockback and no vertical impulse: a hit only sends damage, so the
+    // "everybody flies" bug cannot come from the combat layer.
+    if (liveEnt) {
       hitAny = true;
       if (ent.head) hitHead = true;
+      if (!shotTargetId) { shotTargetId = ent.r.id; firstHitName = ent.r.name || ''; }
       const dmg = Math.round(w.damage * (ent.head ? 2 : 1) * (ent.t > w.range * 0.65 ? 0.8 : 1));
       netSend({ t: 'hit', target: ent.r.id, dmg, head: ent.head, weapon: w.id, byId: net.id, by: playerName });
-      addImpact(end, '#b83030');
-    } else if (block) {
-      addImpact(end, '#cbb593');
-      if (typeof damageVoxelFromShot === 'function') damageVoxelFromShot(block, w.id, w.damage);
+      addImpact(end, '#b83030', impactInfo);
+      impactInfo.silent = true;
+    } else if (solid.kind === 'dragon') {
+      // Both classes are indestructible noncombatants. Stop the ray and play
+      // existing impact FX/SFX without a hit packet, HP mutation or kill credit.
+      addImpact(end, '#e8af57', impactInfo);
+      impactInfo.silent = true;
+    } else if (solid.block) {
+      addImpact(end, '#cbb593', impactInfo);
+      impactInfo.silent = true;
+      if (typeof damageVoxelFromShot === 'function') damageVoxelFromShot(solid.block, w.id, w.damage);
     }
   }
 
+  // Hit markers can be optimistic. Kill banners, feed events and match scores
+  // are produced only by a confirmed death, never by this target-HP estimate.
+  if (hitAny && fxApi && typeof fxApi.hitFeedback === 'function') {
+    try { fxApi.hitFeedback(hitHead, firstHitName); } catch (e) { /* optional */ }
+  }
+
+  // Audio first: 94-audio's `sfx` listener claims the shot family, so its
+  // `shot` listener does not voice the same round twice.
+  combatEmit('sfx', {
+    kind: 'shot', weapon: w.id, position: from.clone(),
+    volume: Math.min(1, (w.sound || 0.5) * 1.15)
+  });
+  combatEmit('shot', {
+    weapon: w.id, from: from.clone(),
+    to: shotEnd || from.clone().addScaledVector(baseDir, w.range),
+    hit: hitAny, head: hitHead, targetId: shotTargetId || null
+  });
+
   if (hitAny) flashHitmarker(hitHead);
   muzzleBurst(obstruction ? obstruction.from : from);
-  playShot(w);
-  player.pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, player.pitch + w.recoil * (gun.aiming ? 0.7 : 1)));
+  const spatialAudio = combatApi('audio');
+  if (!(spatialAudio && spatialAudio.available)) playShot(w);
+  combatApplyShotRecoil(w, shotAt);
   updateCombatHud();
 }
 
 /* ---------------- damage, death & respawn ---------------- */
-function applyDamage(dmg, byName, head, byId) {
-  if (!alive) return;
-  const amount = Math.max(1, Math.min(120, Number(dmg) || 0));
-  health = Math.max(0, health - amount);
+function combatCopyPosition(value) {
+  if (!value || !Number.isFinite(value.x) || !Number.isFinite(value.y) || !Number.isFinite(value.z)) return null;
+  return new THREE.Vector3(value.x, value.y, value.z);
+}
+
+function combatWeaponId(value) {
+  const id = value && typeof value === 'object' ? value.id : value;
+  return typeof id === 'string' && /^[\w-]{1,32}$/.test(id) ? id : '';
+}
+
+function combatWeaponForId(id) {
+  try {
+    const peer = typeof net !== 'undefined' && net && net.players ? net.players.get(id) : null;
+    return peer ? combatWeaponId(peer.weapon) : '';
+  } catch (e) { return ''; }
+}
+
+function combatKillToken(info) {
+  if (!info) return null;
+  for (const key of ['killId', 'killToken', 'eventId', 'killEventId']) {
+    const value = info[key];
+    if (typeof value === 'string' && value.length > 0 && value.length <= 160) return value;
+    if (Number.isFinite(value) && value >= 0) return String(value);
+  }
+  return null;
+}
+
+function combatObserveNetPacket(msg) {
+  if (!msg || typeof msg !== 'object') return;
+  try {
+    if (typeof net === 'undefined' || !net) return;
+    if (msg.room && net.room && msg.room !== net.room) return;
+    const at = performance.now();
+    // This hook runs before the network dispatcher. Only CACHE metadata here;
+    // applyDamage/addKillFeed consume it after that dispatcher accepts a hit or
+    // death. A raw packet never produces a banner, damage or match score.
+    if (msg.t === 'hit' && msg.target === net.id) combatPendingHitPacket = { msg, at };
+    else if (msg.t === 'died') combatPendingDeathPacket = { msg, at };
+  } catch (e) { /* Optional compatibility with older four-/two-argument calls. */ }
+}
+
+function combatHitInfo(dmg, byName, head, byId, info, extra) {
+  let packet = null;
+  let activeKill = null;
+  try {
+    if (typeof net !== 'undefined' && net) {
+      const context = net.damageContext;
+      if (context && context.target === net.id && (!byId || context.byId === byId) &&
+          (!byName || safeName(context.by) === safeName(byName))) packet = context;
+      const kill = net.killContext;
+      if (kill && kill.victimId === net.id && (!byId || kill.byId === byId)) activeKill = kill;
+    }
+  } catch (e) { /* The fifth argument remains sufficient without network context. */ }
+  const pending = combatPendingHitPacket;
+  if (!packet && pending && performance.now() - pending.at < 250) {
+    const p = pending.msg;
+    const packetAmount = Math.max(1, Math.min(120, Number(p.dmg) || 0));
+    if ((!byId || p.byId === byId) && (!byName || safeName(p.by) === safeName(byName)) &&
+        packetAmount === Math.max(1, Math.min(120, Number(dmg) || 0)) &&
+        (head == null || !!p.head === !!head)) packet = p;
+  }
+  combatPendingHitPacket = null;
+  const supplied = typeof info === 'string' ? { weapon: info }
+    : info && typeof info === 'object' && !Array.isArray(info) ? info : null;
+  const source = Object.assign({}, packet, supplied,
+    extra && typeof extra === 'object' && !Array.isArray(extra) ? extra : null);
+  const kill = source.kill && typeof source.kill === 'object' ? source.kill : null;
+  const result = Object.assign({}, source, activeKill, kill);
+  const authority = kill && kill.authoritative === true ? kill : activeKill;
+  result.byId = authority ? authority.killerId || authority.byId || ''
+    : byId || result.byId || result.killerId || combatIdByName(byName || result.by);
+  result.killerId = result.byId || '';
+  result.byName = safeName(authority && (authority.by || authority.byName) || byName || result.byName || result.by);
+  result.head = authority ? !!authority.head
+    : head == null ? !!(result.head || result.headshot) : !!head;
+  result.weapon = combatWeaponId(result.weapon) || combatWeaponForId(result.byId);
+  result.killerPos = combatCopyPosition(result.killerPos) || combatCopyPosition(result.from) ||
+    combatCopyPosition(result.pos) || combatPositionForId(result.byId);
+  result.from = combatCopyPosition(source.from) || combatCopyPosition(result.killerPos);
+  result.pos = combatCopyPosition(result.killerPos);
+  result.victimPos = player.pos.clone();
+  result.at = performance.now();
+  // Server hit packets may contain both corrected HP and the actual death
+  // event. Preserve that event's token, weapon, headshot and source position.
+  result.authoritativeHealth = Number.isFinite(source.health) &&
+    (result.authoritative === true || (packet && typeof net !== 'undefined' && net && net.mode === 'ws'))
+    ? Math.max(0, Math.min(MAX_HEALTH, source.health)) : null;
+  return result;
+}
+
+function combatPositionForId(id) {
+  if (!id) return null;
+  try {
+    if (typeof net !== 'undefined' && net && net.id && id === net.id) return player.pos.clone();
+    if (typeof net !== 'undefined' && net && net.players) {
+      const r = net.players.get(id);
+      if (r) {
+        if (r.group && r.group.position) return r.group.position.clone();
+        if (Number.isFinite(r.x) && Number.isFinite(r.y) && Number.isFinite(r.z)) {
+          return new THREE.Vector3(r.x, r.y, r.z);
+        }
+      }
+    }
+  } catch (e) { /* position is cosmetic */ }
+  return null;
+}
+
+function combatLocalName() {
+  try { return typeof playerName === 'string' ? safeName(playerName) : ''; } catch (e) { return ''; }
+}
+
+function applyDamage(dmg, byName, head, byId, info) {
+  if (!alive) return false;
+  const numeric = Number(dmg);
+  if (!Number.isFinite(numeric) || numeric <= 0) return false;
+  const hit = combatHitInfo(numeric, byName, head, byId, info, arguments[5]);
+  if (combatIsFriendly(hit.byId, hit.byName, null, hit.killerTeam || hit.byTeam)) return false;
+  const hitWeapon = WEAPON_BY_ID[hit.weapon];
+  if (hit.killerPos && hitWeapon && hit.killerPos.distanceTo(player.pos) > hitWeapon.range) return false;
+  const amount = Math.max(1, Math.min(120, numeric));
+  health = hit.authoritativeHealth === null ? Math.max(0, health - amount) : hit.authoritativeHealth;
+  combatLastHitInfo = hit;
   lastDamageAt = performance.now();
   if (hurtEl) hurtEl.style.opacity = String(Math.min(0.9, 0.28 + (1 - health / MAX_HEALTH) * 0.7));
   setHealth(health);
-  playTone(head ? 190 : 150, 0.1, 'sawtooth', 0.1);
-  if (health <= 0) die(byName, byId);
+  playTone(hit.head ? 190 : 150, 0.1, 'sawtooth', 0.1);
+  const impactPos = player.pos.clone().addScaledVector(combatWorldUp, combatBodyHeight(player) * 2 / 3);
+  combatEmit('sfx', { kind: 'hit', weapon: hit.weapon, position: impactPos.clone(), volume: 0.9 });
+  if (hit.byName || hit.byId) {
+    const fxApi = combatApi('combatFx');
+    if (fxApi && typeof fxApi.damageDirection === 'function') {
+      try { fxApi.damageDirection({ from: hit.from, pos: hit.killerPos, byId: hit.byId, byName: hit.byName, amount }); } catch (e) { /* optional */ }
+    }
+  }
+  combatEmit('damage', {
+    amount, byName: hit.byName, byId: hit.byId, health, weapon: hit.weapon, head: hit.head,
+    from: combatCopyPosition(hit.from), killerPos: combatCopyPosition(hit.killerPos), pos: impactPos
+  });
+  if (health <= 0) die(hit.byName, hit.byId, hit);
+  return true; // Network callers must not force HP/SFX after a rejected hit.
 }
 
-function die(byName, byId) {
+function die(byName, byId, hitInfo) {
   if (!alive) return;
+  const last = combatLastHitInfo;
+  const matchesLast = last && performance.now() - last.at < 8000 &&
+    (!byId || byId === last.byId) && (!byName || safeName(byName) === last.byName);
+  const hit = hitInfo && typeof hitInfo === 'object' ? hitInfo : matchesLast ? last : {};
+  const killerId = byId || hit.byId || hit.killerId || combatIdByName(byName);
+  const killerName = safeName(byName || hit.byName || hit.by);
+  const victimPos = player.pos.clone(); // Freeze before movement/ride reset hooks run.
+  const deathSoundPos = victimPos.clone().addScaledVector(combatWorldUp, combatBodyHeight(player) * 2 / 3);
+  const killerPos = combatCopyPosition(hit.killerPos) || combatCopyPosition(hit.pos) ||
+    combatCopyPosition(hit.from) || combatPositionForId(killerId);
   alive = false;
-  deaths++;
-  respawnAt = performance.now() + 3200;
+  // The network may already have applied this absolute count before announcing
+  // a missed-hit death. Adopting it must not add a second local death.
+  deaths = hit.authoritative === true && Number.isFinite(hit.deaths)
+    ? Math.max(0, Math.floor(hit.deaths)) : deaths + 1;
+  if (hit.authoritative === true && Number.isFinite(hit.kills)) kills = Math.max(0, Math.floor(hit.kills));
+  const diedAt = performance.now();
+  respawnAt = diedAt + 3200;
   gun.trigger = false;
   gun.aiming = false;
   gun.firePose = 0;
   gun.kick = 0;
+  gun.shotAge = -1;
+  gun.mechanismCued = false;
+  gun.recoilSide = 0;
+  combatRecoilAccum = 0;
+  combatBurstShots = 0;
   cancelReload(false);
   if (typeof resetPlayerMotion === 'function') resetPlayerMotion();
   if (typeof cancelQuickBuild === 'function') cancelQuickBuild();
@@ -1283,16 +2194,54 @@ function die(byName, byId) {
   updateGunVisual(0);
   setHealth(0);
   setKd();
-  if (deathEl) deathEl.classList.add('show');
+  const info = Object.assign({}, hit, {
+    byId: killerId || '', killerId: killerId || '', victimId: typeof net !== 'undefined' && net ? net.id : '',
+    weapon: combatWeaponId(hit.weapon) || combatWeaponForId(killerId), head: !!hit.head,
+    pos: killerPos, killerPos: combatCopyPosition(killerPos), victimPos,
+    killerTeam: hit.killerTeam || combatTeamForId(killerId),
+    victimTeam: hit.victimTeam || combatTeamForId(typeof net !== 'undefined' && net ? net.id : ''),
+    localDeath: true, confirmed: true, deaths
+  });
+  const token = combatKillToken(info);
+  if (token !== null) info.killId = token;
+  const killcam = combatApi('killcam');
+  const fxApi = combatApi('combatFx');
+  const fallback = !killcam && fxApi && typeof fxApi.killBanner === 'function';
+  if (deathEl) {
+    deathEl.classList.toggle('show', !killcam);
+    deathEl.classList.toggle('combat-fx-fallback', !!fallback);
+    const heading = deathEl.querySelector('h2');
+    if (heading) heading.textContent = killerName !== '???' ? killerName + ' got you' : 'Eliminated';
+  }
   if (respawnInEl) respawnInEl.textContent = '3';
-  if (deathEl) deathEl.querySelector('h2').textContent = byName && byName !== '???' ? safeName(byName) + ' got you' : 'Eliminated';
-  addKillFeed(byName, playerName);
-  netSend({ t: 'died', id: net.id, victim: playerName, by: safeName(byName), byId: byId || '', weapon: currentWeapon().id, kills, deaths });
+  // Positional sound first suppresses audio's death/killfeed fallbacks.
+  combatEmit('sfx', { kind: 'death', weapon: info.weapon, position: deathSoundPos, volume: 0.9, killId: info.killId });
+  // Core/killcam/audio consume this after the local alive flag is already false.
+  combatEmit('death', playerName, killerName, info);
+  if (fallback) {
+    try { fxApi.killBanner(playerName, killerName, info); } catch (e) { /* optional */ }
+  }
+  addKillFeed(killerName, playerName, info);
+  // A server/host death token already represents the reported death. Only the
+  // legacy victim-confirmed path needs to send a fresh died report.
+  if (info.authoritative !== true || token === null) {
+    netSend({
+      t: 'died', id: net.id, victimId: net.id, victim: playerName, by: killerName,
+      byId: info.byId, killerId: info.killerId, weapon: info.weapon, head: info.head,
+      killId: info.killId, killToken: info.killToken, eventId: info.eventId,
+      victimPos: info.victimPos, killerPos: info.killerPos, life: info.life, generation: info.generation,
+      kills, deaths
+    });
+  }
   playTone(90, 0.5, 'sawtooth', 0.14);
 }
 
 function doRespawn() {
-  const spawn = findSpawn();
+  if (combatWorldBusy()) { combatReleaseGun(false); return false; }
+  let spawn = null;
+  const modes = combatApi('modes');
+  try { if (modes && typeof modes.respawnPoint === 'function') spawn = modes.respawnPoint(modes.localTeam); } catch (e) { /* optional */ }
+  if (!spawn || !Number.isFinite(spawn.x) || !Number.isFinite(spawn.y) || !Number.isFinite(spawn.z)) spawn = findSpawn();
   player.pos.set(spawn.x, spawn.y, spawn.z);
   player.vel.set(0, 0, 0);
   if (typeof resetPlayerMotion === 'function') resetPlayerMotion();
@@ -1306,35 +2255,137 @@ function doRespawn() {
   gun.trigger = false;
   gun.firePose = gun.kick = gun.viewAim = 0;
   gun.equip = 1;
+  combatRecoilAccum = 0;
+  gun.recoilSide = 0;
+  gun.shotAge = -1;
+  gun.mechanismCued = false;
+  gun.bloom.fill(0);
+  gun.shots.fill(0);
+  gun.lastSpread = 0;
+  combatBurstShots = 0;
+  combatRecoilStamp = combatBurstStamp = -9999;
+  combatLastHitInfo = combatPendingHitPacket = combatPendingDeathPacket = null;
   lastDamageAt = -9999;
-  if (deathEl) deathEl.classList.remove('show');
+  if (deathEl) deathEl.classList.remove('show', 'combat-fx-fallback');
   if (hurtEl) hurtEl.style.opacity = '0';
   setHealth(health);
+  combatOnLoadoutChanged();
+  combatEmit('sfx', {
+    kind: 'respawn', position: player.pos.clone().addScaledVector(combatWorldUp, combatBodyHeight(player) * 2 / 3), volume: 0.5
+  });
+  // Emit once, after alive/position reset and before the view gun is restored.
+  combatEmit('respawn');
   updateGunVisual(0);
   updateCombatHud();
   netSend({ ...combatNetState('respawn'), id: net.id });
+  return true;
 }
 
-function addKillFeed(killer, victim) {
-  if (!killfeedEl) return;
+function combatKillfeedInfo(killer, victim, info) {
+  const supplied = info && typeof info === 'object' && !Array.isArray(info) ? info : {};
+  let packet = null;
+  const pending = combatPendingDeathPacket;
+  if (pending && performance.now() - pending.at < 250 &&
+      safeName(pending.msg.by) === safeName(killer) && safeName(pending.msg.victim) === safeName(victim)) {
+    packet = pending.msg;
+    combatPendingDeathPacket = null;
+  }
+  const source = Object.assign({}, packet, supplied);
+  const self = typeof net !== 'undefined' && net ? net.id : '';
+  const killerId = source.killerId || source.byId || combatIdByName(killer);
+  const victimId = source.victimId || (source.t === 'died' ? source.id : '') || combatIdByName(victim);
+  const victimPos = combatCopyPosition(source.victimPos) || combatPositionForId(victimId);
+  const killerPos = combatCopyPosition(source.killerPos) ||
+    (source.localDeath ? combatCopyPosition(source.pos) : null) || combatPositionForId(killerId);
+  const predicted = !!(source.predicted || source.optimistic || source.localKill);
+  const confirmed = !predicted &&
+    source.confirmed !== false && source.authoritative !== false &&
+    (!!packet || source.confirmed === true || source.authoritative === true);
+  const result = Object.assign({}, source, {
+    confirmed, killerId: killerId || '', byId: killerId || '', victimId: victimId || '',
+    weapon: combatWeaponId(source.weapon) || combatWeaponForId(killerId), head: source.head == null ? !!source.headshot : !!source.head,
+    killerPos, victimPos, pos: combatCopyPosition(victimPos),
+    killerTeam: source.killerTeam || combatTeamForId(killerId), victimTeam: source.victimTeam || combatTeamForId(victimId),
+    // Modes reserves localKill for old HP-prediction events. Never set it on a
+    // confirmed/scoring event; the overlay identifies personal kills by IDs.
+    predicted, localKill: false, optimistic: false,
+    personalKill: !!self && killerId === self && victimId !== self,
+    localDeath: source.localDeath === true || (!!self && victimId === self)
+  });
+  const token = combatKillToken(result);
+  if (token !== null) result.killId = token; // Preserve aliases as well as the canonical token.
+  return result;
+}
+
+function addKillFeed(killer, victim, info) {
+  info = combatKillfeedInfo(killer, victim, info);
+  const killerName = safeName(killer);
+  const victimName = safeName(victim);
+  const now = performance.now();
+  const token = combatKillToken(info);
+  const ordinal = Number.isFinite(info.life) ? 'life:' + info.life : Number.isFinite(info.deaths) ? 'death:' + info.deaths : '';
+  const key = token !== null && info.confirmed ? 'kill:' + token
+    : (info.confirmed ? 'confirmed:' : 'row:') + (info.killerId || killerName) + '>' +
+      (info.victimId || victimName) + ':' + (info.generation == null ? '' : info.generation) + ':' + ordinal;
+  const seen = combatKfDedupe.get(key);
+  if (seen !== undefined && (token !== null && info.confirmed || ordinal || now - seen < 2600)) return true;
+  if (info.confirmed && info.authoritative === true && info.localDeath && alive) {
+    // A confirmed died packet must also activate death/killcam when its hit
+    // packet was missed. die posts the same token after flipping alive=false,
+    // so this path produces one local death and one row without recursion.
+    if (typeof net !== 'undefined' && net && Number.isSafeInteger(info.life) &&
+        Number.isSafeInteger(net.localLife) && info.life < net.localLife) return true;
+    if (!Number.isFinite(info.deaths) && typeof net !== 'undefined' && net && net.killContext &&
+        net.killContext.killId === token) info.deaths = deaths; // netApplyOwnState already adopted this count.
+    die(killerName, info.killerId, info);
+    return true;
+  }
+  combatKfDedupe.set(key, now);
+  while (combatKfDedupe.size > 256) combatKfDedupe.delete(combatKfDedupe.keys().next().value);
+  // A legacy two-name call still renders a row. Only accepted death packets or
+  // explicitly confirmed actual deaths can reach the match-scoring hook.
+  if (!killfeedEl) {
+    if (info.confirmed) combatEmit('killfeed', killerName, victimName, info);
+    return true;
+  }
+  const weaponId = info.weapon;
+  const weapon = weaponId && WEAPON_BY_ID[weaponId] ? WEAPON_BY_ID[weaponId].name : (weaponId ? weaponId.toUpperCase() : 'eliminated');
+  const killerTeam = info.killerTeam;
+  const victimTeam = info.victimTeam;
   const row = document.createElement('div');
   row.className = 'kf';
   const a = document.createElement('b');
-  a.textContent = safeName(killer);
+  a.className = 'kf-k' + (killerTeam ? ' kf-' + killerTeam : '');
+  a.textContent = killerName;
   const mid = document.createElement('i');
-  mid.textContent = 'eliminated';
+  mid.className = 'kf-x';
+  mid.textContent = weapon;
   const b = document.createElement('b');
-  b.textContent = safeName(victim);
+  b.className = 'kf-v' + (victimTeam ? ' kf-' + victimTeam : '');
+  b.textContent = victimName;
   row.append(a, mid, b);
+  if (info.head) {
+    const hs = document.createElement('span');
+    hs.className = 'kf-hs';
+    hs.textContent = 'HEADSHOT';
+    row.appendChild(hs);
+  }
   killfeedEl.appendChild(row);
   while (killfeedEl.children.length > 5) killfeedEl.removeChild(killfeedEl.firstChild);
   setTimeout(() => row.remove(), 5200);
+  if (info.confirmed) combatEmit('killfeed', killerName, victimName, info);
+  return true;
 }
 
 /* ---------------- weapon selection & modes ---------------- */
-function selectWeapon(i) {
+function selectWeapon(i, silent) {
   if (!Number.isInteger(i) || i < 0 || i >= WEAPONS.length) return;
+  if (!combatWeaponAllowed(WEAPONS[i])) {
+    if (typeof toast === 'function') toast('Not in this loadout');
+    return;
+  }
   if (gun.index === i) return;
+  combatClearGeneratedRecoil();
   cancelReload(false);
   gun.index = i;
   gun.cooldown = 0.18;
@@ -1342,49 +2393,80 @@ function selectWeapon(i) {
   gun.trigger = false;
   gun.firePose = gun.kick = gun.viewAim = 0;
   gun.equip = 1;
+  gun.shotAge = -1;
+  gun.mechanismCued = false;
+  combatBurstShots = 0;
+  combatRecoilStamp = combatBurstStamp = -9999;
   refreshGunModels();
-  playTone(420, 0.04, 'square', 0.05);
-  netSend(combatNetState());
+  if (!silent && alive && !combatActionBlocked()) {
+    playTone(420, 0.04, 'square', 0.05);
+    combatEmit('sfx', { kind: 'ui', action: 'swap', weapon: WEAPONS[i].id, position: combatSourcePosition(), volume: 0.4 });
+  }
+  if (typeof netSend === 'function') netSend(combatNetState());
 }
 
 function cycleWeapon(direction) {
-  selectWeapon((gun.index + (direction < 0 ? -1 : 1) + WEAPONS.length) % WEAPONS.length);
+  const step = direction < 0 ? -1 : 1;
+  for (let n = 1; n <= WEAPONS.length; n++) {
+    const idx = ((gun.index + step * n) % WEAPONS.length + WEAPONS.length) % WEAPONS.length;
+    if (combatWeaponAllowed(WEAPONS[idx])) { selectWeapon(idx); return; }
+  }
 }
 
 function setCombatMode(on) {
   combatMode = !!on;
   document.body.classList.toggle('combat', combatMode);
   document.body.classList.toggle('build', !combatMode);
-  hintEl.classList.add('hidden');
-  gun.trigger = false;
-  gun.aiming = false;
-  gun.firePose = gun.kick = gun.viewAim = 0;
-  cancelReload(false);
+  // The dedicated Home/Pause controller owns visibility when installed.
+  // A loadout or build-mode change must not silently hide the Home screen.
+  if (!(BC.api && BC.api.menus)) hintEl.classList.add('hidden');
+  combatReleaseGun(false);
+  gun.viewAim = 0;
+  combatOnLoadoutChanged();
   if (typeof cancelQuickBuild === 'function') cancelQuickBuild();
   if (typeof resetBuildingInput === 'function') resetBuildingInput();
   updateGunVisual(0);
   netSend(combatNetState());
   if (highlight) highlight.visible = false;
-  if (audio()) playTone(combatMode ? 520 : 360, 0.06, 'square', 0.05);
-  toast(combatMode ? 'Combat mode — left click shoots' : 'Build mode — mine and place blocks');
+  combatEmit('sfx', { kind: 'ui', action: 'combatMode', position: combatSourcePosition(), volume: 0.2 });
+  playTone(combatMode ? 520 : 360, 0.06, 'square', 0.05);
+  if (typeof toast === 'function') toast(combatMode ? 'Combat mode — left click shoots' : 'Build mode — mine and place blocks');
 }
 
 function toggleMute() {
-  muted = !muted;
-  toast(muted ? 'Sound muted' : 'Sound on');
+  const next = !combatReadMute(); // Choose once; every bridge adopts this value.
+  muted = next; // Set before the store can resume the shared audio() context.
+  let adopted = next;
+  const settings = combatSettingsStore();
+  try {
+    if (settings && typeof settings.set === 'function') {
+      const saved = settings.set('muted', next);
+      if (typeof saved === 'boolean') adopted = saved;
+    }
+  } catch (e) { /* Local-file storage failure must not disable the toggle. */ }
+  combatSyncMute(adopted);
+  if (typeof toast === 'function') toast(muted ? 'Sound muted' : 'Sound on');
 }
 
 /* ---------------- per-frame combat update ---------------- */
 function updateCombat(dt, now) {
   dt = Math.max(0, Number.isFinite(dt) ? dt : 0);
   now = Number.isFinite(now) ? now : performance.now();
+  const blocked = combatActionBlocked();
+  if (blocked) combatReleaseGun();
+  if (combatWorldBusy()) { updateGunVisual(0); updateFx(dt); return; }
+  if (alive && !combatWeaponAllowed(currentWeapon())) combatOnLoadoutChanged();
+  const w = currentWeapon();
   const reduced = combatReducedMotion && combatReducedMotion.matches;
   const scoped = isScopeActive();
   const sprint = !reduced && alive && !scoped && !gun.trigger && !player.fly && player.groundSpeed > 5.3 &&
     (player.sprinting || keys.ShiftLeft || keys.ShiftRight);
-  const targetFov = scoped ? currentWeapon().scopeFov : 74 + (sprint ? 3 : 0);
-  const nextFov = camera.fov + (targetFov - camera.fov) * combatDamp(reduced ? 20 : 14, dt);
-  if (Math.abs(camera.fov - targetFov) > 0.001) {
+  const riding = combatApi('riding'), killcam = combatApi('killcam'), jetpack = combatApi('jetpack');
+  const externalFov = !!((riding && riding.active) || (killcam && killcam.active) ||
+    (!scoped && ((jetpack && jetpack.active) || player.fly)));
+  const targetFov = scoped ? w.scopeFov : 74 + (sprint ? 3 : 0);
+  if (!externalFov && Math.abs(camera.fov - targetFov) > 0.001) {
+    const nextFov = camera.fov + (targetFov - camera.fov) * combatDamp(combatAdsRate(w, scoped, reduced), dt);
     camera.fov = Math.abs(nextFov - targetFov) < 0.001 ? targetFov : nextFov;
     camera.updateProjectionMatrix();
   }
@@ -1401,12 +2483,18 @@ function updateCombat(dt, now) {
   }
   if (localAvatar) localAvatar.rotation.z += (0 - localAvatar.rotation.z) * combatDamp(8, dt);
 
-  const cooldownCarry = gun.cooldown > 0 ? Math.min(0, gun.cooldown - dt) : 0;
-  gun.cooldown = Math.max(0, gun.cooldown - dt);
-  gun.kick *= Math.exp(-currentWeapon().recover * dt);
+  // Input owns semi-auto DOWN edges. Only automatic weapons sample a held
+  // trigger below, at most once per frame. Keep sub-frame cadence carry during
+  // normal frames, but drop missed-round debt after a hitch (never catch up).
+  const interval = 60 / w.rpm;
+  const cooldownCarry = !blocked && gun.cooldown > 0 && dt <= interval ? Math.min(0, gun.cooldown - dt) : 0;
+  if (!blocked) gun.cooldown = Math.max(0, gun.cooldown - dt);
+  if (!blocked && combatStepHandling(dt, now, w) && typeof updateCamera === 'function') updateCamera(0);
+  gun.kick *= Math.exp(-w.recover * dt);
   if (gun.kick < 0.0001) gun.kick = 0;
-  gun.firePose = Math.max(0, gun.firePose - dt * 3.5);
-  if (gun.reloading > 0 && (!combatMode || combatQuickBuilding() || craftOpen || gun.reloadIndex !== gun.index)) cancelReload();
+  gun.firePose = Math.max(0, gun.firePose - dt / Math.max(0.06, w.handling.cycle));
+  if (gun.reloading > 0 && (blocked || !combatMode || combatQuickBuilding() ||
+      !combatWeaponAllowed(currentWeapon()) || gun.reloadIndex !== gun.index)) cancelReload();
   if (gun.reloading > 0) {
     gun.reloading -= dt;
     if (gun.reloading <= 0) {
@@ -1420,7 +2508,7 @@ function updateCombat(dt, now) {
       reloadFillEl.style.width = getReloadProgress() * 100 + '%';
     }
   }
-  if (gun.trigger && currentWeapon().auto) {
+  if (!blocked && gun.trigger && currentWeapon().auto) {
     const before = gun.ammo[gun.index];
     fireOnce();
     if (gun.ammo[gun.index] < before) gun.cooldown = Math.max(0, gun.cooldown + cooldownCarry);
@@ -1436,28 +2524,32 @@ function updateCombat(dt, now) {
 }
 
 function updateGunVisual(dt) {
-  const active = alive && combatMode && !combatQuickBuilding() && !craftOpen;
+  const active = alive && combatMode && !combatQuickBuilding() && !combatActionBlocked() && combatWeaponAllowed(currentWeapon());
   const scoped = isScopeActive();
   combatUpdateScopeHud();
-  const showView = !thirdPerson && active && !scoped;
   const w = currentWeapon(), reload = getReloadProgress();
+  const tube = scoped && w.view === 'sniper-tube';
+  const showView = active && (!thirdPerson || scoped) && !tube;
   const reduced = combatReducedMotion && combatReducedMotion.matches;
-  const aim = active && gun.aiming && reload < 0 ? 1 : 0;
-  gun.viewAim += (aim - gun.viewAim) * combatDamp(18, dt);
+  const aim = active && gun.aiming ? 1 : 0;
+  gun.viewAim += (aim - gun.viewAim) * combatDamp(combatAdsRate(w, !!aim, reduced), dt);
+  if (Math.abs(gun.viewAim - aim) <= 0.001) gun.viewAim = aim;
   gun.equip *= Math.exp(-18 * Math.max(0, dt));
   vmRoot.visible = showView;
   if (viewGun) {
     viewGun.visible = showView;
     updateWeaponReload(viewGun, active ? reload : -1, gun.reloadRounds);
+    if (reload < 0) combatSampleShotMechanism(viewGun, active ? gun.shotAge : -1, gun.shots[gun.index]);
     const rp = viewGun.userData.reloadPose, a = gun.viewAim;
     const move = reduced ? 0 : Math.min(1, Math.max(0, player.groundSpeed) / 7.3) * (1 - a) * (reload < 0 ? 1 : 0);
     const phase = Number.isFinite(player.walkPhase) ? player.walkPhase : 0;
     const recoil = gun.kick * w.kickBack * (reduced ? 0.35 : 1);
+    const adsY = -viewGun.userData.adsAnchor.y * viewGun.scale.y;
     // Base + offsets, not an offset accumulated on last frame's position.
     viewGun.position.set(
-      0.27 + (0.008 - 0.27) * a + rp.x + Math.sin(phase) * 0.008 * move,
-      -0.27 + ((w.id === 'sniper' ? -0.185 : -0.15) + 0.27) * a + rp.y - gun.equip * (reduced ? 0.03 : 0.12) + Math.cos(phase * 2) * 0.006 * move,
-      -0.56 + 0.045 * a + rp.z + recoil
+      0.27 * (1 - a) + rp.x + Math.sin(phase) * 0.008 * move,
+      -0.27 + (adsY + 0.27) * a + rp.y - gun.equip * (reduced ? 0.03 : 0.12) + Math.cos(phase * 2) * 0.006 * move,
+      -0.56 + (w.handling.adsZ + 0.56) * a + rp.z + recoil
     );
     viewGun.rotation.set(rp.pitch, rp.yaw, rp.roll);
     combatViewHands(viewGun);
@@ -1467,23 +2559,116 @@ function updateGunVisual(dt) {
     if (held) {
       held.visible = active && thirdPerson && !scoped;
       updateWeaponReload(held, active ? reload : -1, gun.reloadRounds);
+      if (reload < 0) combatSampleShotMechanism(held, active ? gun.shotAge : -1, gun.shots[gun.index]);
     }
     // Avatar visibility belongs to camera collision/movement, not combat.
     if (scoped) localAvatar.visible = false;
   }
-  if (active && reload < 0 && !scoped) {
+  if (active && reload < 0 && !tube) {
     camera.getWorldPosition(combatVisualOrigin);
     camera.getWorldDirection(combatVisualDir);
-    const block = raycastVoxel(w.range, combatVisualOrigin, combatVisualDir);
-    combatVisualTarget.copy(combatVisualOrigin).addScaledVector(combatVisualDir, block ? block.dist : w.range);
+    const solid = combatRaycastSolid(combatVisualOrigin, combatVisualDir, w.range, combatSolidRayOut);
+    combatVisualTarget.copy(combatVisualOrigin).addScaledVector(combatVisualDir, solid.distance);
     combatGetMuzzle(combatAimMuzzle);
     if ((combatVisualTarget.x - combatAimMuzzle.x) * combatVisualDir.x +
         (combatVisualTarget.y - combatAimMuzzle.y) * combatVisualDir.y +
         (combatVisualTarget.z - combatAimMuzzle.z) * combatVisualDir.z < 0.1) {
       combatVisualTarget.copy(combatAimMuzzle).addScaledVector(combatVisualDir, w.range);
     }
-    if (showView) combatAimGunAt(viewGun, combatVisualTarget);
-    if (thirdPerson && localAvatar) combatAimGunAt(localAvatar.userData.gun, combatVisualTarget);
+    if (showView) {
+      combatAimGunAt(viewGun, combatVisualTarget);
+      // Mechanism posing and kick are visual feedback, sampled on top of the
+      // actual camera/barrel solve. Real ADS points remain centred afterwards.
+      const rp = viewGun.userData.reloadPose, feedback = reduced ? 0.35 : 1;
+      viewGun.rotation.x += rp.pitch + gun.kick * w.recoil * w.handling.viewRise * feedback;
+      viewGun.rotation.y += rp.yaw;
+      viewGun.rotation.z += rp.roll + gun.kick * w.handling.viewRoll * feedback;
+      combatAlignViewSight(viewGun, gun.viewAim);
+    }
+    if (thirdPerson && !scoped && localAvatar) combatAimGunAt(localAvatar.userData.gun, combatVisualTarget);
   }
+  if (scoped && !tube && viewGun) combatProjectScopeHousing(viewGun);
   if (dt > 0) combatLookNeedsSync = false;
+}
+
+function combatReloadPhase() {
+  const progress = getReloadProgress();
+  if (progress < 0) return 'ready';
+  const stages = currentWeapon().handling.reloadStages;
+  let phase = 'raise weapon';
+  for (let i = 0; i < stages.length && progress >= stages[i][0]; i++) phase = stages[i][1];
+  return phase;
+}
+
+function combatHandlingProfile(id) {
+  const w = id == null ? currentWeapon() : WEAPON_BY_ID[id];
+  return w ? w.handling : null;
+}
+
+/* On-demand observation only; normal frames never allocate a second gun state.
+   Probes/audio/HUD may read the profile or the existing gun/viewmodel directly. */
+function combatHandlingState() {
+  const w = currentWeapon();
+  return {
+    weapon: w.id, view: w.view, optic: w.optic, role: w.role,
+    ads: isScopeActive(), aimProgress: gun.viewAim, fov: camera.fov,
+    vmRootVisible: vmRoot.visible, viewGunVisible: !!(viewGun && viewGun.visible),
+    bloom: gun.bloom[gun.index], lastSpread: gun.lastSpread,
+    recoilPitch: combatRecoilAccum, recoilYaw: gun.recoilSide,
+    shotAge: gun.shotAge, mechanism: w.handling.mechanism,
+    mechanismProgress: gun.shotAge < 0 ? -1 : combatClamp01(gun.shotAge / w.handling.cycle),
+    reloadProgress: getReloadProgress(), reloadPhase: combatReloadPhase(), reloadTotal: gun.reloadTotal
+  };
+}
+
+/* ---------------- runtime wiring ---------------- */
+if (typeof BC !== 'undefined' && BC && typeof BC.on === 'function') {
+  if (BC.api) {
+    const api = BC.api.combat || {};
+    api.getProfile = combatHandlingProfile;
+    api.getState = combatHandlingState;
+    api.isScopeActive = isScopeActive;
+    api.muzzleModel = combatMuzzleModel;
+    api.raycastSolidDragon = combatRaycastDragon;
+    api.raycastSolid = combatRaycastSolid;
+    Object.defineProperties(api, {
+      gun: { enumerable: true, configurable: true, get: () => gun },
+      weapon: { enumerable: true, configurable: true, get: currentWeapon },
+      profile: { enumerable: true, configurable: true, get: () => currentWeapon().handling },
+      viewGun: { enumerable: true, configurable: true, get: () => viewGun },
+      vmRoot: { enumerable: true, configurable: true, get: () => vmRoot },
+      reloadPhase: { enumerable: true, configurable: true, get: combatReloadPhase }
+    });
+    BC.api.combat = api;
+  }
+  BC.on('netPacket', combatObserveNetPacket, -20);
+  BC.on('modeChanged', combatOnLoadoutChanged);
+  BC.on('loadoutChanged', combatOnLoadoutChanged);
+  BC.on('settingsChanged', (key, value) => {
+    if (key === 'muted') combatSyncMute(value);
+    else if (key === 'mode') combatOnLoadoutChanged();
+  });
+  BC.on('inputReset', () => combatReleaseGun());
+  BC.on('preFrame', (dt, now, playing) => {
+    if (!playing || combatActionBlocked()) combatReleaseGun();
+  }, -20);
+  BC.on('worldReset', () => {
+    combatReleaseGun(false);
+    gun.bloom.fill(0);
+    gun.shots.fill(0);
+    gun.lastSpread = 0;
+    combatLastHitInfo = combatPendingHitPacket = combatPendingDeathPacket = null;
+    combatKfDedupe.clear();
+    combatOnLoadoutChanged();
+  });
+  BC.on('netStatus', () => {
+    combatPendingHitPacket = combatPendingDeathPacket = null;
+    combatOnLoadoutChanged();
+  });
+  if (typeof BC.whenReady === 'function') {
+    BC.whenReady(() => {
+      combatSyncMute();
+      combatOnLoadoutChanged();
+    });
+  }
 }
