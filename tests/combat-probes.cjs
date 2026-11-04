@@ -38,12 +38,14 @@ function weaponProbe(expected) {
         check(g.userData.muzzle.getWorldPosition(new b.THREE.Vector3()).toArray().every(Number.isFinite), 'Non-finite muzzle', w.id);
       }
       b.gun.ammo[index] = w.mag;
+      // Compare reload recovery with the ready pose, not a shot mechanism
+      // still cycling (the sniper bolt takes 1.08s; the cylinder indexes).
+      const neutral = poses();
       b.fireOnce();
       check(b.gun.ammo[index] === w.mag - 1, 'Real fire did not consume one round', w.id);
       b.fireOnce();
       check(b.gun.ammo[index] === w.mag - 1, 'Cooldown allowed an immediate second shot', w.id);
-      step(0.7);
-      const neutral = poses();
+      step(Math.max(0.7, w.handling.cycle + 0.05));
       const initialAmmo = b.gun.ammo[index];
       b.startReload();
       const duration = b.gun.reloading;
@@ -127,6 +129,8 @@ function scopeProbe() {
   return k.state(() => {
     const scope = k.api('isScopeActive');
     const optics = { pistol: 'reflex', rifle: 'holo', shotgun: 'spread', smg: 'chevron', sniper: 'mildot', revolver: 'precision', lmg: 'support' };
+    const views = { pistol: 'pistol-irons', rifle: 'rifle-reflex', shotgun: 'shotgun-rib', smg: 'smg-hood',
+      sniper: 'sniper-tube', revolver: 'revolver-notch', lmg: 'lmg-aperture' };
     for (const weapon of b.WEAPONS) check(weapon.optic === optics[weapon.id], 'Missing/distinct weapon optic mapping', { weapon: weapon.id, optic: weapon.optic });
     b.setCombatMode(true);
     k.resetKeys();
@@ -164,13 +168,30 @@ function scopeProbe() {
       b.gun.aiming = true; settle();
       check(scope() && document.body.classList.contains('scoped'), 'Aim did not enter optical scope', { thirdPerson, weapon: b.WEAPONS[index].id });
       check(b.camera.position.distanceTo(eye()) < 0.04, 'Scoped camera did not move to eye plane', thirdPerson);
-      check(!b.localAvatar().visible && !k.api('viewGun').visible, 'Scoped optics still show the avatar/view gun');
+      const weapon = b.WEAPONS[index], view = k.api('viewGun');
+      check(!b.localAvatar().visible, 'ADS eye view still shows the full local avatar');
+      check(view.visible === (weapon.id !== 'sniper') && k.api('vmRoot').visible === (weapon.id !== 'sniper'),
+        'Open ADS must show its actual model; only the sniper tube hides it', { weapon: weapon.id, visible: view.visible });
       const overlay = document.getElementById('scopeOverlay');
       check(overlay && getComputedStyle(overlay).display !== 'none' && overlay.getBoundingClientRect().width > 0, 'Scope overlay has no rendered layout');
       check(overlay.dataset.optic === b.WEAPONS[index].optic, 'Scope overlay kept the previous weapon optic', { weapon: b.WEAPONS[index].id, optic: overlay.dataset.optic });
+      check(overlay.dataset.view === views[weapon.id] && view.userData.adsView === views[weapon.id],
+        'Aiming view did not switch its physical sight geometry', { weapon: weapon.id, data: overlay.dataset.view, model: view.userData.adsView });
+      if (weapon.id !== 'sniper') {
+        const sight = view.userData.adsAimPoint;
+        check(sight?.isObject3D && view.userData.adsRearPoint?.isObject3D && view.userData.opticBounds,
+          'Open sight has no physical front/rear/housing geometry markers', weapon.id);
+        view.updateWorldMatrix(true, true); b.camera.updateMatrixWorld(true);
+        const projected = sight.getWorldPosition(new b.THREE.Vector3()).project(b.camera);
+        check(Math.abs(projected.x) < 0.018 && Math.abs(projected.y) < 0.018,
+          'Physical sight aim point is not centered on the camera ray', { weapon: weapon.id, projected: projected.toArray() });
+      }
       for (const id of ['scopeWeapon', 'scopeZoom']) check(document.getElementById(id)?.textContent.trim(), 'Scope label missing: ' + id);
-      check(b.camera.fov < normalFov - 5 && b.camera.fov > 1, 'Scope did not provide optical zoom');
-      zoom.push({ thirdPerson, weapon: b.WEAPONS[index].id, optic: overlay.dataset.optic, fov: b.camera.fov, normalFov });
+      check(b.camera.fov < normalFov && b.camera.fov > 1, 'ADS FOV is invalid or wider than hipfire');
+      const frame = document.getElementById('scopeFrame'), style = getComputedStyle(frame), rect = frame.getBoundingClientRect();
+      zoom.push({ thirdPerson, weapon: weapon.id, optic: overlay.dataset.optic, view: overlay.dataset.view,
+        fov: b.camera.fov, normalFov, frame: { width: rect.width, height: rect.height, radius: style.borderRadius, display: style.display },
+        mask: getComputedStyle(overlay).backgroundImage });
       b.gun.aiming = false; clear('aim release');
       b.gun.aiming = true; settle();
       b.selectWeapon((index + 1) % b.WEAPONS.length); clear('weapon change');
@@ -178,6 +199,9 @@ function scopeProbe() {
     const fovs = zoom.filter((r) => r.thirdPerson).map((r) => r.fov);
     const sniper = zoom.find((r) => r.thirdPerson && r.weapon === 'sniper').fov;
     check(Math.abs(sniper - Math.min(...fovs)) < 0.1 && Math.max(...fovs) - sniper > 5, 'Sniper is not the strongest per-weapon optical zoom', zoom);
+    check(new Set(zoom.filter((r) => r.thirdPerson).map((r) => r.view)).size === 7, 'Weapon aiming views are not distinct');
+    check(new Set(zoom.filter((r) => r.thirdPerson).map((r) => JSON.stringify(r.frame))).size >= 4,
+      'Weapon sights still reuse one identical circular housing', zoom);
     b.gun.aiming = true; settle(); b.setCombatMode(false); clear('build mode');
     b.setCombatMode(true); b.gun.aiming = true; settle(); b.applyDamage(120, 'Regression');
     b.updateCombat(0, performance.now()); b.updateAvatar(0); b.updateCamera(0);

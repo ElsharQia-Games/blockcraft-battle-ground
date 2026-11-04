@@ -16,6 +16,8 @@ function bootProbe() {
   return {
     protocol: location.protocol, scripts: scripts.map((s) => new URL(s.src).pathname.split('/').pop()),
     population: population(), roster: [...b.CHAR_KEYS], render: { ...b.renderer.info.render },
+    dragonClasses: { total: b.dragons.length, guardians: b.dragons.filter((d) => d.type === 'guardian').length,
+      mounts: b.dragons.filter((d) => d.type === 'mount').length, expected: window.BCDragonRules.count(b.seed) },
     api: Object.keys(b).sort()
   };
 }
@@ -145,7 +147,13 @@ function dragonProbe() {
   const dragons = k.api('dragons');
   // 45-dragons.js publishes articulated upper/outer joints in parts.wings.
   const wingsOf = (d) => d.parts.wings.flatMap((wing) => [wing.upper, wing.outer]);
-  check(dragons.length === 4, 'Expected four spawned dragons');
+  check(dragons.length === window.BCDragonRules.count(b.seed), 'Seeded guardian/mount population is incomplete');
+  const guardians = dragons.filter((d) => d.type === 'guardian'), mounts = dragons.filter((d) => d.type === 'mount');
+  check(guardians.length === 4 && mounts.length >= 2 && mounts.length <= 3, 'Dragon classes do not meet the requested balance');
+  check(guardians.every((d) => d.indestructible && d.invulnerable && !b.riding.rideable(d)) &&
+    mounts.every((d) => b.riding.rideable(d) && d.group.scale.x < 0.46), 'Guardian immunity/mount eligibility is incorrect');
+  check(Math.min(...guardians.map((d) => d.group.scale.x)) > Math.max(...mounts.map((d) => d.group.scale.x)) * 2.2,
+    'Guardian and mount sizes are not visibly distinct');
   const count = dragons.length;
   const roots = dragons.map((d) => d.group);
   const resources = () => {
@@ -189,7 +197,7 @@ function dragonProbe() {
       check(samples.some((s) => JSON.stringify(s.row[i].wings) !== JSON.stringify(samples[0].row[i].wings)), 'Static dragon wings', i);
       check(samples.some((s) => new b.THREE.Vector3(...s.row[i].position).distanceTo(new b.THREE.Vector3(...samples[0].row[i].position)) > 1), 'Static dragon path', i);
     }
-    return { count, metadata, samples };
+    return { count, guardians: guardians.length, mounts: mounts.length, metadata, samples };
   } finally {
     restores.forEach((restore) => restore());
   }
