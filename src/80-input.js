@@ -24,7 +24,7 @@ const gameplayKeyboardCapture = {
 let inputCaptureGeneration = 0, inputCaptureTimer = 0;
 let inputCaptureCancelled = false, inputPointerPending = false, inputFullscreenPending = false;
 let inputPointerPromise = false, inputStaleFullscreen = false;
-const INPUT_MOUSE_SETTLE_MS = 100, INPUT_MOUSE_CLOCK_SLOP_MS = 2;
+const INPUT_MOUSE_SETTLE_MS = 100, INPUT_MOUSE_CAPTURE_GRACE_MS = 600;
 const inputMouseStream = {
   epoch: 0, epochAt: 0, settleUntil: 0, baselinePending: true, active: false,
   pointerLock: null, fullscreen: null, width: 0, height: 0, pixelRatio: 1,
@@ -388,7 +388,9 @@ document.addEventListener('fullscreenerror', () => {
 
 function inputMouseMove(e) {
   const s = inputMouseStream, now = inputMouseNow();
-  if (!isGameplayInputActive(e) || (typeof document.hasFocus === 'function' && !document.hasFocus())) {
+  // Pointer lock already implies focus; some Linux window managers report
+  // document.hasFocus() === false while the pointer is locked.
+  if (!isGameplayInputActive(e)) {
     if (s.active) resetInputMouseStream('inactive', now);
     s.active = false;
     s.reason = 'inactive';
@@ -406,29 +408,19 @@ function inputMouseMove(e) {
   s.lastDeltaY = e.movementY;
   s.lastTimeStamp = e.timeStamp;
   if (!Number.isFinite(e.movementX) || !Number.isFinite(e.movementY)) return inputMouseReject('non-finite-delta');
-  if (gameplayKeyboardCapture.starting || inputPointerPending || inputFullscreenPending) {
+  // Only reject during the first moments of a capture transition. If a
+  // browser never settles its fullscreen/keyboard request (seen on Firefox),
+  // the mouse must not stay dead for the whole session.
+  if ((gameplayKeyboardCapture.starting || inputPointerPending || inputFullscreenPending) &&
+      now - s.epochAt < INPUT_MOUSE_CAPTURE_GRACE_MS) {
     s.baselinePending = true;
     return inputMouseReject('capture-starting');
   }
-  let stamp = e.timeStamp === undefined ? now : e.timeStamp;
-  // Older browsers used epoch timestamps instead of performance.timeOrigin.
-  if (stamp > 1e12 && now < 1e12) {
-    const origin = typeof performance !== 'undefined' && Number.isFinite(performance.timeOrigin)
-      ? performance.timeOrigin : Date.now() - now;
-    stamp -= origin;
-  }
-  if (!Number.isFinite(stamp) || stamp < 0 || stamp > now + INPUT_MOUSE_CLOCK_SLOP_MS) {
-    resetInputMouseStream('timestamp-discontinuity', now);
-    return inputMouseReject('invalid-timestamp');
-  }
-  // A queued sample from an earlier lock/resume must not re-prime this epoch.
-  if (stamp < s.epochAt - INPUT_MOUSE_CLOCK_SLOP_MS) return inputMouseReject('stale-epoch');
-  if (s.lastEventTime !== null && stamp < s.lastEventTime - INPUT_MOUSE_CLOCK_SLOP_MS) {
-    resetInputMouseStream('timestamp-discontinuity', now);
-    return inputMouseReject('timestamp-discontinuity');
-  }
-  s.lastEventTime = stamp;
-  if (now < s.settleUntil || stamp < s.settleUntil - INPUT_MOUSE_CLOCK_SLOP_MS) {
+  // Timing uses ARRIVAL time, never e.timeStamp. Firefox on Linux can stamp
+  // events with the X11/Wayland clock, which drifts from performance.now();
+  // a 2 ms tolerance then rejected every sample and the camera never moved.
+  s.lastEventTime = now;
+  if (now < s.settleUntil) {
     s.baselinePending = false;
     return inputMouseReject('settling');
   }

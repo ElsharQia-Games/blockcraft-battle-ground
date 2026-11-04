@@ -83,23 +83,27 @@ function mouseStreamProbe() {
     const before = diagnostics();
     try {
       capture.starting = true;
+      reset('qa-capture');
       check(!move({ movementX: 1428, movementY: -1400, timeStamp: performance.now() }), 'Capture-starting cursor warp is applied');
       check(b.player.yaw === 0 && b.player.pitch === 0, 'Capture warp flips the view');
       capture.starting = false;
       reset('qa-resume');
       check(!move({ movementX: -1428, movementY: 900, timeStamp: performance.now() }), 'Resume settling warp is applied');
       check(b.player.yaw === 0 && b.player.pitch === 0, 'Resume warp flips the view');
-      const epoch = diagnostics();
-      check(!move({ movementX: 1428, movementY: 0, timeStamp: Math.max(0, epoch.epochAt - 100) }), 'Stale-epoch sample is applied');
       check(!move({ movementX: NaN, movementY: 0, timeStamp: performance.now() }), 'Nonfinite mouse delta is applied');
-      check(!move({ movementX: 0, movementY: 0, timeStamp: Infinity }), 'Discontinuous timestamp is applied');
       k.primeMouse();
+      // Firefox on Linux can stamp events with a drifting OS clock. Those
+      // samples must still turn the camera (it used to stay frozen forever).
+      b.player.yaw = b.player.pitch = 0;
+      check(move({ movementX: 10, movementY: 0, timeStamp: performance.now() + 5000 }), 'Future-stamped sample froze the camera');
+      check(move({ movementX: 10, movementY: 0, timeStamp: 3 }), 'Old-stamped sample froze the camera');
+      check(b.player.yaw < 0, 'Drifted timestamps did not turn the camera');
       b.player.yaw = b.player.pitch = 0;
       const gain = b.BC.mouseSensitivity(b.WEAPONS[b.gun.index].id, false);
       check(move({ movementX: 1428, movementY: 0, timeStamp: performance.now() }), 'Steady fast flick was blanket-capped');
       check(Math.abs(b.player.yaw + 1428 * 0.0022 * gain) < 1e-7, 'Steady flick changed personal sensitivity');
       const after = diagnostics();
-      check(after.rejectedCount >= before.rejectedCount + 5 && after.acceptedCount > before.acceptedCount,
+      check(after.rejectedCount >= before.rejectedCount + 3 && after.acceptedCount > before.acceptedCount,
         'Mouse diagnostics do not record rejected transition samples and accepted steady motion', { before, after });
       return { before, after, transitionsRejected: true, steadyFlickPreserved: true };
     } finally { capture.starting = starting; }
