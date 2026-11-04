@@ -1416,15 +1416,21 @@ function addTracer(from, to) {
   tracers.push({ line, mat, life: 0.09, max: 0.09 });
 }
 
-const PARTICLE_GEO = new THREE.BoxGeometry(0.055, 0.055, 0.055);
-const PARTICLE_MATS = new Map();
+// All impact particles share ONE instanced mesh (one draw call), with a
+// fixed pool and per-instance colour. A shotgun volley used to add dozens of
+// separate meshes and draw calls.
+const PARTICLE_MAX = 192;
+const particleMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(0.055, 0.055, 0.055),
+  new THREE.MeshBasicMaterial({ toneMapped: false }), PARTICLE_MAX);
+particleMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+particleMesh.frustumCulled = false;
+particleMesh.count = 0;
+particleMesh.name = 'impact-particles';
+scene.add(particleMesh);
+const particleColor = new THREE.Color();
+const particleObj = new THREE.Object3D();
 const particles = [];
 let combatImpactSfxAt = -9999;
-function particleMat(color) {
-  let m = PARTICLE_MATS.get(color);
-  if (!m) { m = new THREE.MeshBasicMaterial({ color, toneMapped: false }); PARTICLE_MATS.set(color, m); }
-  return m;
-}
 function addImpact(point, color, info) {
   // One positional event per impact cluster, not one per pellet/particle.
   const sfxAt = performance.now();
@@ -1433,13 +1439,11 @@ function addImpact(point, color, info) {
     combatEmit('sfx', { kind: 'impact', weapon: info && info.weapon, position: point.clone(), volume: 0.34 });
   }
   const n = 6;
+  particleColor.set(color);
   for (let i = 0; i < n; i++) {
-    if (particles.length > 160) break;
-    const mesh = new THREE.Mesh(PARTICLE_GEO, particleMat(color));
-    mesh.position.copy(point);
-    scene.add(mesh);
+    if (particles.length >= PARTICLE_MAX) break;
     particles.push({
-      mesh,
+      x: point.x, y: point.y, z: point.z, rx: 0, ry: 0, color: particleColor.clone(),
       vx: (Math.random() - 0.5) * 5.5,
       vy: Math.random() * 4.5 + 0.5,
       vz: (Math.random() - 0.5) * 5.5,
@@ -1490,20 +1494,23 @@ function updateFx(dt) {
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
     p.life -= dt;
-    if (p.life <= 0) {
-      scene.remove(p.mesh);
-      particles.splice(i, 1);
-      continue;
-    }
+    if (p.life <= 0) { particles.splice(i, 1); continue; }
     p.vy -= 16 * dt;
-    p.mesh.position.x += p.vx * dt;
-    p.mesh.position.y += p.vy * dt;
-    p.mesh.position.z += p.vz * dt;
-    p.mesh.rotation.x += dt * 8;
-    p.mesh.rotation.y += dt * 6;
-    const s = Math.max(0.05, p.life / p.max);
-    p.mesh.scale.setScalar(s);
+    p.x += p.vx * dt; p.y += p.vy * dt; p.z += p.vz * dt;
+    p.rx += dt * 8; p.ry += dt * 6;
   }
+  for (let i = 0; i < particles.length; i++) {
+    const p = particles[i];
+    particleObj.position.set(p.x, p.y, p.z);
+    particleObj.rotation.set(p.rx, p.ry, 0);
+    particleObj.scale.setScalar(Math.max(0.05, p.life / p.max));
+    particleObj.updateMatrix();
+    particleMesh.setMatrixAt(i, particleObj.matrix);
+    particleMesh.setColorAt(i, p.color);
+  }
+  particleMesh.count = particles.length;
+  particleMesh.instanceMatrix.needsUpdate = true;
+  if (particleMesh.instanceColor) particleMesh.instanceColor.needsUpdate = true;
   if (hurtEl) {
     const o = parseFloat(hurtEl.style.opacity || '0');
     if (o > 0) hurtEl.style.opacity = String(Math.max(0, o - dt * 1.6));

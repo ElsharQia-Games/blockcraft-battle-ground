@@ -201,8 +201,9 @@ function touchBuildUI() {
       display: flex; gap: 8px; }
     #touchControls .tc-btn { pointer-events: auto; touch-action: none; position: absolute; border-radius: 50%;
       border: 2px solid rgba(255,255,255,.4); background: rgba(12,16,26,.45); color: #fff;
-      font: 700 13px/1 system-ui, sans-serif; letter-spacing: .02em; backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px); padding: 0; }
+      font: 700 13px/1 system-ui, sans-serif; letter-spacing: .02em; padding: 0; }
+    /* No backdrop-filter here: a blur behind every button is re-composited
+       each frame and is expensive on phone GPUs. */
     #touchControls .tc-btn.held, #touchControls .tc-btn.on { background: rgba(255,255,255,.85); color: #0b0f18; }
     #touchControls .tc-top .tc-btn { position: static; width: 46px; height: 38px; border-radius: 10px; font-size: 12px; }
     #touchControls .tc-fire { width: 86px; height: 86px; right: 0; bottom: 64px; background: rgba(206,32,56,.6); font-size: 15px; }
@@ -237,15 +238,22 @@ function touchBuildUI() {
   `);
 }
 
+// Called every frame while playing: only touch the DOM when something
+// changed, so the HUD does not force a style recalc each frame.
+let touchButtonsKey = '';
 function touchRefreshButtons() {
   if (!touchUI.root) return;
   const building = quickBuild.active || !combatMode;
+  const aimOn = combatMode && !quickBuild.active && gun.aiming;
+  const key = [building, quickBuild.active, quickBuild.kind, combatMode, aimOn, !!keys.KeyC].join('|');
+  if (key === touchButtonsKey) return;
+  touchButtonsKey = key;
   document.body.classList.toggle('touch-building', building);
   touchUI.fire.textContent = building ? 'Place' : 'Fire';
   touchUI.aim.textContent = quickBuild.active ? 'Cancel' : !combatMode ? 'Break' : 'Aim';
-  touchUI.aim.classList.toggle('on', combatMode && !quickBuild.active && gun.aiming);
+  touchUI.aim.classList.toggle('on', aimOn);
   touchUI.crouch.classList.toggle('on', !!keys.KeyC);
-  touchUI.build.textContent = quickBuild.active ? (BUILD_PIECES[quickBuild.kind] ? quickBuild.kind : 'Build') : 'Build';
+  touchUI.build.textContent = quickBuild.active && BUILD_PIECES[quickBuild.kind] ? quickBuild.kind : 'Build';
 }
 
 /* ---------------- touch input ---------------- */

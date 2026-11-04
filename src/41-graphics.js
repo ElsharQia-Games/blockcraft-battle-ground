@@ -13,6 +13,9 @@
 const GFX_SHADOW_SPAN = 54;     // half-size of the sun's shadow box, in blocks
 const GFX_SHADOW_MAP = 2048;
 const GFX_SUN_OFFSET = new THREE.Vector3(48, 96, 30);
+// View distance per quality. The far plane sits just past full fog, so chunks
+// the fog already hides are frustum-culled instead of drawn.
+const GFX_VIEW = { high: { near: 56, far: 124, clip: 132 }, low: { near: 40, far: 92, clip: 100 } };
 
 const gfx = {
   quality: 'high',
@@ -59,6 +62,10 @@ function gfxConfigureLights() {
 function gfxConfigureShadows(on) {
   gfx.shadows = on;
   renderer.shadowMap.enabled = on;
+  // Refresh the shadow map every second frame (see gfxShadowTick): half the
+  // shadow cost, and indistinguishable at this movement speed.
+  renderer.shadowMap.autoUpdate = false;
+  renderer.shadowMap.needsUpdate = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   sunLight.castShadow = on;
   if (on) {
@@ -82,6 +89,7 @@ function gfxTagCasters(now) {
   scene.traverse((o) => {
     if (!o.isMesh || gfx.tagged.has(o)) return;
     gfx.tagged.add(o);
+    if (o.isInstancedMesh || (o.userData && o.userData.noShadow)) return; // particles, casings
     const m = o.material;
     if (!m || Array.isArray(m) || m.transparent || m.isShaderMaterial || m.isSpriteMaterial || o === sky) return;
     if (o.geometry && o.geometry.attributes && o.geometry.attributes.color && m === solidMaterial) return; // chunks set in 30-meshing
@@ -102,8 +110,19 @@ function gfxFollowPlayer() {
   sunLight.target.updateMatrixWorld();
 }
 
+function gfxApplyView() {
+  const v = GFX_VIEW[gfx.quality];
+  scene.fog.near = v.near;
+  scene.fog.far = v.far;
+  camera.far = v.clip;
+  camera.updateProjectionMatrix();
+  // The sky dome must stay inside the far plane; it follows the camera.
+  sky.scale.setScalar((v.clip * 0.9) / 700);
+}
+
 function gfxSetQuality(q) {
   gfx.quality = q === 'low' ? 'low' : 'high';
+  gfxApplyView();
   try { localStorage.setItem('blockcraft.gfx', gfx.quality); } catch (e) { /* optional */ }
   gfxConfigureShadows(gfx.quality === 'high');
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, gfx.quality === 'high' ? 2 : 1.25));
@@ -120,7 +139,13 @@ try {
 } catch (e) { /* reflections are optional */ }
 gfxSetQuality(gfxPickQuality());
 
+let gfxShadowFrame = 0;
+function gfxShadowTick() {
+  if (gfx.shadows && (++gfxShadowFrame & 1) === 0) renderer.shadowMap.needsUpdate = true;
+}
+
 BC.on('preFrame', () => gfxFollowPlayer(), 50);
+BC.on('preRender', gfxShadowTick, 10);
 BC.on('lateFrame', (dt, now) => gfxTagCasters(now || performance.now()), 200);
 
 BC.api.graphics = {

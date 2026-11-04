@@ -4379,10 +4379,13 @@ function updateCritters(dt) {
   const steps = Math.max(1, Math.ceil(dt / CRITTER_PHYS_STEP));
   const h = dt / steps;
 
+  // Fast graphics (phones) hides and pauses NPCs sooner; fog hides them anyway.
+  const reach = BC.api.graphics && BC.api.graphics.quality === 'low' ? 48 : CRITTER_FAR;
+  const farSq = reach * reach;
   for (let i = 0; i < critters.length; i++) {
     const c = critters[i];
     const dx = c.x - px, dz = c.z - pz;
-    const far = dx * dx + dz * dz > CRITTER_FAR * CRITTER_FAR;
+    const far = dx * dx + dz * dz > farSq;
     c.group.visible = !far;
     if (far) continue;
 

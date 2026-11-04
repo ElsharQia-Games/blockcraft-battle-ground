@@ -119,6 +119,7 @@ function vfxEjectCasing(weaponId) {
   }
   const mesh = new THREE.Mesh(VFX_CASING_GEO, weaponId === 'shotgun' ? VFX_SHELL_MAT : VFX_CASING_MAT);
   mesh.scale.setScalar(spec[3]);
+  mesh.userData.noShadow = true;
   mesh.position.copy(pos);
   mesh.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
   scene.add(mesh);
