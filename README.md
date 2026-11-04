@@ -21,8 +21,10 @@ with embedded CC0 firearm recordings for weapon audio.
 loads three.js from a CDN, so you need an internet connection the first time (or a cached copy).
 There is no install or bundling step. Keep `index.html`, `src/` and `assets/` together.
 
-The **Home** screen has separate Play setup, Characters, Online and Settings pages.
-Click **Play** to enter. **Esc** opens a separate **Pause** menu with Resume, Settings and Home;
+The **Home** screen puts **Play, Create room and Join by code** together. Mode & map,
+Characters and Settings have their own pages; connection help stays secondary.
+Click **Play** to enter. Mode & map also has **Play this match**, so setup does not require a trip back.
+**Esc** opens a separate **Pause** menu with Resume, Settings, room invites and Home;
 Back from Settings never resumes the game. Settings apply immediately and persist locally.
 The game requests fullscreen and keyboard capture where supported so gameplay key combinations
 take priority. Pausing releases the mouse; keyboard handling returns to normal outside gameplay.
@@ -41,9 +43,15 @@ On Windows you can also double-click `start.bat`.
 ### Internet (no server needed)
 
 1. Both of you open the same page (`index.html` or the hosted link).
-2. Open **Online** from Home. One player clicks **Create room** — a 5-character code is generated and copied.
-3. Send the code to your friend. They type it into the room box and click **Join room**.
-4. You are in the same gunfight. `P` copies the room code again, `M` mutes sound.
+2. On **Home**, one player clicks **Create room** — a 5-character invite code appears beside **Copy code**.
+3. Send the code or an `index.html?room=CODE` link to your friend. They paste it into the Home room field and press **Join** or **Enter**.
+4. Both click **Play online** when the shared world is ready. `P` copies the active code again, `M` mutes sound.
+
+Joining keeps the menu open while connecting; **Cancel connection** is available if it stalls.
+The active invite code is separate from the join field, so Copy never shares an unsubmitted edit.
+Leaving from Home disconnects without silently joining another session. Home does not end your
+current match; **Return to match** takes you back. Settings save immediately and Back returns
+to the screen you came from, never straight into gameplay.
 
 Rooms travel over public MQTT-over-WebSocket relays (`broker.emqx.io`, then
 `broker.hivemq.com` as a fallback), so there is no server to host — but the relay is public,
@@ -106,8 +114,10 @@ stop the slide; leaving the ground retains bounded momentum rather than flight.
 A jump press is buffered for 120 ms before landing, with 90 ms of grace after leaving a
 ledge. A short tap rises roughly 1.8–2 metres; holding Space during the bounded rising window
 raises that to about 2.9 metres. Re-pressing Space in mid-air cannot renew the jump.
-In water, hold Space and move toward a clear shoreline to climb out; `C` dives, and
-Space takes priority if both are held. A blocked bank or low roof still prevents passage.
+Water movement is about 92% of normal walking speed. Hold Space to swim up; near the
+surface it uses the same regular jump and bounded hold as land, without requiring a bank.
+Release before another surface jump. `C` dives, and Space takes priority if both are held.
+A blocked bank or low roof still prevents passage.
 
 `F` activates a visible jetpack with a 100-point fuel tank. Hovering drains
 fuel; boosting and air dashes cost more. Fuel recharges on the ground after a
@@ -117,6 +127,11 @@ In jetpack flight, `Shift` boosts, `C` triggers a short air dash, and `Space`
 ascends—including `Shift` + `Space` and `Ctrl` + `Space`. Only held `Ctrl` descends, so
 boosting never cancels ascent. Pausing, death, and map regeneration release held
 movement/fire inputs.
+
+A small contact shadow and team-colored ground ring mark the surface directly
+below your feet, including while jumping or using the jetpack. The ring is clearer
+in the air and quieter on the ground. It marks the ground beneath you, not a guaranteed
+future trajectory, and does not shine through solid terrain.
 
 ### Settings and match modes
 
@@ -143,6 +158,9 @@ and audio settings. A shared seed selects the same terrain, villages and arena.
 Normal third person places the camera over the **right shoulder**; `V` switches between
 that view and first person. The shoulder camera pulls in around nearby blocks and hides
 the avatar when too close. Both normal views keep a clear, dark-edged **hip-fire crosshair**.
+When looking steeply downward, the centre aim ray converges directly beneath your feet
+without moving the camera off the shoulder. Shooting and building use that same corrected
+ray; normal forward viewing and first-person/ADS aiming are unchanged.
 
 **Hold right mouse to aim down sights** from either camera view. Each weapon has a different
 physical sight and housing, not just a reticle change. The open sights keep the actual gun
@@ -159,6 +177,15 @@ Health, ammo, hit markers and damage feedback stay visible while aiming.
 | Sniper | Enclosed scope tube with mil-dot cross and range hashes |
 | Revolver | Rear notch and front blade |
 | LMG | Aperture sight and protective wings |
+
+### Hit feedback and teams
+
+Confirmed hits show floating damage numbers and a short-lived health bar above the
+target. Shotgun pellets from one shot combine into one number. Bars follow the current
+health/stance, hide behind cover and expire after a few seconds; rejected shots do not
+invent damage or HP changes. Player outlines and health borders use the actual red/blue
+team, even when teammates and opponents wear the same character skin. Non-team modes
+and ambient villagers keep a neutral outline.
 
 ### Shooting cover
 
@@ -221,7 +248,9 @@ Both traditional and quick building reject occupied player/dragon bodies and blo
   paths use a shared clock and are initialized after terrain generation.
   Each seed adds two or three much smaller mounts, all rideable by any player.
   Guardians cannot be ridden. Each mount admits one rider at a time for at most 30 seconds,
-  with fire breath, a heat limit, voxel-aware core/camera collisions and a safe forced dismount.
+  with fire breath, a heat limit and voxel-aware core/camera collisions. Dismounts step off
+  at the dragon's current height and fall naturally, with bounded carried momentum rather
+  than a teleport to the ground. `F` can activate the jetpack during the fall if fuel remains.
 - **Combat** — seven weapons (pistol, rifle, shotgun, SMG, sniper, revolver and LMG) with
   distinct damage, rate of fire, spread, recoil, range and per-weapon reload sequences.
   Seven physical sight views pair distinct housings with weapon-specific magnification; the sniper zooms furthest.
@@ -264,17 +293,19 @@ src/46-riding.js    exclusive 30-second mount rides, fire breath, heat and ride 
 src/48-outline.js   character silhouette outlines and viewport synchronization
 src/50-player.js    player motion, shoulder/scope camera, avatar, block picking, spawn
 src/52-jetpack.js   fuel, boost, air dash, reusable pack/flame visuals and fuel meter
+src/53-ground-marker.js ground shadow/ring and cached surface query for downward aim
 src/55-building.js  quick construction, previews, rotation and voxel placement
 src/58-killcam.js   death camera that follows the killer until respawn
 src/60-combat.js    weapons, scope state/FOV, models, audio, effects, hit tests, health, death
 src/62-combat-fx.js bounded aim assistance, direction feedback and elimination messages
+src/63-player-feedback.js confirmed floating damage and occlusion-aware overhead health
 src/65-destruction.js material durability, bullet damage and block destruction feedback
 src/70-inventory.js unlimited building materials, hotbar, material cycling and toasts
 src/80-input.js     pointer lock, lifecycle-guarded mouse stream, keyboard and resize
 src/85-scoreboard.js hold-Tab scoreboard, roster and match statistics
 src/86-hud.js       compact red/blue HUD, live ping and consolidated match/weapon readouts
 src/87-minimap.js   cached topographic contours, heading, landmarks and arena boundary
-src/88-menu.js      separate Home/pages/Pause, settings tabs and safe Resume
+src/88-menu.js      Home room actions, dedicated pages/Pause, contextual Back and trusted Play/Resume
 src/90-net.js       LAN WebSocket + MQTT transport, rooms, remote players
 src/92-sync.js      ping/jitter metrics and connection/watchdog bridge
 src/94-audio.js     directional, distance-attenuated sampled/procedural WebAudio SFX
@@ -307,7 +338,8 @@ Destruction, scoreboard state and outline viewport uniforms update before every 
 
 New systems are available through `window.__blockcraft.features` (also `BC.api`):
 `settings`, `modes`, `world`, `physics`, `jetpack`, `riding`, `killcam`, `combatFx`,
-`hud`, `minimap`, `menus`, `dragons`, `net` and `audio`. The current numeric seed is exposed as
+`hud`, `minimap`, `menus`, `dragons`, `outlines`, `groundMarker`, `playerFeedback`, `net` and `audio`.
+The current numeric seed is exposed as
 `window.__blockcraft.seed`; `?seed=12345` overrides the saved map seed.
 
 Feature hooks run in this order: `preFrame`, player/camera/combat,
