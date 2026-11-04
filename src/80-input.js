@@ -7,10 +7,12 @@ const hintEl = document.getElementById('hint');
 const playBtn = document.getElementById('play');
 const statsEl = document.getElementById('stats');
 const inputButtonsDown = new Set();
+const inputCharacterCtrlHeld = new Set();
+let inputCharacterCtrlPressEvent = null;
 let scoreboardTabHeld = false;
 const GAMEPLAY_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
-  'KeyE', 'KeyV', 'KeyC', 'KeyF', 'KeyB', 'KeyR', 'KeyQ', 'KeyM', 'KeyP', 'KeyZ', 'KeyX', 'KeyG', 'KeyT', 'Tab'
+  'KeyV', 'KeyC', 'KeyF', 'KeyB', 'KeyR', 'KeyQ', 'KeyM', 'KeyP', 'KeyZ', 'KeyX', 'KeyG', 'KeyT', 'Tab'
 ]);
 let inputWindowFocused = typeof document.hasFocus !== 'function' || document.hasFocus();
 let inputWasActive = false;
@@ -22,13 +24,20 @@ const gameplayKeyboardCapture = {
 let inputCaptureGeneration = 0, inputCaptureTimer = 0;
 let inputCaptureCancelled = false, inputPointerPending = false, inputFullscreenPending = false;
 let inputPointerPromise = false, inputStaleFullscreen = false;
+const INPUT_MOUSE_SETTLE_MS = 100, INPUT_MOUSE_CLOCK_SLOP_MS = 2;
+const inputMouseStream = {
+  epoch: 0, epochAt: 0, settleUntil: 0, baselinePending: true, active: false,
+  pointerLock: null, fullscreen: null, width: 0, height: 0, pixelRatio: 1,
+  acceptedCount: 0, rejectedCount: 0, resetReason: 'startup', reason: 'idle', lastRejectReason: '', lastRejectEpoch: 0,
+  lastDeltaX: 0, lastDeltaY: 0, lastTimeStamp: null, lastEventTime: null
+};
 
 function inputKeyboardAPI() {
   return typeof navigator !== 'undefined' && navigator.keyboard ? navigator.keyboard : null;
 }
 
 function updateKeyboardCaptureState() {
-  const state = gameplayKeyboardCapture;
+  const state = gameplayKeyboardCapture, wasStarting = state.starting;
   state.fullscreen = !!document.fullscreenElement;
   state.locked = state.granted && state.fullscreen && isGameplayInputActive();
   if (state.locked) state.status = 'locked';
@@ -37,6 +46,7 @@ function updateKeyboardCaptureState() {
     clearTimeout(inputCaptureTimer);
     inputCaptureTimer = 0;
   }
+  if (wasStarting && !state.starting) resetInputMouseStream('capture-ready');
 }
 
 function unlockGameplayKeyboard() {
@@ -60,6 +70,7 @@ function releaseKeyboardCapture(reason = 'released') {
   inputCaptureTimer = 0;
   unlockGameplayKeyboard();
   gameplayKeyboardCapture.fullscreen = !!document.fullscreenElement;
+  resetInputMouseStream('capture-release');
 }
 
 function exitInputFullscreen() {
@@ -72,10 +83,15 @@ function exitInputFullscreen() {
 
 function showInputResumeHint() {
   document.body.classList.remove('started');
-  if (!loading && !craftOpen) {
-    hintEl.classList.remove('hidden');
-    playBtn.textContent = 'Click to resume';
+  if (typeof loading === 'undefined' || loading) return;
+  const menus = BC.api && BC.api.menus;
+  if (menus) {
+    const show = BC.flags.hasPlayed ? menus.showPause : menus.showHome;
+    if (typeof show === 'function') show.call(menus);
+    return;
   }
+  hintEl.classList.remove('hidden');
+  playBtn.textContent = BC.flags.hasPlayed ? 'Click to resume' : 'Click to play';
 }
 
 function pauseGameplayInput(exitFullscreen = false) {
@@ -97,27 +113,97 @@ function isInputEditable(target) {
 }
 
 function isGameplayInputActive(event) {
-  return !loading && alive && !craftOpen && inputWindowFocused && !document.hidden &&
+  return typeof loading !== 'undefined' && !loading && alive && !craftOpen && inputWindowFocused && !document.hidden &&
+    !BC.flags.worldBusy && !BC.flags.playerRepairBlocked &&
     document.pointerLockElement === renderer.domElement &&
     !isInputEditable(document.activeElement) && !isInputEditable(event && event.target);
 }
 
-function resetGameplayInput(releaseCapture = true) {
-  if (releaseCapture) releaseKeyboardCapture();
+function inputMouseNow() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+// Relative deltas can include a cursor warp while lock/fullscreen/focus changes.
+// Discard that transition stream, not large turns: stable samples have NO size,
+// speed or idle-gap cap, and sensitivity is still applied exactly once below.
+function resetInputMouseStream(reason = 'input-reset', now = inputMouseNow()) {
+  const s = inputMouseStream;
+  s.epoch++;
+  s.epochAt = now;
+  s.settleUntil = now + INPUT_MOUSE_SETTLE_MS;
+  s.baselinePending = true;
+  s.lastEventTime = null;
+  s.resetReason = reason;
+  s.active = isGameplayInputActive();
+  s.pointerLock = document.pointerLockElement;
+  s.fullscreen = document.fullscreenElement;
+  s.width = window.innerWidth;
+  s.height = window.innerHeight;
+  s.pixelRatio = window.devicePixelRatio || 1;
+}
+
+function inputMouseReject(reason) {
+  inputMouseStream.rejectedCount++;
+  inputMouseStream.reason = inputMouseStream.lastRejectReason = reason;
+  inputMouseStream.lastRejectEpoch = inputMouseStream.epoch;
+  return false;
+}
+
+// Bounded, on-demand QA snapshot; no console output or per-frame history.
+// resetInputMouseStream() and inputMouseMove() are also callable classic-script
+// functions, so controlled samples exercise the same single production handler.
+function getInputMouseDiagnostics() {
+  const s = inputMouseStream, now = inputMouseNow();
+  return {
+    epoch: s.epoch, epochAt: s.epochAt, resetReason: s.resetReason,
+    acceptedCount: s.acceptedCount, rejectedCount: s.rejectedCount,
+    reason: s.reason, lastRejectReason: s.lastRejectReason, lastRejectEpoch: s.lastRejectEpoch,
+    lastDelta: { x: s.lastDeltaX, y: s.lastDeltaY }, lastTimeStamp: s.lastTimeStamp,
+    lastEventTime: s.lastEventTime, baselinePending: s.baselinePending,
+    settling: gameplayKeyboardCapture.starting || inputPointerPending || inputFullscreenPending ||
+      s.baselinePending || now < s.settleUntil,
+    settleUntil: s.settleUntil, captureStarting: gameplayKeyboardCapture.starting,
+    active: isGameplayInputActive() && (typeof document.hasFocus !== 'function' || document.hasFocus())
+  };
+}
+
+// This is also the inputReset subscriber. It must never emit inputReset itself:
+// riding/world/life owners can dispatch that hook without this file's pause path.
+function inputClearGameplayHolds() {
+  resetInputMouseStream();
   for (const k in keys) keys[k] = false;
   scoreboardTabHeld = false;
   jumpQueued = false;
+  // Keep the physical Ctrl hold across life/map resets: only releasing BOTH
+  // Ctrl keys starts a new logical character press. It never holds movement.
+  inputCharacterCtrlPressEvent = null;
   inputButtonsDown.clear();
   if (typeof setScoreboardVisible === 'function') setScoreboardVisible(false);
-  resetBuildingInput();
+  if (typeof resetBuildingInput === 'function') resetBuildingInput();
   gun.trigger = false;
   gun.aiming = false;
-  if (typeof resetPlayerMotion === 'function') resetPlayerMotion();
-  else { player.vel.set(0, 0, 0); player.groundSpeed = 0; }
   inputWasActive = false;
 }
 
-// updateBuilding calls this after combat, catching death and programmatic inventory changes too.
+function resetGameplayInput(releaseCapture = true) {
+  if (releaseCapture) releaseKeyboardCapture();
+  inputClearGameplayHolds();
+  if (typeof resetPlayerMotion === 'function') resetPlayerMotion();
+  else { player.vel.set(0, 0, 0); player.groundSpeed = 0; }
+  BC.emit('inputReset');
+}
+
+// Hold cleanup preserves capture. Only an actual pause/unlock cancels the
+// fullscreen/keyboard request, so a mount or map change cannot break resume UX.
+BC.on('inputReset', inputClearGameplayHolds, -100);
+BC.on('worldWillReset', inputClearGameplayHolds, -100);
+BC.on('worldReset', inputClearGameplayHolds, -100);
+BC.on('modeChanged', inputClearGameplayHolds, -100);
+BC.on('death', inputClearGameplayHolds, -100);
+BC.on('respawn', inputClearGameplayHolds, -100);
+BC.on('worldBusyChanged', (busy) => { if (busy) inputClearGameplayHolds(); }, -100);
+
+// updateBuilding calls this after combat, catching death and gameplay state changes too.
 function updateInputState() {
   const active = isGameplayInputActive();
   if (!active && inputWasActive) resetGameplayInput();
@@ -126,7 +212,7 @@ function updateInputState() {
 }
 
 function lockPointer() {
-  if (loading || !alive || craftOpen || document.hidden || gameplayKeyboardCapture.starting) return false;
+  if (typeof loading === 'undefined' || loading || BC.flags.worldBusy || BC.flags.playerRepairBlocked || !alive || craftOpen || document.hidden || gameplayKeyboardCapture.starting) return false;
   const state = gameplayKeyboardCapture, keyboard = inputKeyboardAPI();
   const fullscreenTarget = document.documentElement;
   state.supported = !!(keyboard && typeof keyboard.lock === 'function' && typeof keyboard.unlock === 'function');
@@ -143,6 +229,7 @@ function lockPointer() {
   state.status = requestKeyboard ? 'requesting' : state.supported ? 'fullscreen-unavailable' : 'unsupported';
   inputPointerPending = document.pointerLockElement !== renderer.domElement;
   inputFullscreenPending = requestFullscreen;
+  resetInputMouseStream('capture-request');
   clearTimeout(inputCaptureTimer);
   inputCaptureTimer = setTimeout(() => {
     if (generation === inputCaptureGeneration && state.starting) releaseKeyboardCapture('timeout');
@@ -228,7 +315,9 @@ function lockPointer() {
 
 playBtn.addEventListener('click', lockPointer);
 renderer.domElement.addEventListener('click', () => {
-  if (!craftOpen && !hintEl.classList.contains('hidden')) lockPointer();
+  // With 88-menu installed, only its real Play/Resume buttons may activate
+  // capture. A click behind Home, Pause or Settings must never resume play.
+  if (!(BC.api && BC.api.menus) && !craftOpen && !hintEl.classList.contains('hidden')) lockPointer();
 });
 
 // Opacity/pointer-events alone leave menu controls in the keyboard focus order.
@@ -250,11 +339,18 @@ document.addEventListener('pointerlockchange', () => {
   if (locked && inputCaptureCancelled) { pauseGameplayInput(); return; }
   inputPointerPending = false;
   resetGameplayInput(!locked);
+  resetInputMouseStream(locked ? 'pointer-lock' : 'pointer-unlock');
   if (locked) {
     inputWindowFocused = true;
     // A focused Play button must not receive Space while it is also the jump key.
     if (document.activeElement && document.activeElement !== document.body && document.activeElement.blur) {
       document.activeElement.blur();
+    }
+    BC.flags.hasPlayed = true;
+    const menus = BC.api && BC.api.menus;
+    if (menus) {
+      if (typeof menus.notifyGameplayStarted === 'function') menus.notifyGameplayStarted();
+      if (typeof menus.hide === 'function') menus.hide();
     }
     hintEl.classList.add('hidden');
     document.body.classList.add('started');
@@ -268,6 +364,7 @@ document.addEventListener('pointerlockerror', () => {
   toast('Pointer lock unavailable — click the page again');
 });
 document.addEventListener('fullscreenchange', () => {
+  resetInputMouseStream('fullscreen-change');
   const wasFullscreen = gameplayKeyboardCapture.fullscreen;
   gameplayKeyboardCapture.fullscreen = !!document.fullscreenElement;
   if (inputCaptureCancelled && inputStaleFullscreen && document.fullscreenElement === document.documentElement) {
@@ -280,19 +377,81 @@ document.addEventListener('fullscreenchange', () => {
 });
 document.addEventListener('fullscreenerror', () => {
   if (!inputFullscreenPending) return;
+  resetInputMouseStream('fullscreen-error');
   inputFullscreenPending = false;
   unlockGameplayKeyboard();
   gameplayKeyboardCapture.status = 'fullscreen-denied';
   updateKeyboardCaptureState();
 });
 
-document.addEventListener('mousemove', (e) => {
-  if (!isGameplayInputActive(e)) return;
-  player.yaw -= e.movementX * 0.0022;
-  player.pitch -= e.movementY * 0.0022;
+function inputMouseMove(e) {
+  const s = inputMouseStream, now = inputMouseNow();
+  if (!isGameplayInputActive(e) || (typeof document.hasFocus === 'function' && !document.hasFocus())) {
+    if (s.active) resetInputMouseStream('inactive', now);
+    s.active = false;
+    s.reason = 'inactive';
+    return false;
+  }
+  // Observe changed DOM/viewport state too: mouse events can precede delivery of
+  // the corresponding pointerlockchange/fullscreenchange/resize callback.
+  if (!s.active) resetInputMouseStream('gameplay-active', now);
+  else if (s.pointerLock !== document.pointerLockElement) resetInputMouseStream('pointer-lock-observed', now);
+  else if (s.fullscreen !== document.fullscreenElement) resetInputMouseStream('fullscreen-observed', now);
+  else if (s.width !== window.innerWidth || s.height !== window.innerHeight || s.pixelRatio !== (window.devicePixelRatio || 1)) {
+    resetInputMouseStream('resize-observed', now);
+  }
+  s.lastDeltaX = e.movementX;
+  s.lastDeltaY = e.movementY;
+  s.lastTimeStamp = e.timeStamp;
+  if (!Number.isFinite(e.movementX) || !Number.isFinite(e.movementY)) return inputMouseReject('non-finite-delta');
+  if (gameplayKeyboardCapture.starting || inputPointerPending || inputFullscreenPending) {
+    s.baselinePending = true;
+    return inputMouseReject('capture-starting');
+  }
+  let stamp = e.timeStamp === undefined ? now : e.timeStamp;
+  // Older browsers used epoch timestamps instead of performance.timeOrigin.
+  if (stamp > 1e12 && now < 1e12) {
+    const origin = typeof performance !== 'undefined' && Number.isFinite(performance.timeOrigin)
+      ? performance.timeOrigin : Date.now() - now;
+    stamp -= origin;
+  }
+  if (!Number.isFinite(stamp) || stamp < 0 || stamp > now + INPUT_MOUSE_CLOCK_SLOP_MS) {
+    resetInputMouseStream('timestamp-discontinuity', now);
+    return inputMouseReject('invalid-timestamp');
+  }
+  // A queued sample from an earlier lock/resume must not re-prime this epoch.
+  if (stamp < s.epochAt - INPUT_MOUSE_CLOCK_SLOP_MS) return inputMouseReject('stale-epoch');
+  if (s.lastEventTime !== null && stamp < s.lastEventTime - INPUT_MOUSE_CLOCK_SLOP_MS) {
+    resetInputMouseStream('timestamp-discontinuity', now);
+    return inputMouseReject('timestamp-discontinuity');
+  }
+  s.lastEventTime = stamp;
+  if (now < s.settleUntil || stamp < s.settleUntil - INPUT_MOUSE_CLOCK_SLOP_MS) {
+    s.baselinePending = false;
+    return inputMouseReject('settling');
+  }
+  // If no mouse sample arrived during settling, discard the first relative
+  // sample even when it arrives later; its origin may still be the old cursor.
+  if (s.baselinePending) {
+    s.baselinePending = false;
+    return inputMouseReject('stream-baseline');
+  }
+  const riding = BC.api && BC.api.riding;
+  const useWeapon = combatMode && !quickBuild.active && !(riding && riding.active);
+  const weaponId = useWeapon && typeof currentWeapon === 'function' ? currentWeapon().id : null;
+  const sens = (typeof BC !== 'undefined' && BC.mouseSensitivity)
+    ? BC.mouseSensitivity(weaponId, useWeapon && gun.aiming) : 1;
+  const yaw = player.yaw - e.movementX * 0.0022 * sens;
+  const pitch = player.pitch - e.movementY * 0.0022 * sens;
+  if (!Number.isFinite(yaw) || !Number.isFinite(pitch)) return inputMouseReject('non-finite-rotation');
+  player.yaw = yaw;
   const lim = Math.PI / 2 - 0.02;
-  player.pitch = Math.max(-lim, Math.min(lim, player.pitch));
-});
+  player.pitch = Math.max(-lim, Math.min(lim, pitch));
+  s.acceptedCount++;
+  s.reason = 'accepted';
+  return true;
+}
+document.addEventListener('mousemove', inputMouseMove);
 
 document.addEventListener('mousedown', (e) => {
   if (!isGameplayInputActive(e) || (e.button !== 0 && e.button !== 2)) return;
@@ -328,11 +487,15 @@ document.addEventListener('wheel', (e) => {
   if (!isGameplayInputActive(e) || e.deltaY === 0) return;
   e.preventDefault();
   const direction = e.deltaY > 0 ? 1 : -1;
-  if (quickBuild.active) {
+  if (e.shiftKey && (quickBuild.active || !combatMode)) {
+    cycleHotbarMaterial(direction);
+    if (quickBuild.active) setQuickBuildMaterial(HOTBAR[selected]);
+  } else if (quickBuild.active) {
     selectSlot(selected + direction);
     setQuickBuildMaterial(HOTBAR[selected]);
   } else if (combatMode) {
-    equipInputWeapon((gun.index + direction + WEAPONS.length) % WEAPONS.length);
+    resetBuildingInput();
+    cycleWeapon(direction);
   } else selectSlot(selected + direction);
 }, { passive: false });
 
@@ -360,7 +523,8 @@ function captureScoreboardTab(e) {
   if (!active && !scoreboardTabHeld) return;
   e.preventDefault();
   e.stopImmediatePropagation();
-  const show = e.type === 'keydown' && active;
+  // A held Tab's autorepeat cannot reopen a scoreboard reset by a new life/map.
+  const show = e.type === 'keydown' && active && (!e.repeat || scoreboardTabHeld);
   scoreboardTabHeld = show;
   keys.Tab = show;
   if (show) inputWasActive = true;
@@ -369,34 +533,54 @@ function captureScoreboardTab(e) {
 window.addEventListener('keydown', captureScoreboardTab, true);
 window.addEventListener('keyup', captureScoreboardTab, true);
 
+function inputTrackCharacterCtrl(e) {
+  if (e.code !== 'ControlLeft' && e.code !== 'ControlRight') return;
+  if (e.type === 'keyup') {
+    inputCharacterCtrlHeld.delete(e.code);
+    inputCharacterCtrlPressEvent = null;
+    return;
+  }
+  const first = !e.repeat && inputCharacterCtrlHeld.size === 0;
+  inputCharacterCtrlHeld.add(e.code);
+  inputCharacterCtrlPressEvent = first ? e : null;
+}
+// Window capture sees Ctrl even when a rider or editable menu consumes it at
+// document capture. This prevents a held flight key from becoming a roster
+// change after dismount/resume, and handles left+right Ctrl as one press.
+window.addEventListener('keydown', inputTrackCharacterCtrl, true);
+window.addEventListener('keyup', inputTrackCharacterCtrl, true);
+
 document.addEventListener('keydown', (e) => {
-  if (e.isComposing || e.keyCode === 229 || isInputEditable(e.target) ||
-      isInputEditable(document.activeElement)) return;
+  if (e.isComposing || e.keyCode === 229) return;
+  if (e.code === 'Escape') {
+    const menus = BC.api && BC.api.menus;
+    if (e.repeat) {
+      if (menus || document.pointerLockElement === renderer.domElement || gameplayKeyboardCapture.requested) consumeGameplayKey(e);
+      return;
+    }
+    // Settings needs Escape even while its slider/text field owns focus.
+    // Closed menus return false so gameplay keeps the existing unlock route.
+    if (menus && typeof menus.handleEscape === 'function' && menus.handleEscape(e)) {
+      consumeGameplayKey(e);
+      return;
+    }
+    if (isInputEditable(e.target) || isInputEditable(document.activeElement)) return;
+    if (document.pointerLockElement === renderer.domElement || gameplayKeyboardCapture.requested) {
+      consumeGameplayKey(e);
+      pauseGameplayInput(true);
+    }
+    return;
+  }
+  if (isInputEditable(e.target) || isInputEditable(document.activeElement)) return;
   const active = isGameplayInputActive(e);
   const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
   const handled = GAMEPLAY_KEYS.has(e.code) || !!digit;
   // DOM cancellation is best-effort for reserved browser shortcuts; fullscreen
   // Keyboard Lock delivers supported Ctrl/Meta combinations to these handlers.
   if (active && (handled || e.ctrlKey || e.metaKey)) consumeGameplayKey(e);
-  if (e.code === 'Escape') {
-    if (craftOpen || document.pointerLockElement === renderer.domElement || gameplayKeyboardCapture.requested) {
-      consumeGameplayKey(e);
-      if (craftOpen) closeCraft();
-      pauseGameplayInput(true);
-    }
-    return;
-  }
   // Keyup is unconditional below. An autorepeating held key never becomes a fresh action
   // after closing a menu, regaining focus, changing mode or respawning.
   if (e.repeat || keys[e.code]) return;
-  if (e.code === 'KeyE') {
-    if (!active && (e.ctrlKey || e.metaKey || e.altKey)) return;
-    if (loading || !alive || !inputWindowFocused || document.hidden) return;
-    consumeGameplayKey(e);
-    resetGameplayInput();
-    toggleCraft();
-    return;
-  }
   if (!active || !handled) return;
   keys[e.code] = true;
   inputWasActive = true;
@@ -422,12 +606,15 @@ document.addEventListener('keydown', (e) => {
       if (typeof resetCamera === 'function') resetCamera();
       toast(thirdPerson ? 'Over-shoulder' : 'First person');
       break;
-    case 'KeyC': cycleCharacter(); break;
+    case 'ControlLeft':
+    case 'ControlRight':
+      // Ctrl is held descent in flight; its first logical press cycles only
+      // on foot. C is left to crouch/slide or the fuel-gated jetpack air dash.
+      if (inputCharacterCtrlPressEvent === e && !player.fly &&
+          !(BC.api.jetpack && BC.api.jetpack.active) && !(BC.api.riding && BC.api.riding.active)) cycleCharacter();
+      break;
     case 'KeyF':
-      player.fly = !player.fly;
-      player.vel.y = 0;
-      jumpQueued = false;
-      toast(player.fly ? 'Flying' : 'Walking');
+      if (BC.api.jetpack) BC.api.jetpack.toggle();
       break;
     case 'KeyB': {
       const nextCombatMode = quickBuild.active ? false : !combatMode;
@@ -436,7 +623,11 @@ document.addEventListener('keydown', (e) => {
       break;
     }
     case 'KeyR': if (combatMode && !quickBuild.active) startReload(); break;
-    case 'KeyQ': equipInputWeapon((gun.index + 1) % WEAPONS.length); break;
+    case 'KeyQ':
+      resetBuildingInput();
+      if (!combatMode) setCombatMode(true);
+      cycleWeapon(1);
+      break;
     case 'KeyM': toggleMute(); break;
     case 'KeyP': copyRoom(); break;
   }
@@ -447,19 +638,41 @@ document.addEventListener('keyup', (e) => {
   if (isGameplayInputActive(e) && !e.isComposing &&
       (GAMEPLAY_KEYS.has(e.code) || /^(?:Digit|Numpad)[1-9]$/.test(e.code) || e.ctrlKey || e.metaKey)) consumeGameplayKey(e);
 }, true);
+function inputPauseForFocusLoss() {
+  const capturing = document.pointerLockElement === renderer.domElement ||
+    gameplayKeyboardCapture.requested || gameplayKeyboardCapture.starting;
+  // A keyup can be lost outside the browser. Repeat events remain blocked on
+  // refocus, but a genuinely new Ctrl press must not inherit a stale hold.
+  inputCharacterCtrlHeld.clear();
+  inputCharacterCtrlPressEvent = null;
+  // Losing focus while already editing a paused menu still releases every
+  // control/capture, but must not replace Settings with a new resume surface.
+  if (capturing || !(BC.api && BC.api.menus)) pauseGameplayInput();
+  else resetGameplayInput();
+}
 window.addEventListener('blur', () => {
   inputWindowFocused = false;
-  pauseGameplayInput();
+  inputPauseForFocusLoss();
+  resetInputMouseStream('blur');
 });
-window.addEventListener('focus', () => { inputWindowFocused = true; });
+window.addEventListener('focus', () => {
+  inputWindowFocused = true;
+  resetInputMouseStream('focus');
+});
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) pauseGameplayInput();
+  if (document.hidden) inputPauseForFocusLoss();
+  resetInputMouseStream('visibility-change');
 });
 document.addEventListener('focusin', (e) => {
-  if (isInputEditable(e.target)) pauseGameplayInput();
+  resetInputMouseStream('focus-change');
+  if (!isInputEditable(e.target)) return;
+  if (document.pointerLockElement === renderer.domElement || gameplayKeyboardCapture.requested || gameplayKeyboardCapture.starting) {
+    pauseGameplayInput();
+  } else resetGameplayInput(); // Already-paused settings edits must not replace their menu.
 });
 
 window.addEventListener('resize', () => {
+  resetInputMouseStream('resize');
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
