@@ -1,0 +1,23 @@
+{
+  "name": "blockcraft-battle-ground",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A tiny procedurally generated voxel world with online gunfights. three.js, no build step, no dependencies.",
+  "scripts": {
+    "start": "node server.js",
+    "server": "node server.js"
+  },
+  "keywords": [
+    "voxel",
+    "game",
+    "threejs",
+    "webgl",
+    "multiplayer",
+    "mqtt",
+    "shooter"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  }
+}
