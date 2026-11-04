@@ -245,7 +245,11 @@ function getBlock(x, y, z) {
 }
 function setBlock(x, y, z, type) {
   if (x < 0 || x >= WORLD || z < 0 || z >= WORLD || y < 0 || y >= HEIGHT) return;
-  blocks[blockIndex(x, y, z)] = type;
+  const index = blockIndex(x, y, z), oldType = blocks[index];
+  blocks[index] = type;
+  if (oldType !== blocks[index] && typeof resetVoxelDamage === 'function') {
+    resetVoxelDamage(x, y, z, oldType, blocks[index]);
+  }
 }
 const isOpaque = (x, y, z) => {
   const b = getBlock(x, y, z);
