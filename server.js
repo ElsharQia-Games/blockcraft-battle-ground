@@ -28,11 +28,11 @@ const MAX_EDITS = 6000;
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 /* ---- rate/shape limits ------------------------------------------------- */
-const MAX_MSGS_PER_SEC = 50;
+const MAX_MSGS_PER_SEC = 120;
 const MAX_BYTES_PER_SEC = 180000;
-const MSG_BURST = 60;
-const MAX_STATE_PER_SEC = 25;
-const MAX_STATE_BROADCASTS_PER_SEC = 20;
+const MSG_BURST = 140;
+const MAX_STATE_PER_SEC = 30;
+const MAX_STATE_BROADCASTS_PER_SEC = 30;
 const MAX_FRAME_BYTES = 32 * 1024;
 const MAX_FRAME_ABSOLUTE = 1024 * 1024;
 const MAX_BUFFER_BYTES = 256 * 1024;
@@ -479,11 +479,13 @@ function fireLock(client, weapon, kind, msg) {
       if (!Number.isFinite(msg.shotAt) || msg.shotAt < 0 || msg.shotAt > Number.MAX_SAFE_INTEGER) {
         noteDrop(client); return false;
       }
-      if (client.fireClockOrigin === null) client.fireClockOrigin = now - msg.shotAt;
+      // The origin tracks the FASTEST delivery seen so far. Anchoring it to the
+      // first packet meant one slow first shot made every later, normally
+      // delivered shot look "from the future" and silently dropped all hits.
+      const origin = now - msg.shotAt;
+      if (client.fireClockOrigin === null || origin < client.fireClockOrigin) client.fireClockOrigin = origin;
       fireAt = msg.shotAt + client.fireClockOrigin;
-      // A bounded monotonic shot clock admits a delayed, ordered burst, but
-      // cannot be advanced arbitrarily to bypass the real-time fire budget.
-      if (fireAt < now - 1500 || fireAt > now + 80) { noteDrop(client); return false; }
+      if (fireAt < now - 1500) { noteDrop(client); return false; }
     }
     if (fireAt - client.lastFireAt < Math.max(interval, client.lastFireInterval)) {
       noteDrop(client);
@@ -659,7 +661,7 @@ function publicPlayer(client) {
     sliding: client.slide,
     boost: client.boost, fly: client.fly, fuel: client.fuel,
     onGround: client.onGround,
-    dash: client.dash, height: client.height, bodyHeight: client.height, team: teamFor(client.id),
+    dash: client.dash, height: client.height, bodyHeight: client.height, team: client.team || null,
     life: client.life, dragon: client.ride, generation: worldGeneration,
     sid: client.seqOut++
   };
@@ -771,11 +773,39 @@ function weaponAllowed(weapon) {
     (!SERVER_MODES[roomMode] || SERVER_MODES[roomMode].includes(weapon));
 }
 
+// Teams are sticky per player: assigned once on join to the smaller side and
+// changed only by an explicit switch. Recomputing from the sorted roster
+// reshuffled everyone whenever a player joined or left.
 function teamFor(id) {
   if (roomMode !== 'tdm' && roomMode !== 'lockdown') return null;
-  const ids = [...clients.values()].filter((c) => c.joined).map((c) => c.id).sort();
-  const index = ids.indexOf(id);
-  return index < 0 ? null : index % 2 ? 'blue' : 'red';
+  const client = clients.get(id);
+  return client && (client.team === 'red' || client.team === 'blue') ? client.team : null;
+}
+
+function balancedTeam(except) {
+  let red = 0, blue = 0;
+  for (const c of clients.values()) {
+    if (c === except || !c.joined) continue;
+    if (c.team === 'red') red++;
+    else if (c.team === 'blue') blue++;
+  }
+  return blue < red ? 'blue' : 'red';
+}
+
+function setTeam(target, team, by) {
+  target.team = team;
+  releaseRide(target, 'team');
+  if (target.hp > 0) {
+    target.hp = 100;
+    target.lastDamageAt = -Infinity;
+    target.healthAt = nowMs();
+  }
+  // The switched player moves to the new team's spawn.
+  target.spawnAllowedUntil = nowMs() + 5000;
+  broadcast({ t: 'teamSet', id: target.id, team, by: by.id, byName: by.name,
+    generation: worldGeneration, authoritative: true });
+  broadcastRoster();
+  log(target.name + ' moved to ' + team + (by !== target ? ' by ' + by.name : ''));
 }
 
 function enemies(a, b) {
@@ -1171,6 +1201,7 @@ function handleMessage(client, msg, bytes) {
     }
     const currentJoin = firstJoin || !client.generationAware || msg.generation === worldGeneration;
     if (currentJoin && !applyPosition(client, msg, !firstJoin)) return;
+    if (!client.team) client.team = balancedTeam(client);
     client.joined = true;
     if (firstJoin && Number.isFinite(msg.at)) client.clockOffset = Math.max(-86400000, Math.min(86400000, msg.at - SERVER_EPOCH - nowMs()));
     if (firstJoin && Number.isFinite(msg.clockAt) && msg.clockAt >= 0 && msg.clockAt <= Number.MAX_SAFE_INTEGER) {
@@ -1238,6 +1269,14 @@ function handleMessage(client, msg, bytes) {
   if (!acceptSequence(client, msg)) return;
   if (msg.t === 'dragons') {
     if (setDragonCatalog(client, msg.dragons, msg)) broadcast(dragonCatalogPacket());
+    return;
+  }
+  if (msg.t === 'team') {
+    // Anyone may switch their own team; only the host may move other players.
+    const target = clients.get(cleanId(msg.target) || client.id);
+    if (!target || !target.joined || (msg.team !== 'red' && msg.team !== 'blue') ||
+        (target !== client && client.id !== hostId)) { noteDrop(client); return; }
+    if (target.team !== msg.team) setTeam(target, msg.team, client);
     return;
   }
   if (msg.t === 'ride') { if (allowState(client)) handleRide(client, msg); return; }
@@ -1308,7 +1347,7 @@ function handleMessage(client, msg, bytes) {
     if (client.ride >= 0 || !client.combat || client.hp <= 0 || serverReloadProgress(client) >= 0 || !weaponAllowed(msg.weapon)) return;
     if (!validPosition(msg.x, msg.y, msg.z) ||
         Math.hypot(msg.x - client.x, msg.y - client.y, msg.z - client.z) >
-          6 + Math.min(12, Math.max(0, nowMs() - client.positionAt) * 0.048)) {
+          10 + Math.min(16, Math.max(0, nowMs() - client.positionAt) * 0.05)) {
       noteDrop(client); return;
     }
     if (!fireLock(client, client.weapon, 'shot', msg)) return;
@@ -1325,7 +1364,9 @@ function handleMessage(client, msg, bytes) {
   }
 
   if (msg.t === 'hit') {
-    if (client.ride >= 0 || !client.combat || client.hp <= 0 || serverReloadProgress(client) >= 0) return;
+    // The shot itself already passed the reload/fire gates. Re-checking an
+    // extrapolated reload here dropped pellets that arrived just after a pose.
+    if (client.ride >= 0 || client.hp <= 0) return;
     const target = clients.get(cleanId(msg.target));
     if (!target || !target.joined || target.hp <= 0 || !enemies(client, target)) return;
     const weapon = msg.weapon;
@@ -1355,7 +1396,7 @@ function handleMessage(client, msg, bytes) {
 
   if (msg.t === 'respawn') {
     if (!client.deathReported) { sendHealth(client); return; }
-    if (client.deathReported && nowMs() - client.deathAt < RESPAWN_MS - 100) { sendHealth(client); return; }
+    if (client.deathReported && nowMs() - client.deathAt < RESPAWN_MS - 700) { sendHealth(client); return; }
     if (!validPosition(msg.x, msg.y, msg.z) || !applyPosition(client, msg, false)) { noteDrop(client); return; }
     if (client.deathReported) {
       client.hp = 100;
@@ -1446,7 +1487,7 @@ server.on('upgrade', (req, socket, head) => {
     crouch: 0,
     slide: 0,
     boost: 0, fly: 0, onGround: 1, fuel: 100, dash: 0, height: 1.8,
-    life: 1, ride: -1, joined: false,
+    life: 1, ride: -1, joined: false, team: null,
     deathAt: 0, deathEvent: null,
     lastDamageAt: -Infinity, healthAt: createdAt, healthSentAt: 0,
     positionAt: createdAt, spawnAllowedUntil: 0, clockOffset: 0,

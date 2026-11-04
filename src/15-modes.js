@@ -362,12 +362,16 @@ function MODES_assignTeams() {
   MODES_teamCount = MODES_rosterSize();
   MODES_teamDirty = false;
   if (!def.teams) { MODES_localTeam = null; return null; }
+  const online = MODES_onlineTeams();
   const sorted = MODES_rosterIds().sort();
   for (let i = 0; i < sorted.length; i++) {
     const key = sorted[i];
-    const team = (i % 2 === 0) ? 'red' : 'blue';
-    MODES_teamMap.set(key, team);
     const raw = key.slice(2);
+    // Online, the room authority owns team membership (sticky, switchable).
+    // Offline there is only the local player and practice bots.
+    const team = online ? netTeamFor(raw) : (i % 2 === 0) ? 'red' : 'blue';
+    if (!team) continue;
+    MODES_teamMap.set(key, team);
     if (raw) MODES_teamMap.set(raw, team);
   }
   // Keep names separate from ids; duplicate display names cannot overwrite a
@@ -396,16 +400,36 @@ function MODES_syncTeams() {
     return null;
   }
   const self = MODES_localId();
+  if (MODES_onlineTeams()) {
+    // Cheap and always current: switches apply without waiting for a roster.
+    MODES_localTeam = netTeamFor(net.id);
+    if (MODES_teamDirty || self !== MODES_teamSelf || MODES_rosterSize() !== MODES_teamCount) MODES_assignTeams();
+    return MODES_localTeam;
+  }
   if (MODES_teamDirty || self !== MODES_teamSelf || MODES_rosterSize() !== MODES_teamCount ||
       !MODES_teamMap.has(self)) MODES_assignTeams();
   else MODES_localTeam = MODES_teamMap.get(self) || MODES_localTeam;
   return MODES_localTeam;
 }
 
+function MODES_onlineTeams() {
+  try {
+    return typeof net !== 'undefined' && net && net.online && net.id && typeof netTeamFor === 'function';
+  } catch (e) { return false; }
+}
+
 function MODES_teamFor(id) {
   const def = MODES_activeDef || MODES[0];
   if (!def.teams || id == null || id === '') return null;
   const key = String(id);
+  if (MODES_onlineTeams()) {
+    const raw = key.indexOf('n:') === 0 ? key.slice(2) : key;
+    if (raw === net.id || /^[\w-]{1,40}$/.test(raw)) {
+      const team = netTeamFor(raw);
+      if (raw === net.id) MODES_localTeam = team;
+      if (team || net.authPlayers.has(raw)) return team;
+    }
+  }
   MODES_syncTeams();
   if (MODES_teamMap.has(key)) return MODES_teamMap.get(key);
   return MODES_nameTeams.has(key) ? MODES_nameTeams.get(key) : null;
@@ -1733,7 +1757,7 @@ if (typeof BC !== 'undefined' && BC && typeof BC.on === 'function') {
   BC.on('netPacket', function (msg) {
     if (!msg || typeof msg !== 'object') return;
     if (msg.t === 'welcome' || msg.t === 'join' || msg.t === 'leave' ||
-        msg.t === 'state' || msg.t === 'roster') {
+        msg.t === 'state' || msg.t === 'roster' || msg.t === 'teamSet' || msg.t === 'authority') {
       MODES_queueRosterRefresh();
     }
   }, 5);

@@ -281,6 +281,8 @@
     get configPending() { const n = N(); return !!(n && n.configPending); },
     canConfigure: function () { return typeof netCanConfigure === 'function' && netCanConfigure(); },
     teamFor: function (id) { return typeof netTeamFor === 'function' ? netTeamFor(id) : null; },
+    requestTeam: function (id, team) { return typeof netRequestTeam === 'function' && netRequestTeam(id, team); },
+    get isHost() { const n = N(); return !!(n && n.online && n.id && n.hostId === n.id); },
     enemies: function (a, b) { return typeof netEnemies === 'function' && netEnemies(a, b); }
   };
 

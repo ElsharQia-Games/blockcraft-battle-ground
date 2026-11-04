@@ -718,6 +718,7 @@ function netSend(msg) {
     netPoseFields(msg);
   }
   if (msg.t !== 'join' && netMqttAction(msg.t) && net.localLife > 0) msg.life = net.localLife;
+  if (msg.t === 'respawn') net.respawnSentAt = performance.now();
   if (msg.t === 'shot') {
     if (!netValidPosition(msg)) return false;
     if (netLocalRiding()) return false;
@@ -1247,13 +1248,74 @@ function netRememberState(p) {
   else net.authPlayers.set(p.id, { ...p });
 }
 
+// Teams come from ONE place: the room authority's sticky per-player record.
+// Every peer used to derive teams from its own sorted view of the roster, so
+// the host and a victim could disagree and silently drop hits as "friendly".
 function netTeamFor(id) {
   if (net.matchMode !== 'tdm' && net.matchMode !== 'lockdown') return null;
   const record = net.authPlayers.get(id);
-  if (net.mode === 'ws' && record && (record.team === 'red' || record.team === 'blue')) return record.team;
-  const ids = [...new Set([net.id, ...net.players.keys(), ...net.authPlayers.keys()])].filter(netValidId).sort();
-  const index = ids.indexOf(id);
-  return index < 0 ? null : index % 2 ? 'blue' : 'red';
+  if (record && (record.team === 'red' || record.team === 'blue')) return record.team;
+  if (record && net.mode === 'mqtt' && net.hostId === net.id && net.authorityReady) return netAssignTeam(record);
+  return null;
+}
+
+function netAssignTeam(record) {
+  let red = 0, blue = 0;
+  for (const r of net.authPlayers.values()) {
+    if (r === record) continue;
+    if (r.team === 'red') red++;
+    else if (r.team === 'blue') blue++;
+  }
+  record.team = blue < red ? 'blue' : 'red';
+  return record.team;
+}
+
+// Anyone may switch their own team; the host may move anyone.
+function netRequestTeam(targetId, team) {
+  if (team !== 'red' && team !== 'blue') return false;
+  const target = netValidId(targetId) ? targetId : net.id;
+  if (!net.online || !net.id) return false;
+  if (target !== net.id && net.hostId !== net.id) { toast('Only the host can move other players'); return false; }
+  return netSend({ t: 'team', target, team });
+}
+
+function netOnTeamSet(msg) {
+  if (!netValidId(msg.id) || (msg.team !== 'red' && msg.team !== 'blue')) return;
+  const record = net.authPlayers.get(msg.id);
+  if (record) record.team = msg.team;
+  const remote = net.players.get(msg.id);
+  if (remote) remote.team = netTeamFor(msg.id);
+  const label = msg.team === 'red' ? 'Red' : 'Blue';
+  if (msg.id === net.id) {
+    if (alive) {
+      // Fresh life on the new side: full health at that team's spawn.
+      let spawn = null;
+      const modes = netAPI('modes');
+      try { if (modes && typeof modes.respawnPoint === 'function') spawn = modes.respawnPoint(msg.team); } catch (e) { /* optional */ }
+      if (!spawn || !Number.isFinite(spawn.x)) spawn = findSpawn();
+      player.pos.set(spawn.x, spawn.y, spawn.z);
+      player.vel.set(0, 0, 0);
+      if (typeof resetPlayerMotion === 'function') resetPlayerMotion();
+      setHealth(MAX_HEALTH);
+    }
+    toast(msg.by && msg.by !== net.id ? 'The host moved you to ' + label + ' team' : 'You joined ' + label + ' team');
+  } else {
+    const name = remote ? remote.name : record && record.name ? record.name : 'A player';
+    toast(safeName(name) + ' joined ' + label + ' team');
+  }
+  if (typeof BC !== 'undefined' && BC.emit) BC.emit('teamChanged', msg.id, msg.team);
+  netEmitStatus();
+}
+
+// The authority says we are dead but this client still thinks it is alive:
+// die locally. Without this the player became an unkillable ghost, because
+// the authority ignores damage to a player it already considers dead.
+function netForceLocalDeath(p) {
+  if (!alive || typeof die !== 'function') return;
+  if (performance.now() - (net.respawnSentAt || -Infinity) < 2500) return; // our respawn is in flight
+  const event = p.t === 'died' ? p : p.deathEvent && typeof p.deathEvent === 'object' ? p.deathEvent : null;
+  const info = event ? { ...event, authoritative: true } : { authoritative: true };
+  die(event ? event.by : '', event ? event.byId || event.killerId : '', info);
 }
 
 function netEnemies(a, b) {
@@ -1282,6 +1344,8 @@ function netApplyOwnState(p) {
   if (Number.isFinite(p.kills)) kills = Math.floor(netPoseNumber(p.kills, kills, 0, 999999));
   if (Number.isFinite(p.deaths)) deaths = Math.floor(netPoseNumber(p.deaths, deaths, 0, 999999));
   setKd();
+  if (Number.isFinite(p.hp) && p.hp <= 0 && alive &&
+      (!Number.isSafeInteger(p.life) || p.life === (net.localLife || p.life))) netForceLocalDeath(p);
 }
 
 function netKillInfo(msg) {
@@ -1467,6 +1531,9 @@ function handleNet(msg, from, nested) {
     }
     case 'health':
       netApplyOwnState(msg);
+      break;
+    case 'teamSet':
+      netOnTeamSet(msg);
       break;
     case 'correction':
       if (msg.id === net.id && netValidPosition(msg)) {
@@ -1858,7 +1925,7 @@ function netMqttAction(type) {
   switch (type) {
     case 'join': case 'state': case 'reload': case 'shot': case 'hit':
     case 'voxelHit': case 'edit': case 'edits': case 'died': case 'respawn':
-    case 'ride': case 'breath': case 'dragons': return true;
+    case 'ride': case 'breath': case 'dragons': case 'team': return true;
     default: return false;
   }
 }
@@ -1897,8 +1964,9 @@ function netMqttRecord(id, msg, create) {
       life: 1, aim: 0, firing: 0, combat: 1, build: 0, reload: -1,
       reloadTotal: WEAPON_BY_ID.pistol.reload, reloadRounds: WEAPON_BY_ID.pistol.mag,
       crouch: 0, slide: 0, fly: 0, onGround: 1, boost: 0, dash: 0, fuel: 100, height: 1.8,
-      bodyHeight: 1.8, dragon: -1, deathReported: false, deathEvent: null };
+      bodyHeight: 1.8, dragon: -1, deathReported: false, deathEvent: null, team: null };
     net.authPlayers.set(id, r);
+    netAssignTeam(r);
   }
   if (!r.shots) {
     const now = performance.now();
@@ -1984,7 +2052,7 @@ function netMqttPublic(r) {
     reload, reloadTotal: r.reloadTotal, reloadRounds: r.reloadRounds,
     crouch: r.crouch, slide: r.slide, sliding: r.slide, fly: r.fly, onGround: r.onGround, boost: r.boost,
     dash: r.dash, fuel: r.fuel, height: r.height, bodyHeight: r.bodyHeight,
-    dragon, team: netTeamFor(r.id), generation: net.generation, sid: ++r.outSid };
+    dragon, team: r.team || netAssignTeam(r), generation: net.generation, sid: ++r.outSid };
 }
 
 function netMqttResetMatch() {
@@ -2070,9 +2138,12 @@ function netMqttFireLock(r, msg, type) {
     let fireAt = now;
     if (msg.shotAt !== undefined) {
       if (!Number.isFinite(msg.shotAt) || msg.shotAt < 0 || msg.shotAt > Number.MAX_SAFE_INTEGER) return false;
-      if (r.fireClockOrigin === null) r.fireClockOrigin = now - msg.shotAt;
+      // Track the fastest delivery seen. Anchoring to the first packet let one
+      // slow first shot reject every later on-time shot (and all its hits).
+      const origin = now - msg.shotAt;
+      if (r.fireClockOrigin === null || origin < r.fireClockOrigin) r.fireClockOrigin = origin;
       fireAt = msg.shotAt + r.fireClockOrigin;
-      if (fireAt < now - 1500 || fireAt > now + 80) return false;
+      if (fireAt < now - 1500) return false;
     }
     if (fireAt - r.lastFireAt < Math.max(interval, r.lastFireInterval)) return false;
     r.lastFireAt = fireAt;
@@ -2283,7 +2354,7 @@ function netMqttProcess(msg, from, budgeted) {
       netMqttPose(r, msg);
       if (r.hp <= 0 || !r.combat || r.dragon >= 0 || netMqttReload(r) >= 0 || !netMqttWeaponAllowed(msg.weapon) || msg.weapon !== r.weapon ||
           !netValidPosition(msg) || Math.hypot(msg.x - r.x, msg.y - r.y, msg.z - r.z) >
-          6 + Math.min(12, Math.max(0, performance.now() - r.positionAt) * 0.048) || !netMqttFireLock(r, msg, 'shot')) break;
+          10 + Math.min(16, Math.max(0, performance.now() - r.positionAt) * 0.05) || !netMqttFireLock(r, msg, 'shot')) break;
       netMqttAuthority({ t: 'shot', id: r.id, weapon: r.weapon, shotId: msg.shotId,
         x: msg.x, y: msg.y, z: msg.z, yaw: r.yaw, pitch: r.pitch, aim: r.aim,
         firing: 1, combat: 1, build: 0, reload: -1, life: r.life, sid: ++r.outSid });
@@ -2292,7 +2363,8 @@ function netMqttProcess(msg, from, budgeted) {
     case 'hit': {
       const target = net.authPlayers.get(msg.target), w = WEAPON_BY_ID[msg.weapon];
       const head = netPoseFlag(msg.head, 0), shot = r.shots.get(netToken(msg.shotId));
-      if (!target || !w || !shot || r.hp <= 0 || !r.combat || r.dragon >= 0 || netMqttReload(r) >= 0 ||
+      // The shot already passed the reload gate; pellets just ride on it.
+      if (!target || !w || !shot || r.hp <= 0 || r.dragon >= 0 ||
           !netEnemies(r.id, target.id) || !netMqttWeaponAllowed(msg.weapon) || msg.weapon !== r.weapon ||
           !Number.isFinite(msg.dmg) || msg.dmg <= 0 || msg.dmg > w.damage * (head ? 2 : 1) ||
           Math.hypot(target.x - shot.x, target.y + target.bodyHeight * 0.55 - shot.y, target.z - shot.z) > Math.min(w.range, 120) + 2 ||
@@ -2349,6 +2421,18 @@ function netMqttProcess(msg, from, budgeted) {
       }
       break;
     }
+    case 'team': {
+      const target = net.authPlayers.get(netValidId(msg.target) ? msg.target : r.id);
+      if (!target || (msg.team !== 'red' && msg.team !== 'blue') ||
+          (target !== r && r.id !== net.hostId) || target.team === msg.team) break;
+      target.team = msg.team;
+      netMqttReleaseRide(target, 'team');
+      if (target.hp > 0) { target.hp = MAX_HEALTH; target.lastDamageAt = -Infinity; target.healthAt = performance.now(); }
+      target.awaitingSpawn = true; // the switched player teleports to their new spawn
+      netMqttAuthority({ t: 'teamSet', id: target.id, team: msg.team, by: r.id });
+      netMqttRoster();
+      break;
+    }
     case 'ride': netMqttRide(r, msg); break;
     case 'breath': netMqttBreath(r, msg); break;
     case 'died':
@@ -2357,7 +2441,7 @@ function netMqttProcess(msg, from, budgeted) {
       netMqttAuthority(r.deathReported && r.deathEvent ? r.deathEvent : netMqttDeath(r, null, 'world', false));
       break;
     case 'respawn':
-      if (!r.deathReported || performance.now() - r.deathAt < 3100 || !netValidPosition(msg)) {
+      if (!r.deathReported || performance.now() - r.deathAt < 2500 || !netValidPosition(msg)) {
         netMqttAuthority({ t: 'health', ...netMqttPublic(r) }, r.id); break;
       }
       r.hp = MAX_HEALTH;
@@ -2879,7 +2963,7 @@ function mqttHandlePublish(first, body) {
         msg.wireSeq <= mqtt.authoritySeq || (msg.to !== undefined && !netValidId(msg.to)) || !netInboundOK(msg.packet)) return;
     const packet = msg.packet;
     if (!['join', 'state', 'states', 'roster', 'health', 'correction', 'shot', 'hit', 'voxelHit', 'edit', 'edits', 'editAck', 'editReject',
-      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'leave'].includes(packet.t) ||
+      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'leave', 'teamSet'].includes(packet.t) ||
       packet.generation !== net.generation || packet.epoch !== net.epoch) return;
     mqtt.authoritySeq = msg.wireSeq;
     if (msg.to && msg.to !== net.id) return;

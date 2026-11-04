@@ -2131,9 +2131,13 @@ function applyDamage(dmg, byName, head, byId, info) {
   const numeric = Number(dmg);
   if (!Number.isFinite(numeric) || numeric <= 0) return false;
   const hit = combatHitInfo(numeric, byName, head, byId, info, arguments[5]);
-  if (combatIsFriendly(hit.byId, hit.byName, null, hit.killerTeam || hit.byTeam)) return false;
-  const hitWeapon = WEAPON_BY_ID[hit.weapon];
-  if (hit.killerPos && hitWeapon && hit.killerPos.distanceTo(player.pos) > hitWeapon.range) return false;
+  // A hit confirmed by the room authority already passed its team and range
+  // checks. Re-judging it with this client's guesses made players unkillable.
+  if (hit.authoritative !== true) {
+    if (combatIsFriendly(hit.byId, hit.byName, null, hit.killerTeam || hit.byTeam)) return false;
+    const hitWeapon = WEAPON_BY_ID[hit.weapon];
+    if (hit.killerPos && hitWeapon && hit.killerPos.distanceTo(player.pos) > hitWeapon.range) return false;
+  }
   const amount = Math.max(1, Math.min(120, numeric));
   health = hit.authoritativeHealth === null ? Math.max(0, health - amount) : hit.authoritativeHealth;
   combatLastHitInfo = hit;
