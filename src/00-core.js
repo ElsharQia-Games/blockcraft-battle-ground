@@ -8,7 +8,28 @@ const CHUNKS = 16;
 const WORLD = CHUNK * CHUNKS;          // 256 blocks across
 const HEIGHT = 80;
 const SEA = 22;
-const SEED = 20261104;
+
+/* The world seed is runtime data now: ?seed= wins, then the last seed saved by
+   the lobby, then the original hand-authored world. 20-world.js reads SEED for
+   every noise lookup, so assigning SEED before generateTerrain() re-rolls the
+   whole map deterministically (including villages and dragon routes). */
+function resolveWorldSeed() {
+  const fallback = 20261104;
+  try {
+    const params = new URLSearchParams(location.search);
+    const raw = params.has('seed') ? params.get('seed') : localStorage.getItem('blockcraft.seed');
+    if (raw == null || String(raw).trim() === '') return fallback;
+    const text = String(raw).trim();
+    if (/^-?\d+$/.test(text)) {
+      const n = Number(text);
+      if (Number.isSafeInteger(n)) return n >>> 0;
+    }
+    return BC.hashSeed(text) || fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+let SEED = resolveWorldSeed();
 
 const AIR = 0, GRASS = 1, DIRT = 2, STONE = 3, SAND = 4, LOG = 5,
       LEAVES = 6, PLANKS = 7, COBBLE = 8, BRICK = 9, WATER = 10,

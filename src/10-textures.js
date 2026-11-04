@@ -250,6 +250,12 @@ function setBlock(x, y, z, type) {
   if (oldType !== blocks[index] && typeof resetVoxelDamage === 'function') {
     resetVoxelDamage(x, y, z, oldType, blocks[index]);
   }
+  // Normal edits invalidate only nearby minimap tiles. Generation writes
+  // millions of voxels, so it emits one worldReset instead of per-cell events.
+  if (oldType !== blocks[index] && typeof BC !== 'undefined' &&
+      BC.flags.bootReady && !BC.flags.worldBusy) {
+    BC.emit('voxelChanged', { x, y, z, oldType, b: blocks[index] });
+  }
 }
 const isOpaque = (x, y, z) => {
   const b = getBlock(x, y, z);
