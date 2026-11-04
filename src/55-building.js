@@ -37,6 +37,11 @@ function buildingEye() {
 }
 
 function buildingGameplayReady() {
+  const world = BC.api && BC.api.world;
+  const riding = BC.api && BC.api.riding;
+  const killcam = BC.api && BC.api.killcam;
+  if ((BC.flags && (BC.flags.worldBusy || BC.flags.playerRepairBlocked)) || (world && world.busy) ||
+      (riding && riding.active) || (killcam && killcam.active)) return false;
   if (typeof isGameplayInputActive === 'function') return isGameplayInputActive();
   return typeof loading !== 'undefined' && !loading && typeof alive !== 'undefined' && alive &&
     typeof craftOpen !== 'undefined' && !craftOpen && !document.hidden &&
@@ -65,8 +70,10 @@ function cancelQuickBuild() {
   quickBuild.plan = null;
   quickBuild.anchor = null;
   quickBuild.lastPlacement = null;
+  quickBuild.lastResult = null;
   quickBuild.valid = false;
   quickBuild.reason = '';
+  quickBuild.cost = quickBuild.available = 0;
   clearBuildingHeld();
   hideBuildingPreview();
 }
@@ -74,6 +81,12 @@ function cancelQuickBuild() {
 function resetBuildingInput(cancelMode = true) {
   if (cancelMode) cancelQuickBuild();
   else { clearBuildingHeld(); hideBuildingPreview(); }
+}
+
+function resetBuildingWorldState() {
+  cancelQuickBuild();
+  buildingHeld.nextActionAt = 0;
+  if (buildingPreviewData) buildingPreviewData.layoutKey = '';
 }
 
 function selectBuildPiece(kind) {
@@ -145,27 +158,87 @@ function buildSolid(x, y, z) {
 }
 
 function buildIntersectsBody(c, p, height = PH) {
-  if (!p || ![p.x, p.y, p.z].every(Number.isFinite)) return false;
+  if (!p || !Number.isFinite(p.x) || !Number.isFinite(p.y) || !Number.isFinite(p.z)) return false;
   const epsilon = typeof PLAYER_EPS === 'number' ? PLAYER_EPS : 0.00001;
   return c.x + 1 > p.x - PW + epsilon && c.x < p.x + PW - epsilon &&
     c.y + 1 > p.y + epsilon && c.y < p.y + height - epsilon &&
     c.z + 1 > p.z - PW + epsilon && c.z < p.z + PW - epsilon;
 }
 
-function buildOverlapsRemote(c, now) {
-  if (typeof net === 'undefined' || !net || !net.players) return false;
-  for (const r of net.players.values()) {
-    if (r.hp <= 0 || (r.deadUntil && r.deadUntil > now)) continue;
-    // Check both the drawn body and the last received position, not the camera or avatar mesh.
-    if (buildIntersectsBody(c, r, Math.max(PH, 1.9)) ||
-        buildIntersectsBody(c, { x: r.tx, y: r.ty, z: r.tz }, Math.max(PH, 1.9))) return true;
+const buildingRemoteCell = { x: 0, y: 0, z: 0 };
+const buildingRemoteTarget = { x: 0, y: 0, z: 0 };
+const buildingDragonCellBox = { x: 0, y: 0, z: 0, w: 0.5, h: 1, ignoreDragonIndex: -1 };
+const buildingDragonRayDir = { x: 0, y: 0, z: 0 };
+
+// Shared with 50's traditional canPlace gate. Query the single collider owner
+// lazily; guardians and mounts are equally solid, with NO rider exemption here.
+function buildVoxelHitsSolidDragon(x, y, z) {
+  if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z) || !buildInBounds(x, y, z)) return false;
+  const api = BC.api && BC.api.dragons;
+  if (!api || typeof api.overlapsAabb !== 'function') return false;
+  const box = buildingDragonCellBox;
+  box.x = x + 0.5; box.y = y; box.z = z + 0.5;
+  return !!api.overlapsAabb(box, -1);
+}
+
+function buildLineHitsSolidDragon(origin, target) {
+  const api = BC.api && BC.api.dragons;
+  if (!api || typeof api.raycast !== 'function') return false;
+  const dx = target.x - origin.x, dy = target.y - origin.y, dz = target.z - origin.z;
+  const distance = Math.hypot(dx, dy, dz);
+  if (!Number.isFinite(distance) || distance <= 0.00001) return false;
+  const dir = buildingDragonRayDir;
+  dir.x = dx / distance; dir.y = dy / distance; dir.z = dz / distance;
+  const hit = api.raycast(origin, dir, Math.max(0, distance - 0.00001), -1);
+  return !!(hit && (!Number.isFinite(hit.distance) || hit.distance <= distance - 0.00001));
+}
+
+function buildRemoteBodyHeight(r) {
+  const data = r.group && r.group.userData;
+  let height = Number.isFinite(r.bodyHeight) && r.bodyHeight > 0 ? r.bodyHeight : r.height;
+  if ((!Number.isFinite(height) || height <= 0) && data) {
+    height = Number.isFinite(data.colliderHeight) && data.colliderHeight > 0 ? data.colliderHeight : data.bodyHeight;
+  }
+  if (!Number.isFinite(height) || height <= 0) {
+    height = r.crouch || r.crouching || r.slide || r.sliding || r.dash || r.dashing ? 1.2 : PH;
+  }
+  return Math.max(1.1, Math.min(1.9, height));
+}
+
+// Public single-cell guard. The traditional placement owner calls this BEFORE
+// debiting inventory/writing voxels; blueprints use the exact same body rule.
+function buildVoxelHitsLivingRemote(x, y, z, now = performance.now()) {
+  if (!Number.isInteger(x) || !Number.isInteger(y) || !Number.isInteger(z) || !buildInBounds(x, y, z) ||
+      typeof net === 'undefined' || !net || !net.players) return false;
+  const c = buildingRemoteCell;
+  c.x = x; c.y = y; c.z = z;
+  const self = net.id;
+  const hasSelf = self != null && self !== '';
+  for (const id of net.players.keys()) {
+    if (hasSelf && id === self) continue;
+    const r = net.players.get(id);
+    if (!r || (hasSelf && r.id === self) || !Number.isFinite(r.hp) || r.hp <= 0 || r.dead === true || r.dead === 1 ||
+        r.alive === false || r.alive === 0 || r.deathNoted === true || r.deadUntil > now) continue;
+    const height = buildRemoteBodyHeight(r);
+    const drawn = r.group && r.group.position ? r.group.position : r;
+    if (buildIntersectsBody(c, drawn, height)) return true;
+    const received = Number.isFinite(r.tx) && Number.isFinite(r.ty) && Number.isFinite(r.tz);
+    buildingRemoteTarget.x = received ? r.tx : r.x;
+    buildingRemoteTarget.y = received ? r.ty : r.y;
+    buildingRemoteTarget.z = received ? r.tz : r.z;
+    if (buildIntersectsBody(c, buildingRemoteTarget, height)) return true;
   }
   return false;
+}
+
+function buildOverlapsRemote(c, now) {
+  return buildVoxelHitsLivingRemote(c.x, c.y, c.z, now);
 }
 
 /* Exact voxel traversal from the player's eye. Only matching blocks IN this template
    can be reused through; an unrelated wall still blocks construction behind it. */
 function buildingLineClear(eye, target, reusable) {
+  if (buildLineHitsSolidDragon(eye, target)) return false;
   const dx = target.x - eye.x, dy = target.y - eye.y, dz = target.z - eye.z;
   let x = Math.floor(eye.x), y = Math.floor(eye.y), z = Math.floor(eye.z);
   const sx = Math.sign(dx), sy = Math.sign(dy), sz = Math.sign(dz);
@@ -228,9 +301,11 @@ function preflightBuildPiece(kind, anchor, rotation, material) {
 
   const now = performance.now();
   const eye = buildingEye();
+  const bodyHeight = typeof playerBodyHeight === 'function' ? playerBodyHeight() : PH;
   for (const c of plan.changes) {
-    if (buildIntersectsBody(c, player.pos)) return fail('self', 'Step back — you are inside the blueprint');
+    if (buildIntersectsBody(c, player.pos, bodyHeight)) return fail('self', 'Step back — you are inside the blueprint');
     if (buildOverlapsRemote(c, now)) return fail('player', 'Another player is in the way');
+    if (buildVoxelHitsSolidDragon(c.x, c.y, c.z)) return fail('dragon', 'A solid dragon is in the way');
   }
   for (const c of cells) {
     if (Math.hypot(c.x + 0.5 - eye.x, c.y + 0.5 - eye.y, c.z + 0.5 - eye.z) > REACH + 1e-6) {
@@ -522,3 +597,13 @@ function updateBuilding(dt) {
   }
   runHeldBuilding();
 }
+
+BC.api.building = BC.api.building || {};
+BC.api.building.voxelHitsLivingRemote = buildVoxelHitsLivingRemote;
+BC.api.building.voxelHitsSolidDragon = buildVoxelHitsSolidDragon;
+BC.api.building.lineHitsSolidDragon = buildLineHitsSolidDragon;
+BC.api.building.remoteBodyHeight = buildRemoteBodyHeight;
+BC.api.building.resetWorld = resetBuildingWorldState;
+BC.on('worldWillReset', resetBuildingWorldState, -90);
+BC.on('worldReset', resetBuildingWorldState, -90);
+BC.on('modeChanged', resetBuildingWorldState, -90);

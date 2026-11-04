@@ -1,8 +1,11 @@
-/* Blockcraft Battle Ground — Inventory, hotbar, crafting and toasts.
+/* Blockcraft Battle Ground — Building materials, hotbar and toasts.
    70-inventory.js
    Part of a split that loads as classic <script> tags (see index.html). */
 'use strict';
 const UNLIMITED_BUILDING = true;
+// Mutable compatibility flag for deferred gameplay guards and debug callers.
+// Inventory/crafting no longer has a player-facing surface or an open action.
+let craftOpen = false;
 const inventory = Object.create(null);
 const STARTING_KIT = {
   [GRASS]: 24, [DIRT]: 64, [STONE]: 64, [SAND]: 32, [LOG]: 24, [LEAVES]: 24,
@@ -20,7 +23,7 @@ function isBuildMaterial(id) {
     Object.prototype.hasOwnProperty.call(BLOCK_DEFS, id);
 }
 
-// Building availability is independent of collected items and recipe ingredients.
+// Building availability is independent of legacy collected-item counts.
 function buildItemCount(id) {
   return UNLIMITED_BUILDING && isBuildMaterial(id) ? Infinity : itemCount(id);
 }
@@ -33,7 +36,6 @@ function takeBuildItems(id, n = 1) {
 function addItem(id, n = 1) {
   inventory[id] = Math.min(999, itemCount(id) + n);
   refreshHotbar();
-  if (craftOpen) refreshCraft();
 }
 
 function takeItem(id, n = 1) {
@@ -41,7 +43,6 @@ function takeItem(id, n = 1) {
   inventory[id] = itemCount(id) - n;
   if (inventory[id] <= 0) delete inventory[id];
   refreshHotbar();
-  if (craftOpen) refreshCraft();
   return true;
 }
 
@@ -89,7 +90,6 @@ function refreshHotbar() {
     s.el.classList.toggle('empty', n <= 0);
     s.el.title = blockName(id) + (n === Infinity ? ' · Unlimited building' : '');
   }
-  document.getElementById('slotLabel').textContent = String(selected + 1);
 }
 
 const toastEl = document.getElementById('toast');
@@ -109,108 +109,18 @@ function selectSlot(i) {
   toast(blockName(id) + (n === Infinity ? ' · Unlimited building' : n > 0 ? ' ×' + n : ' (none)'));
 }
 
-/* ---- crafting ---- */
-const RECIPES = [
-  { out: [PLANKS, 4],        req: [[LOG, 1]] },
-  { out: [GLASS, 1],         req: [[SAND, 3]] },
-  { out: [STONEBRICK, 4],    req: [[COBBLE, 4]] },
-  { out: [MOSSY, 1],         req: [[STONEBRICK, 1], [LEAVES, 1]] },
-  { out: [BRICK, 2],         req: [[DIRT, 4]] },
-  { out: [SANDSTONE, 1],     req: [[SAND, 2], [STONE, 1]] },
-  { out: [MUD, 4],           req: [[DIRT, 2], [SAND, 2]] },
-  { out: [GOLD_BLOCK, 1],    req: [[GOLD_ORE, 4]] },
-  { out: [DIAMOND_BLOCK, 1], req: [[DIAMOND_ORE, 4]] }
-];
-
-const craftEl = document.getElementById('craft');
-const invGridEl = document.getElementById('invGrid');
-const recipeListEl = document.getElementById('recipeList');
-let craftOpen = false;
-
-function makeMiniCanvas(id) {
-  const cv = document.createElement('canvas');
-  cv.width = TILE_PX; cv.height = TILE_PX;
-  paintTile(cv, id);
-  return cv;
+// Shift+wheel changes the selected slot's material without opening a menu.
+// Keep every solid material available while the numbered hotbar stays compact.
+function cycleHotbarMaterial(direction) {
+  if (direction !== 1 && direction !== -1) return false;
+  const materials = BLOCK_IDS.filter(isBuildMaterial);
+  if (!materials.length) return false;
+  const current = materials.indexOf(HOTBAR[selected]);
+  const next = current < 0 ? (direction > 0 ? 0 : materials.length - 1)
+    : (current + direction + materials.length) % materials.length;
+  HOTBAR[selected] = materials[next];
+  selectSlot(selected);
+  return true;
 }
 
-function refreshCraft() {
-  invGridEl.innerHTML = '';
-  for (const id of BLOCK_IDS) {
-    const available = buildItemCount(id);
-    const btn = document.createElement('button');
-    btn.className = 'inv-item' + (available > 0 ? '' : ' zero');
-    btn.type = 'button';
-    btn.title = blockName(id) + (available === Infinity
-      ? ' · Unlimited building · ' + itemCount(id) + ' for crafting' : ' ×' + available);
-    btn.appendChild(makeMiniCanvas(id));
-    const n = document.createElement('span');
-    n.className = 'n';
-    n.textContent = available === Infinity ? '∞' : String(available);
-    btn.appendChild(n);
-    btn.addEventListener('click', () => {
-      HOTBAR[selected] = id;
-      refreshHotbar();
-      toast(blockName(id) + ' → slot ' + (selected + 1) + (available === Infinity ? ' · Unlimited building' : ''));
-    });
-    invGridEl.appendChild(btn);
-  }
-
-  recipeListEl.innerHTML = '';
-  for (const r of RECIPES) {
-    const can = r.req.every(([id, n]) => itemCount(id) >= n);
-    const row = document.createElement('div');
-    row.className = 'recipe';
-
-    const meta = document.createElement('div');
-    meta.className = 'meta';
-    meta.appendChild(makeMiniCanvas(r.out[0]));
-    const text = document.createElement('div');
-    const outName = blockName(r.out[0]) + (r.out[1] > 1 ? ' ×' + r.out[1] : '');
-    const reqText = r.req.map(([id, n]) => blockName(id) + ' ×' + n).join(' + ');
-    text.innerHTML = '<div>' + outName + '</div><div class="req">' + reqText + '</div>';
-    meta.appendChild(text);
-
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.textContent = 'Craft';
-    btn.disabled = !can;
-    btn.addEventListener('click', () => doCraft(r));
-
-    row.appendChild(meta);
-    row.appendChild(btn);
-    recipeListEl.appendChild(row);
-  }
-  document.getElementById('slotLabel').textContent = String(selected + 1);
-}
-
-function doCraft(r) {
-  if (!r.req.every(([id, n]) => itemCount(id) >= n)) { toast('Missing materials'); return; }
-  for (const [id, n] of r.req) takeItem(id, n);
-  addItem(r.out[0], r.out[1]);
-  toast('Crafted ' + blockName(r.out[0]) + (r.out[1] > 1 ? ' ×' + r.out[1] : ''));
-}
-
-function openCraft() {
-  craftOpen = true;
-  craftEl.classList.add('open');
-  hintEl.classList.add('hidden');
-  if (document.pointerLockElement) document.exitPointerLock();
-  refreshCraft();
-}
-
-function closeCraft() {
-  craftOpen = false;
-  craftEl.classList.remove('open');
-  if (!document.pointerLockElement) {
-    hintEl.classList.remove('hidden');
-    playBtn.textContent = 'Click to resume';
-  }
-}
-
-function toggleCraft() {
-  if (craftOpen) closeCraft(); else openCraft();
-}
-
-document.getElementById('craftClose').addEventListener('click', closeCraft);
 refreshHotbar();
