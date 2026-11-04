@@ -281,6 +281,8 @@
     coreTop: RIDE_CORE_RADIUS,
     coreBox: { x: 0, y: 0, z: 0, w: RIDE_CORE_RADIUS, h: RIDE_CORE_RADIUS * 2, ignoreDragonIndex: -1 },
     standingBox: { x: 0, y: 0, z: 0, w: 0.3, h: 1.8 },
+    dismountBox: { x: 0, y: 0, z: 0, w: 0.3, h: 1.8, ignoreDragonIndex: -1 },
+    dismountSweep: { x: 0, y: 0, z: 0, hitX: false, hitY: false, hitZ: false },
     coreSweepOut: { x: 0, y: 0, z: 0, hitX: false, hitY: false, hitZ: false },
     motionTarget: new THREE.Vector3(),
     motionDelta: new THREE.Vector3(),
@@ -976,19 +978,36 @@
     return !arena || !arena.active || typeof arena.contains !== 'function' || arena.contains(x, z);
   }
 
-  function landingSpot(from) {
-    if (!finitePosition(from) || typeof getBlock !== 'function') return null;
-    var start = Math.min(HEIGHT - 3, Math.floor(from.y));
-    for (var column = 0; column < LAND_OFFSETS.length; column++) {
-      var x = Math.floor(from.x) + LAND_OFFSETS[column][0];
-      var z = Math.floor(from.z) + LAND_OFFSETS[column][1];
-      if (x < 2 || z < 2 || x >= WORLD - 2 || z >= WORLD - 2 || !inArena(x + 0.5, z + 0.5)) continue;
-      for (var y = start; y >= 0; y--) {
-        var block = getBlock(x, y, z);
-        if (block === AIR || block === WATER || y + 1 <= SEA) continue;
-        if (getBlock(x, y + 1, z) === AIR && getBlock(x, y + 2, z) === AIR &&
-            standingClear(x + 0.5, y + 1.02, z + 0.5)) {
-          return { x: x + 0.5, y: y + 1.02, z: z + 0.5 };
+  var DISMOUNT_DIRECTIONS = [[1, 0], [-1, 0], [0, -1], [0, 1], [0.707, -0.707], [-0.707, -0.707], [0.707, 0.707], [-0.707, 0.707]];
+  var DISMOUNT_RADII = [0.9, 1.4, 2.2, 3.2, 4.8, 6.4];
+  function airDismountSpot(from, dragon) {
+    if (!finitePosition(from)) return null;
+    var physics = BC.api.physics;
+    var rightX = Math.cos(R.yaw), rightZ = -Math.sin(R.yaw);
+    var forwardX = -Math.sin(R.yaw), forwardZ = -Math.cos(R.yaw);
+    // A small sideways seat exit at the CURRENT height. Never search a ground
+    // column or send the player back to their pre-ride position. The final body
+    // must clear every dragon; only the sweep out of its own saddle ignores it.
+    for (var lift = 0; lift < 3; lift++) {
+      var dy = lift === 0 ? 0.06 : lift === 1 ? 0.4 : 0.8;
+      for (var radius = 0; radius < DISMOUNT_RADII.length; radius++) {
+        for (var i = 0; i < DISMOUNT_DIRECTIONS.length; i++) {
+          var dir = DISMOUNT_DIRECTIONS[i], r = DISMOUNT_RADII[radius];
+          var dx = (rightX * dir[0] + forwardX * dir[1]) * r;
+          var dz = (rightZ * dir[0] + forwardZ * dir[1]) * r;
+          var x = from.x + dx, y = from.y + dy, z = from.z + dz;
+          if (x < 1 || z < 1 || x > WORLD - 1 || z > WORLD - 1 || !inArena(x, z) || !standingClear(x, y, z)) continue;
+          if (physics && typeof physics.sweepAabb === 'function') {
+            var box = R.dismountBox;
+            box.x = from.x; box.y = from.y; box.z = from.z;
+            box.w = typeof PW === 'number' ? PW : 0.3;
+            box.h = typeof PH === 'number' ? PH : 1.8;
+            box.ignoreDragonIndex = dragon ? dragon.index : -1;
+            var moved = physics.sweepAabb(box, dx, dy, dz, R.dismountSweep);
+            if (!moved || moved.hitX || moved.hitY || moved.hitZ ||
+                Math.abs(moved.x - x) + Math.abs(moved.y - y) + Math.abs(moved.z - z) > 0.01) continue;
+          }
+          return { x: x, y: y, z: z, sideX: dx / r, sideZ: dz / r };
         }
       }
     }
@@ -1247,6 +1266,7 @@
     reason = String(reason || 'manual');
     var dragon = API.dragon;
     var at = (typeof player !== 'undefined' && player.pos) ? R.point.copy(player.pos) : null;
+    var exitSpeed = Math.min(8, Math.max(0, API.speed));
     if (R.onlineLease && connectionKey() === R.sessionKey) sendRide(dragon, false, true);
 
     API.active = false;
@@ -1284,7 +1304,7 @@
     // A lifecycle reset/respawn owns its own spawn. Never move the corpse or
     // overwrite a freshly regenerated spawn with the retired saddle position.
     var relocate = reason !== 'reset' && reason !== 'busy' && reason !== 'death' && reason !== 'respawn';
-    var safe = relocate ? (landingSpot(at) || landingSpot(R.savedPosition) || safeSpawn()) : null;
+    var safe = relocate ? airDismountSpot(at, dragon) : null;
     if (safe && typeof player !== 'undefined') {
       player.pos.set(safe.x, safe.y, safe.z);
     }
@@ -1294,11 +1314,20 @@
 
     if (typeof player !== 'undefined') {
       player.vel.set(0, 0, 0);
+      if (relocate) {
+        player.vel.x = -Math.sin(R.yaw) * exitSpeed + (safe ? safe.sideX * 4 : 0);
+        player.vel.z = -Math.cos(R.yaw) * exitSpeed + (safe ? safe.sideZ * 4 : 0);
+        player.vel.y = Math.min(0, Math.sin(R.pitch) * exitSpeed);
+        if (typeof playerCapHorizontal === 'function') playerCapHorizontal(12);
+        if (typeof playerMotion !== 'undefined') playerMotion.airCarry = Math.hypot(player.vel.x, player.vel.z);
+      }
       player.fly = false;
       player.onGround = false;
       player.yaw = R.yaw;
       player.pitch = BC.clamp(R.pitch * 0.55, -1.45, 1.45);
-      player.sprinting = player.crouching = player.sliding = player.swimming = false;
+      player.sprinting = player.sliding = player.swimming = false;
+      if (typeof playerSetLowStance === 'function') playerSetLowStance(false);
+      else player.crouching = false;
     }
 
     if (typeof vmRoot !== 'undefined' && vmRoot) {
@@ -1318,7 +1347,7 @@
     if (reason === 'time' || reason === 'key' || reason === 'manual') {
       if (typeof toast === 'function') {
         var jet = BC.api.jetpack;
-        toast(jet && jet.fuel > 3 ? 'Dragon left \u00b7 jetpack ready' : 'Dragon left');
+        toast(jet && jet.fuel > 3 ? 'Dismounted \u00b7 falling \u00b7 F for jetpack' : 'Dismounted \u00b7 falling');
       }
     }
     if (dragon && dragon.tag) dragon.tag.visible = true;
