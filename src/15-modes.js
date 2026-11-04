@@ -968,6 +968,7 @@ function MODES_buildArena() {
   }
 
   for (let gi = 0; gi < 4; gi++) MODES_buildGate(gi, cx, cz, radius, baseY);
+  if (typeof STRUCT_buildArenaCover === 'function') STRUCT_buildArenaCover(MODES_edit, cx, cz, radius);
 
   MODES_buildVisuals(cx, cz, visualY, radius);
 }

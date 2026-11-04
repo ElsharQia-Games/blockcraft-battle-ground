@@ -434,6 +434,16 @@
           }
         }
       }
+      // Fighting structures from 21-structures.js: T tower, C compound, R ruins, X trenches.
+      if (typeof battleSites !== 'undefined' && battleSites) {
+        var siteCodes = { watchtower: 'T', compound: 'C', ruins: 'R', trenches: 'X' };
+        for (var s = 0; s < battleSites.length; s++) {
+          var b = battleSites[s];
+          if (b && Number.isFinite(b.x) && Number.isFinite(b.z) && b.x >= 0 && b.z >= 0 && b.x < miniWorld && b.z < miniWorld) {
+            miniVillages.push({ x: b.x + .5, z: b.z + .5, label: siteCodes[b.kind] || 'F' });
+          }
+        }
+      }
     } catch (err) { /* village layer stays empty, not synthetic */ }
     miniSeed = miniReadSeed(); miniSeedDragonCounts(); miniRevision++; miniSampleCount = MINI_GRID * MINI_GRID;
     miniCacheValid = miniTerrainCount > 0; miniPending = ''; miniLastTick = -Infinity;

@@ -385,6 +385,7 @@ function generateTerrain(reset = false) {
   }
   growFlora();
   buildVillages();
+  if (typeof buildBattleSites === 'function') buildBattleSites();
   createWaterfalls();
   spawnCritters();
   WORLD_generation++;
