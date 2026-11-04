@@ -2,6 +2,7 @@
    70-inventory.js
    Part of a split that loads as classic <script> tags (see index.html). */
 'use strict';
+const UNLIMITED_BUILDING = true;
 const inventory = Object.create(null);
 const STARTING_KIT = {
   [GRASS]: 24, [DIRT]: 64, [STONE]: 64, [SAND]: 32, [LOG]: 24, [LEAVES]: 24,
@@ -13,6 +14,21 @@ const HOTBAR = [GRASS, DIRT, STONE, SAND, LOG, LEAVES, PLANKS, COBBLE, BRICK];
 const itemCount = (id) => inventory[id] || 0;
 const blockName = (id) => (BLOCK_DEFS[id] ? BLOCK_DEFS[id].name : 'Block');
 const blockTile = (id) => (BLOCK_DEFS[id] ? BLOCK_DEFS[id].side : 0);
+
+function isBuildMaterial(id) {
+  return Number.isInteger(id) && id > AIR && id <= 255 && id !== WATER &&
+    Object.prototype.hasOwnProperty.call(BLOCK_DEFS, id);
+}
+
+// Building availability is independent of collected items and recipe ingredients.
+function buildItemCount(id) {
+  return UNLIMITED_BUILDING && isBuildMaterial(id) ? Infinity : itemCount(id);
+}
+
+function takeBuildItems(id, n = 1) {
+  if (!isBuildMaterial(id) || !Number.isSafeInteger(n) || n <= 0) return false;
+  return UNLIMITED_BUILDING || takeItem(id, n);
+}
 
 function addItem(id, n = 1) {
   inventory[id] = Math.min(999, itemCount(id) + n);
@@ -67,11 +83,11 @@ function refreshHotbar() {
   for (let i = 0; i < slots.length; i++) {
     const s = slots[i];
     const id = HOTBAR[i];
-    const n = itemCount(id);
+    const n = buildItemCount(id);
     paintTile(s.canvas, id);
-    s.count.textContent = n > 0 ? String(n) : '';
+    s.count.textContent = n === Infinity ? '∞' : n > 0 ? String(n) : '';
     s.el.classList.toggle('empty', n <= 0);
-    s.el.title = blockName(id);
+    s.el.title = blockName(id) + (n === Infinity ? ' · Unlimited building' : '');
   }
   document.getElementById('slotLabel').textContent = String(selected + 1);
 }
@@ -89,7 +105,8 @@ function selectSlot(i) {
   selected = (i + HOTBAR.length) % HOTBAR.length;
   for (let k = 0; k < slots.length; k++) slots[k].el.classList.toggle('active', k === selected);
   refreshHotbar();
-  toast(blockName(HOTBAR[selected]) + (itemCount(HOTBAR[selected]) ? ' ×' + itemCount(HOTBAR[selected]) : ' (none)'));
+  const id = HOTBAR[selected], n = buildItemCount(id);
+  toast(blockName(id) + (n === Infinity ? ' · Unlimited building' : n > 0 ? ' ×' + n : ' (none)'));
 }
 
 /* ---- crafting ---- */
@@ -120,19 +137,21 @@ function makeMiniCanvas(id) {
 function refreshCraft() {
   invGridEl.innerHTML = '';
   for (const id of BLOCK_IDS) {
+    const available = buildItemCount(id);
     const btn = document.createElement('button');
-    btn.className = 'inv-item' + (itemCount(id) ? '' : ' zero');
+    btn.className = 'inv-item' + (available > 0 ? '' : ' zero');
     btn.type = 'button';
-    btn.title = blockName(id) + ' ×' + itemCount(id);
+    btn.title = blockName(id) + (available === Infinity
+      ? ' · Unlimited building · ' + itemCount(id) + ' for crafting' : ' ×' + available);
     btn.appendChild(makeMiniCanvas(id));
     const n = document.createElement('span');
     n.className = 'n';
-    n.textContent = String(itemCount(id));
+    n.textContent = available === Infinity ? '∞' : String(available);
     btn.appendChild(n);
     btn.addEventListener('click', () => {
       HOTBAR[selected] = id;
       refreshHotbar();
-      toast(blockName(id) + ' → slot ' + (selected + 1));
+      toast(blockName(id) + ' → slot ' + (selected + 1) + (available === Infinity ? ' · Unlimited building' : ''));
     });
     invGridEl.appendChild(btn);
   }
