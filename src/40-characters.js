@@ -224,6 +224,38 @@ function atlasBox(w, h, d) {
   return g;
 }
 
+const CHAR_LEG_SEGMENT = 0.36;
+const CHAR_LEG_LENGTH = CHAR_LEG_SEGMENT * 2;
+const CHAR_LEG_HALF_DEPTH = 0.12;
+
+function charHumanoidLegGeometry(upper) {
+  const key = 'humanoid-leg|' + (upper ? 'thigh' : 'shin');
+  let g = ATLAS_GEOM.get(key);
+  if (g) return g;
+  g = new THREE.BoxGeometry(0.22, CHAR_LEG_SEGMENT, CHAR_LEG_HALF_DEPTH * 2);
+  const uv = g.attributes.uv;
+  for (let f = 0; f < 6; f++) {
+    const col = f % 3, row = (f / 3) | 0;
+    for (let v = 0; v < 4; v++) {
+      const i = f * 4 + v;
+      const u = uv.getX(i), y = uv.getY(i);
+      if ((upper && f === 3) || (!upper && f === 2)) {
+        // Newly exposed knee caps sample the adjacent mid-pant row, not a
+        // second waistband/hem. The original outer top/bottom tiles stay intact.
+        uv.setXY(i, (2 + u) / 3, 0.5 - (upper ? 15.5 : 16.5) / 64);
+      } else {
+        // Side faces use rows 0..15 on the thigh and 16..31 on the shin of
+        // the SAME 96x64 atlas. No repainted material or stretched duplicate.
+        const tileY = f === 2 || f === 3 ? y : y * 0.5 + (upper ? 0.5 : 0);
+        uv.setXY(i, (col + u) / 3, 1 - (row + 1) / 2 + tileY * 0.5);
+      }
+    }
+  }
+  uv.needsUpdate = true;
+  ATLAS_GEOM.set(key, g);
+  return g;
+}
+
 function partMaterial(key, c, part) {
   return texMaterial('char|' + key + '|' + part, (g, face) => paintPart(g, face, c, key, part));
 }
@@ -3802,17 +3834,160 @@ function paintPart(g, face, c, key, part) {
   volumeShade(g, face);
 }
 
+function charMakeHumanoidLeg(key, c, side, x) {
+  const hip = new THREE.Group();
+  hip.name = 'leg' + side;
+  hip.position.set(x, CHAR_LEG_LENGTH, 0);
+  const thigh = new THREE.Mesh(charHumanoidLegGeometry(true), partMaterial(key, c, 'leg' + side));
+  thigh.name = 'thigh' + side;
+  thigh.position.y = -CHAR_LEG_SEGMENT / 2;
+  hip.add(thigh);
+  const knee = new THREE.Group();
+  knee.name = 'knee' + side;
+  knee.position.y = -CHAR_LEG_SEGMENT;
+  hip.add(knee);
+  const shin = new THREE.Mesh(charHumanoidLegGeometry(false), thigh.material);
+  shin.name = 'shin' + side;
+  shin.position.y = -CHAR_LEG_SEGMENT / 2;
+  knee.add(shin);
+  const ankle = new THREE.Group();
+  ankle.name = 'ankle' + side;
+  ankle.position.y = -CHAR_LEG_SEGMENT;
+  knee.add(ankle);
+  const shoe = addPart(ankle, 0.24, 0.12, 0.28, key, c, 'shoe', 0, 0.02, -0.02);
+  shoe.name = 'shoe' + side;
+  return { hip, thigh, knee, shin, ankle, shoe, x };
+}
+
+function charStance01(value) {
+  if (value === true) return 1;
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0;
+}
+
+function charStanceDamp(value, target, alpha) {
+  const next = value + (target - value) * alpha;
+  return Math.abs(next - target) < 0.0001 ? target : next;
+}
+
+function charHumanoidLegPose(leg, hipY, hipZ, footY, footZ, low) {
+  const forward = hipZ - footZ;
+  let ankleY = footY;
+  let dy = hipY - ankleY;
+  let beta = Math.acos(Math.min(1, Math.hypot(dy, forward) / CHAR_LEG_LENGTH));
+  let base = Math.atan2(forward, dy);
+  let shinAngle = base - beta;
+  if (low > 0 && ankleY < CHAR_LEG_HALF_DEPTH &&
+      ankleY < CHAR_LEG_HALF_DEPTH * Math.abs(Math.sin(shinAngle))) {
+    // The rotated calf's bottom corners must also clear the floor. Raise the
+    // ankle pivot only as far as needed; the level shoe compensates below it.
+    let lo = ankleY, hi = CHAR_LEG_HALF_DEPTH;
+    for (let i = 0; i < 7; i++) {
+      const mid = (lo + hi) * 0.5;
+      const y = hipY - mid;
+      const b = Math.acos(Math.min(1, Math.hypot(y, forward) / CHAR_LEG_LENGTH));
+      const shin = Math.atan2(forward, y) - b;
+      if (mid >= CHAR_LEG_HALF_DEPTH * Math.abs(Math.sin(shin))) hi = mid;
+      else lo = mid;
+    }
+    ankleY = hi;
+    dy = hipY - ankleY;
+    beta = Math.acos(Math.min(1, Math.hypot(dy, forward) / CHAR_LEG_LENGTH));
+    base = Math.atan2(forward, dy);
+    shinAngle = base - beta;
+  }
+  const hipAngle = base + beta;
+  leg.hip.position.set(leg.x, hipY, hipZ);
+  // A downward thigh rotates toward authored -Z at positive hip-X. Choose
+  // the forward knee solution, then flex the shin in the opposite direction.
+  leg.hip.rotation.set(hipAngle, 0, 0);
+  leg.knee.position.set(0, -CHAR_LEG_SEGMENT, 0);
+  leg.knee.rotation.set(-2 * beta, 0, 0);
+  leg.ankle.position.set(0, -CHAR_LEG_SEGMENT, 0);
+  leg.ankle.rotation.set(-shinAngle, 0, 0);
+  const actualAnkleY = hipY - CHAR_LEG_SEGMENT * (Math.cos(hipAngle) + Math.cos(shinAngle));
+  leg.shoe.position.set(0, footY + 0.02 - actualAnkleY, -0.02);
+  leg.shoe.rotation.set(0, 0, 0);
+}
+
+/* Shared local/remote pose API. Input weights are targets; dt=0 applies them
+   immediately. The root stays at collision feet; head/weapon rotation is owned
+   by the caller. A null pose resets ONLY knees/ankles/shoes for the legacy
+   46-riding seated hip pose (which is applied later in frame/lateFrame). */
+function poseHumanoidStance(root, pose, dt) {
+  const data = root && root.userData;
+  const parts = data && data.parts;
+  const state = data && data.humanoidStance;
+  if (!parts || !state || !parts.legL || !parts.legR || !parts.kneeL ||
+      !parts.kneeR || !parts.ankleL || !parts.ankleR) return false;
+  if (!pose) {
+    state.stance = state.slide = state.dash = state.swing = state.air = 0;
+    for (let i = 0; i < state.legs.length; i++) {
+      const leg = state.legs[i];
+      leg.knee.position.set(0, -CHAR_LEG_SEGMENT, 0);
+      leg.knee.rotation.set(0, 0, 0);
+      leg.ankle.position.set(0, -CHAR_LEG_SEGMENT, 0);
+      leg.ankle.rotation.set(0, 0, 0);
+      leg.shoe.position.set(0, 0.02, -0.02);
+      leg.shoe.rotation.set(0, 0, 0);
+    }
+    return true;
+  }
+  const step = Number.isFinite(dt) ? Math.max(0, Math.min(0.05, dt)) : 0;
+  const alpha = step > 0 ? 1 - Math.exp(-15 * step) : 1;
+  const slideTarget = charStance01(pose.slide), dashTarget = charStance01(pose.dash);
+  const airTarget = charStance01(pose.air);
+  state.stance = charStanceDamp(state.stance, Math.max(charStance01(pose.stance), slideTarget, dashTarget), alpha);
+  state.slide = charStanceDamp(state.slide, slideTarget, alpha);
+  state.dash = charStanceDamp(state.dash, dashTarget, alpha);
+  state.air = charStanceDamp(state.air, airTarget, alpha);
+  state.swing = charStanceDamp(state.swing, Number.isFinite(pose.swing) ? Math.max(-1, Math.min(1, pose.swing)) : 0, alpha);
+  const low = state.stance, slide = state.slide, dash = state.dash * (1 - slide);
+  const hipY = CHAR_LEG_LENGTH - Math.min(0.455, low * 0.42 + slide * 0.04 + dash * 0.025);
+  const hipZ = low * 0.2 + slide * 0.02 - dash * 0.05;
+  const lean = -Math.max(0, Math.min(0.56, low * 0.5 + dash * 0.18 - slide * 0.12));
+  const gait = state.swing * (1 - slide) * (1 - dash);
+  // Ground contact wins over the fading jump weight: no hovering low stance
+  // for several frames after landing. Airborne lift itself still eases in.
+  const airLift = airTarget > 0 ? state.air * (0.08 + dash * 0.08) : 0;
+  for (let i = 0; i < state.legs.length; i++) {
+    const walkHip = i === 0 ? gait : -gait;
+    const walkKnee = -Math.max(0, -walkHip) * 0.32;
+    const walkY = CHAR_LEG_LENGTH - CHAR_LEG_SEGMENT * (Math.cos(walkHip) + Math.cos(walkHip + walkKnee));
+    const walkZ = -CHAR_LEG_SEGMENT * (Math.sin(walkHip) + Math.sin(walkHip + walkKnee));
+    const footY = walkY * (1 - low) + low * 0.04 + airLift;
+    const footZ = walkZ * (1 - low) + low * (-walkHip * 0.12 +
+      slide * (i === 0 ? -0.2 : 0.1) + dash * (i === 0 ? 0.06 : 0.12));
+    charHumanoidLegPose(state.legs[i], hipY, hipZ, footY, footZ, low);
+  }
+  if (parts.torso) {
+    parts.torso.position.y = hipY;
+    parts.torso.position.z = hipZ;
+    parts.torso.rotation.set(lean, 0, 0);
+  }
+  const cp = Math.cos(lean), sp = Math.sin(lean);
+  if (parts.head) {
+    parts.head.position.y = hipY + 0.62 * cp;
+    parts.head.position.z = hipZ + 0.62 * sp;
+  }
+  for (let i = 0; i < 2; i++) {
+    const arm = i === 0 ? parts.armL : parts.armR;
+    if (!arm) continue;
+    arm.position.y = hipY + 0.58 * cp;
+    arm.position.z = hipZ + 0.58 * sp;
+  }
+  return true;
+}
+
+const charNpcStancePose = { stance: 0, slide: 0, dash: 0, swing: 0, air: 0 };
+
 function makeHumanoid(key, tagText) {
   const c = CHARACTERS[key] || CHARACTERS.steve;
   const root = new THREE.Group();
   const parts = {};
 
-  const legL = new THREE.Group(); legL.position.set(-0.13, 0.72, 0);
-  const legR = new THREE.Group(); legR.position.set(0.13, 0.72, 0);
-  addPart(legL, 0.22, 0.72, 0.24, key, c, 'legL', 0, -0.36, 0);
-  addPart(legR, 0.22, 0.72, 0.24, key, c, 'legR', 0, -0.36, 0);
-  addPart(legL, 0.24, 0.12, 0.28, key, c, 'shoe', 0, -0.7, -0.02);
-  addPart(legR, 0.24, 0.12, 0.28, key, c, 'shoe', 0, -0.7, -0.02);
+  const leftLeg = charMakeHumanoidLeg(key, c, 'L', -0.13);
+  const rightLeg = charMakeHumanoidLeg(key, c, 'R', 0.13);
+  const legL = leftLeg.hip, legR = rightLeg.hip;
 
   const torso = new THREE.Group(); torso.position.set(0, 0.72, 0);
   addPart(torso, 0.52, 0.62, 0.28, key, c, 'torso', 0, 0.31, 0);
@@ -4046,6 +4221,11 @@ function makeHumanoid(key, tagText) {
   root.add(legL, legR, torso, armL, armR, head);
   parts.legL = legL; parts.legR = legR; parts.armL = armL; parts.armR = armR;
   parts.torso = torso; parts.head = head;
+  parts.thighL = leftLeg.thigh; parts.thighR = rightLeg.thigh;
+  parts.kneeL = leftLeg.knee; parts.kneeR = rightLeg.knee;
+  parts.shinL = leftLeg.shin; parts.shinR = rightLeg.shin;
+  parts.ankleL = leftLeg.ankle; parts.ankleR = rightLeg.ankle;
+  parts.shoeL = leftLeg.shoe; parts.shoeR = rightLeg.shoe;
 
   let tag = null;
   if (tagText) {
@@ -4053,7 +4233,8 @@ function makeHumanoid(key, tagText) {
     tag.position.set(0, 2.18, 0);
     root.add(tag);
   }
-  root.userData = { parts, tag, key, phase: 0 };
+  root.userData = { parts, tag, key, phase: 0,
+    humanoidStance: { stance: 0, slide: 0, dash: 0, swing: 0, air: 0, legs: [leftLeg, rightLeg] } };
   if (typeof addCharacterOutline === 'function') addCharacterOutline(root);
   return root;
 }
@@ -4104,11 +4285,18 @@ scene.add(critterGroup);
 function spawnChicken(x, y, z) {
   if (critters.length > 150) return;
   const group = makeChicken();
+  const c = {
+    kind: 'chicken', group, x, y, z, vx: 0, vy: 0, vz: 0,
+    yaw: Math.random() * Math.PI * 2,
+    speed: 0, wanderSpeed: 0, timer: Math.random() * 2, phase: Math.random() * 6, hop: 0,
+    onGround: false, inWater: false, hitWall: false,
+    halfW: 0.22, height: 0.55
+  };
+  const phys = BC.api && BC.api.physics;
+  if (phys && typeof phys.placeCritter === 'function') phys.placeCritter(c);
+  group.position.set(c.x, c.y, c.z);
   critterGroup.add(group);
-  critters.push({
-    kind: 'chicken', group, x, y, z, vy: 0, yaw: Math.random() * Math.PI * 2,
-    speed: 0, timer: Math.random() * 2, phase: Math.random() * 6, hop: 0
-  });
+  critters.push(c);
 }
 
 function spawnVillager(x, y, z, homeX, homeZ, name) {
@@ -4121,12 +4309,21 @@ function spawnVillager(x, y, z, homeX, homeZ, name) {
   const group = makeHumanoid(character, name);
   group.userData.character = character;
   group.userData.moonwalk = moonwalk;
-  critterGroup.add(group);
-  critters.push({
-    kind: 'villager', character, moonwalk, group, x, y, z, vy: 0, yaw: Math.random() * Math.PI * 2,
+  const c = {
+    kind: 'villager', character, moonwalk, group, x, y, z, vx: 0, vy: 0, vz: 0,
+    yaw: Math.random() * Math.PI * 2,
     speed: 0, timer: Math.random() * 2, phase: Math.random() * 6,
+    onGround: false, inWater: false, hitWall: false, stuck: 0,
+    halfW: 0.28, height: 1.7,
     homeX, homeZ, tx: x, tz: z, walking: false
-  });
+  };
+  const phys = BC.api && BC.api.physics;
+  if (phys && typeof phys.placeCritter === 'function') phys.placeCritter(c);
+  c.tx = c.x; c.tz = c.z;
+  group.position.set(c.x, c.y, c.z);
+  group.rotation.y = c.yaw + (moonwalk ? 0 : Math.PI);
+  critterGroup.add(group);
+  critters.push(c);
 }
 
 function spawnCritters() {
@@ -4144,56 +4341,92 @@ function groundNear(x, z) {
   return terrainHeight(Math.round(x), Math.round(z)) + 1;
 }
 
+const CRITTER_PHYS_STEP = 1 / 120;
+const CRITTER_MAX_DT = 0.05;
+const CRITTER_FAR = 70;
+
+function critterPickVillagerTarget(c) {
+  // Same two random draws as the original timer branch, so a given seed keeps
+  // the same wander pattern while physics only changes how it is travelled.
+  const a = Math.random() * Math.PI * 2;
+  const r = 4 + Math.random() * 8;
+  c.tx = c.homeX + Math.cos(a) * r;
+  c.tz = c.homeZ + Math.sin(a) * r;
+  c.walking = true;
+  c.stuck = 0;
+}
+
+/** True when a critter should not walk toward this point (wall or open water). */
+function critterTargetBlocked(phys, c, nx, nz) {
+  if (!phys) return true;
+  if (typeof phys.solidAt === 'function' && phys.solidAt(nx, c.y + 1.1, nz)) return true;
+  if (typeof phys.waterDepthAt === 'function' && phys.waterDepthAt(nx, c.y + 0.2, nz) > 0) return true;
+  // Use edited voxels, not the original noise height: bridges, dug holes and
+  // village floors must count. This also avoids biome object allocations.
+  return typeof phys.supportAt === 'function' &&
+    !Number.isFinite(phys.supportAt(nx, c.y + 1.02, nz, c.halfW, 2.1));
+}
+
 function updateCritters(dt) {
+  if (!Number.isFinite(dt) || !(dt > 0)) return;
+  if ((BC.flags && BC.flags.worldBusy) || (BC.api.world && BC.api.world.busy)) return;
+  dt = Math.min(CRITTER_MAX_DT, dt);
   const px = player.pos.x, pz = player.pos.z;
+  const phys = BC.api && BC.api.physics;
+  // Reduced builds can omit physics, but must not run the old noise-height
+  // fallback that let NPCs ghost through houses or hover over removed floors.
+  if (!phys || typeof phys.stepCritter !== 'function') return;
+  const steps = Math.max(1, Math.ceil(dt / CRITTER_PHYS_STEP));
+  const h = dt / steps;
+
   for (let i = 0; i < critters.length; i++) {
     const c = critters[i];
     const dx = c.x - px, dz = c.z - pz;
-    const far = dx * dx + dz * dz > 70 * 70;
+    const far = dx * dx + dz * dz > CRITTER_FAR * CRITTER_FAR;
     c.group.visible = !far;
     if (far) continue;
+
+    if (!Number.isFinite(c.vx)) c.vx = 0;
+    if (!Number.isFinite(c.vz)) c.vz = 0;
+    if (!Number.isFinite(c.vy)) c.vy = 0;
+    if (c.kind === 'chicken' && !Number.isFinite(c.wanderSpeed)) c.wanderSpeed = c.speed || 0;
+    if (typeof phys.supportAt === 'function') {
+      c.onGround = c.vy <= 0 && Number.isFinite(phys.supportAt(c.x, c.y, c.z, c.halfW, 0.05));
+    }
+
+    const startX = c.x, startZ = c.z;
+    let speed = 0;
+    let moving = false;
 
     c.timer -= dt;
     if (c.kind === 'chicken') {
       if (c.timer <= 0) {
         c.timer = 1.2 + Math.random() * 3;
         if (Math.random() < 0.45) {
-          c.speed = 0;
+          c.wanderSpeed = 0;
         } else {
           c.yaw = Math.random() * Math.PI * 2;
-          c.speed = 0.55 + Math.random() * 0.5;
+          c.wanderSpeed = 0.55 + Math.random() * 0.5;
           const nx = c.x + Math.sin(c.yaw) * 2.5;
           const nz = c.z + Math.cos(c.yaw) * 2.5;
-          if (terrainHeight(Math.round(nx), Math.round(nz)) <= SEA) { c.speed = 0; c.yaw += Math.PI; }
+          if (critterTargetBlocked(phys, c, nx, nz)) { c.wanderSpeed = 0; c.yaw += Math.PI; }
         }
         if (Math.random() < 0.3) c.hop = 1;
       }
       if (c.hop) {
-        c.vy = 3.6; c.hop = 0;
+        if (c.onGround && !c.inWater && !(typeof phys.liquidAt === 'function' && phys.liquidAt(c.x, c.y + 0.08, c.z))) {
+          c.vy = 3.6; c.onGround = false;
+        }
+        c.hop = 0;
       }
-      c.vy -= 26 * dt;
-      c.y += c.vy * dt;
-      const gy = groundNear(c.x, c.z);
-      if (c.y <= gy) { c.y = gy; c.vy = 0; }
-      if (c.speed > 0 && c.y <= gy + 0.01) {
-        c.x += Math.sin(c.yaw) * c.speed * dt;
-        c.z += Math.cos(c.yaw) * c.speed * dt;
-        c.phase += dt * 9;
-      }
-      c.group.position.set(c.x, c.y, c.z);
-      c.group.rotation.y = c.yaw;
-      c.group.rotation.z = Math.sin(c.phase) * 0.05;
+      speed = c.wanderSpeed;
+      moving = speed > 0 && (c.onGround || c.inWater || c.vy > 0);
     } else {
       const moonwalking = c.moonwalk === true;
       if (c.timer <= 0) {
         c.timer = 2 + Math.random() * 4;
         c.walking = Math.random() < 0.6;
-        if (c.walking) {
-          const a = Math.random() * Math.PI * 2;
-          const r = 4 + Math.random() * 8;
-          c.tx = c.homeX + Math.cos(a) * r;
-          c.tz = c.homeZ + Math.sin(a) * r;
-        }
+        if (c.walking) critterPickVillagerTarget(c);
       }
       if (c.walking) {
         const dx2 = c.tx - c.x, dz2 = c.tz - c.z;
@@ -4202,22 +4435,81 @@ function updateCritters(dt) {
           c.walking = false;
           c.timer = 1 + Math.random() * 3;
           c.speed = 0;
+          c.stuck = 0;
         } else {
           const want = Math.atan2(dx2, dz2);
           let diff = want - c.yaw;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
           c.yaw += diff * Math.min(1, dt * 5);
-          c.speed = moonwalking ? 1.2 : 0.95;
-          c.x += Math.sin(c.yaw) * c.speed * dt;
-          c.z += Math.cos(c.yaw) * c.speed * dt;
-          c.phase += dt * (moonwalking ? 8.5 : 7);
+          speed = moonwalking ? 1.2 : 0.95;
+          moving = true;
         }
-      } else {
-        c.speed = 0;
       }
-      const gy = groundNear(c.x, c.z);
-      c.y += (gy - c.y) * Math.min(1, dt * 9);
+    }
+
+    // NPCs never collide with the player, so clear their path instead of
+    // letting them stand in it. Chickens bolt; villagers drift to a new target.
+    const pdx = c.x - px, pdz = c.z - pz;
+    const pd2 = pdx * pdx + pdz * pdz;
+    const clear = c.kind === 'chicken' ? 1.7 : 1.35;
+    if (pd2 < clear * clear) {
+      const inv = pd2 > 0.000001 ? 1 / Math.sqrt(pd2) : 0;
+      const ax = inv ? pdx * inv : Math.sin(c.yaw);
+      const az = inv ? pdz * inv : Math.cos(c.yaw);
+      if (c.kind === 'chicken') {
+        c.yaw = Math.atan2(ax, az);
+        speed = Math.max(speed, 1.1);
+        moving = true;
+      } else {
+        c.tx = c.x + ax * 2.6;
+        c.tz = c.z + az * 2.6;
+        c.yaw = Math.atan2(ax, az);
+        c.walking = true;
+        speed = Math.max(speed, 0.9);
+        moving = true;
+      }
+    }
+
+    c.speed = moving ? speed : 0;
+    c.vx = moving ? Math.sin(c.yaw) * speed : 0;
+    c.vz = moving ? Math.cos(c.yaw) * speed : 0;
+    c.hitWall = false;
+
+    for (let s = 0; s < steps; s++) {
+      phys.stepCritter(c, h);
+    }
+
+    if (c.kind === 'villager') {
+      if (c.walking && c.speed > 0.05) {
+        const moved = Math.hypot(c.x - startX, c.z - startZ);
+        if (moved < Math.max(0.0003, c.speed * dt * 0.3)) c.stuck += dt;
+        else c.stuck = 0;
+        if (c.stuck > 1.2) critterPickVillagerTarget(c);
+      } else {
+        c.stuck = 0;
+      }
+    }
+
+    if (c.hitWall) {
+      c.hitWall = false;
+      if (c.kind === 'chicken') {
+        c.yaw += Math.PI * 0.75 + Math.random() * 0.5;
+        c.speed = 0;
+        c.wanderSpeed = 0;
+        c.timer = 0.6 + Math.random() * 1.1;
+      }
+    }
+
+    if (c.kind === 'chicken') {
+      if (moving && c.onGround && !c.inWater) c.phase += dt * 9;
+      else if (moving && c.inWater) c.phase += dt * 4;
+      c.group.position.set(c.x, c.y, c.z);
+      c.group.rotation.y = c.yaw;
+      c.group.rotation.z = Math.sin(c.phase) * 0.05;
+    } else {
+      const moonwalking = c.moonwalk === true;
+      if (moving) c.phase += dt * (moonwalking ? 8.5 : 7);
       c.group.position.set(c.x, c.y, c.z);
       // Humanoids are authored facing -Z. Fayoum turns into travel; MJ keeps
       // the old away-from-travel pose while physics still advances at yaw.
@@ -4229,8 +4521,12 @@ function updateCritters(dt) {
     const parts = c.group.userData.parts;
     if (parts) {
       const swing = Math.sin(c.phase) * (c.speed > 0 ? 0.7 : 0.05);
-      parts.legL.rotation.x = swing;
-      parts.legR.rotation.x = -swing;
+      charNpcStancePose.swing = swing;
+      charNpcStancePose.air = !c.onGround && !c.inWater ? 1 : 0;
+      if (!poseHumanoidStance(c.group, charNpcStancePose, dt)) {
+        parts.legL.rotation.x = swing;
+        parts.legR.rotation.x = -swing;
+      }
       parts.armL.rotation.x = -swing * 0.8;
       parts.armR.rotation.x = swing * 0.8;
       parts.head.rotation.y = Math.sin(c.phase * 0.3) * 0.15;

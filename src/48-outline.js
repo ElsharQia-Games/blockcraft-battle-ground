@@ -5,7 +5,7 @@
    Cache entries own only geometry/statistics, never avatars. */
 'use strict';
 
-const CHARACTER_OUTLINE_JOINTS = ['head', 'torso', 'armL', 'armR', 'legL', 'legR'];
+const CHARACTER_OUTLINE_JOINTS = ['head', 'torso', 'armL', 'armR', 'legL', 'legR', 'kneeL', 'kneeR', 'shoeL', 'shoeR'];
 const characterOutlineCache = new Map();
 const characterOutlineViewport = new THREE.Vector4();
 const characterOutlineUniforms = {
@@ -210,7 +210,8 @@ function characterOutlineBakeJoint(joint, joints, key, name) {
     }
     // Non-rig procedural motion cannot be baked into a static joint hull. Skip
     // the whole affected branch, including the live cloak's companion strips.
-    // The six rig joints themselves still follow all movement/weapon poses.
+    // Rig joints, including the articulated shins and level shoes, follow
+    // their own movement/weapon poses instead of baking across a moving hinge.
     if (characterOutlineAnimated(node) || (node !== joint && node.isGroup && node.children.some((child) =>
       child.isMesh && characterOutlineAnimated(child) && characterOutlineSolidMaterial(child.material)))) {
       record.excluded.animated++;
