@@ -248,8 +248,17 @@ function handleNet(msg) {
 }
 
 /* ---------------- LAN websocket ---------------- */
+/* Our bundled server speaks ws:// only, so a page served over https (GitHub Pages,
+   a CDN, ...) has nothing to connect to unless ?server=wss://... is given. */
+function lanPossible() {
+  const q = new URLSearchParams(location.search).get('server');
+  if (q) return true;
+  return location.protocol !== 'https:';
+}
+
 function connectNet() {
   if (net.mode === 'mqtt' || net.closedByUs) return;
+  if (!lanPossible()) return;
   if (net.ws && (net.ws.readyState === 0 || net.ws.readyState === 1)) return;
   let ws;
   try { ws = new WebSocket(netUrl()); } catch (e) { return; }
