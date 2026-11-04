@@ -201,7 +201,11 @@ function loop(now) {
   BC.emit('lateFrame', dt, now);
   sendNetState(now);
   sky.position.set(camera.position.x, 0, camera.position.z);
+  // Render-only effects (camera shake) wrap the draw and are undone at once,
+  // so input, hit tests and outgoing poses never see them.
+  BC.emit('preRender', dt, now);
   renderer.render(scene, camera);
+  BC.emit('postRender', dt, now);
 
   // Physics caps long frames for stability; diagnostics must use the uncapped
   // wall clock or slow rendering would incorrectly report at least 20 FPS.
