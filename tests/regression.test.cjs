@@ -228,7 +228,7 @@ test('scope: revised shoulder/eye cameras, per-weapon optics and clearing transi
   }, { play: true });
 });
 
-test('movement: integrated timestep, C crouch/slide, Ctrl character change, collisions and jetpack controls', { timeout: 150_000 }, async (t) => {
+test('movement: integrated timestep, C or Ctrl crouch/slide, K character change, collisions and jetpack controls', { timeout: 150_000 }, async (t) => {
   await pageCase(t, 'movement', (page) => page.evaluate(movementProbe), { play: true });
 });
 

@@ -110,17 +110,20 @@ function movementProbe() {
       for (let i = 0; i < 18; i++) { update(1 / 120); buffered = Math.max(buffered, b.player.vel.y); }
       check(buffered > 1, 'Jump pressed before landing was lost', buffered);
 
-      // Ctrl is a logical character-change press, not crouch or an autorepeat.
+      // K is a logical character-change press (no autorepeat); Ctrl crouches like C.
       reset();
       const characterBefore = b.charKey;
-      k.key('ControlLeft');
+      k.key('KeyK');
       const characterChanged = b.charKey;
       update(1 / 60);
-      check(characterChanged !== characterBefore && !b.player.crouching, 'Ctrl did not change character without crouching');
-      k.key('ControlLeft', true, true);
-      k.key('ControlRight');
-      check(b.charKey === characterChanged, 'Held/both Ctrl keys repeatedly changed characters');
-      k.key('ControlRight', false); k.key('ControlLeft', false);
+      check(characterChanged !== characterBefore && !b.player.crouching, 'K did not change character without crouching');
+      k.key('KeyK', true, true);
+      check(b.charKey === characterChanged, 'Held K repeatedly changed characters');
+      k.key('KeyK', false);
+      reset();
+      k.key('ControlLeft'); update(1 / 60);
+      check(b.player.crouching && b.charKey === characterChanged, 'Ctrl did not crouch on foot without changing character');
+      k.key('ControlLeft', false); update(1 / 60);
 
       // Crouch changes the real body and can be jump-cancelled in clear space.
       reset();

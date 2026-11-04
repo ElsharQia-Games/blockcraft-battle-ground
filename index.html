@@ -776,7 +776,7 @@
   <div id="buildHud" role="status" aria-live="polite" aria-atomic="true">
     <b id="buildPiece">Wall</b>
     <span id="buildCost"></span>
-    <span id="buildHint">Z wall · X ramp · G floor · T rotate</span>
+    <span id="buildHint">Q build · 1 wall · 2 floor · 3 ramp · R rotate</span>
   </div>
 </div>
 <div id="killfeed" role="log" aria-live="polite" aria-label="Eliminations"></div>
@@ -936,20 +936,24 @@
         <div class="keys bc-controls-grid" aria-label="Keyboard and mouse controls">
           <section class="bc-control-group"><h3>On foot</h3><dl>
             <dt><kbd>WASD</kbd></dt><dd>Move</dd><dt>Mouse</dt><dd>Look</dd><dt><kbd>Space</kbd></dt><dd>Jump / swim up; hold for a higher jump</dd>
-            <dt><kbd>Shift</kbd></dt><dd>Sprint</dd><dt><kbd>C</kbd></dt><dd>Hold to crouch</dd><dt><kbd>Shift</kbd> + <kbd>C</kbd></dt><dd>Sprint slide</dd><dt><kbd>Ctrl</kbd></dt><dd>Change character, once per press</dd>
+            <dt><kbd>Shift</kbd></dt><dd>Sprint</dd><dt><kbd>Ctrl</kbd> or <kbd>C</kbd></dt><dd>Hold to crouch; press while sprinting to slide</dd><dt><kbd>K</kbd></dt><dd>Change character</dd>
           </dl></section>
           <section class="bc-control-group"><h3>Jetpack</h3><dl>
-            <dt><kbd>F</kbd></dt><dd>Toggle jetpack</dd><dt><kbd>Space</kbd></dt><dd>Rise; takes priority over descent</dd><dt><kbd>Shift</kbd></dt><dd>Boost</dd><dt><kbd>Ctrl</kbd></dt><dd>Hold to descend</dd><dt><kbd>C</kbd></dt><dd>Air dash, limited by fuel and cooldown</dd>
+            <dt><kbd>F</kbd></dt><dd>Toggle jetpack</dd><dt><kbd>Space</kbd></dt><dd>Rise</dd><dt><kbd>Shift</kbd></dt><dd>Boost</dd><dt><kbd>Ctrl</kbd></dt><dd>Descend</dd><dt><kbd>C</kbd></dt><dd>Air dash, limited by fuel</dd>
           </dl></section>
-          <section class="bc-control-group"><h3>Weapons &amp; building</h3><dl>
-            <dt>Left click</dt><dd>Shoot / place a build piece</dd><dt>Right click</dt><dd>Aim down sights / cancel a piece</dd><dt><kbd>R</kbd></dt><dd>Reload</dd><dt><kbd>1–7</kbd></dt><dd>Select weapon; wheel or Q cycles</dd>
-            <dt><kbd>Z</kbd> / <kbd>X</kbd> / <kbd>G</kbd></dt><dd>Wall / ramp / floor</dd><dt><kbd>T</kbd></dt><dd>Rotate build piece</dd><dt><kbd>B</kbd></dt><dd>Switch combat / mine &amp; build mode</dd><dt><kbd>1–9</kbd></dt><dd>Select a block from the unlimited hotbar in build mode</dd><dt><kbd>Shift</kbd> + wheel</dt><dd>Cycle all solid materials through the selected hotbar slot</dd>
+          <section class="bc-control-group"><h3>Weapons</h3><dl>
+            <dt>Left click</dt><dd>Shoot</dd><dt>Right click</dt><dd>Aim down sights</dd><dt><kbd>R</kbd></dt><dd>Reload</dd><dt><kbd>1–7</kbd> / wheel</dt><dd>Select or cycle weapons</dd>
+          </dl></section>
+          <section class="bc-control-group"><h3>Building</h3><dl>
+            <dt><kbd>Q</kbd></dt><dd>Build mode on / off (back to your gun)</dd><dt><kbd>1</kbd> <kbd>2</kbd> <kbd>3</kbd> / wheel</dt><dd>Wall, floor, ramp</dd>
+            <dt>Left click</dt><dd>Place; hold to keep building</dd><dt><kbd>R</kbd></dt><dd>Rotate the piece</dd><dt><kbd>Shift</kbd> + wheel</dt><dd>Change material</dd>
+            <dt><kbd>B</kbd></dt><dd>Block mode: left click mines, right click places single blocks</dd>
           </dl></section>
           <section class="bc-control-group"><h3>Dragon riding</h3><dl>
              <dt><kbd>E</kbd></dt><dd>Mount a nearby small dragon / dismount</dd><dt><kbd>Space</kbd></dt><dd>Rise</dd><dt><kbd>C</kbd></dt><dd>Descend</dd><dt><kbd>Shift</kbd></dt><dd>Boost</dd><dt>Left click</dt><dd>Fire breath, limited by heat</dd>
           </dl></section>
           <section class="bc-control-group"><h3>View &amp; match</h3><dl>
-            <dt><kbd>V</kbd></dt><dd>First person / over-shoulder view</dd><dt><kbd>Tab</kbd> hold</dt><dd>Match scoreboard</dd><dt><kbd>M</kbd></dt><dd>Mute / unmute</dd><dt><kbd>P</kbd></dt><dd>Copy room code</dd><dt><kbd>Esc</kbd></dt><dd>Cancel / pause; Back in menu pages</dd>
+            <dt><kbd>E</kbd></dt><dd>Mount / dismount a small dragon</dd><dt><kbd>V</kbd></dt><dd>First person / over-shoulder view</dd><dt><kbd>Tab</kbd> hold</dt><dd>Match scoreboard</dd><dt><kbd>M</kbd></dt><dd>Mute / unmute</dd><dt><kbd>P</kbd></dt><dd>Copy room code</dd><dt><kbd>Esc</kbd></dt><dd>Cancel / pause; Back in menu pages</dd>
           </dl></section>
         </div>
         <p class="combatNote">Shoot blocks to break cover. Building materials are unlimited; choose them directly from the nine-slot hotbar. Space jump-cancels a slide when there is room to stand. Four large guardians patrol each world; each seed also has two or three small dragons, all rideable. Rides last up to 30 seconds. Character cycling is disabled while flying or riding.</p>

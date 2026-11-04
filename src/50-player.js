@@ -123,7 +123,7 @@ function resetPlayerMotion() {
   playerMotion.slideCooldown = Math.max(0, playerMotion.slideCooldown);
   playerMotion.slideX = playerMotion.slideZ = playerMotion.airCarry = 0;
   playerMotion.crouchJumpLock = false;
-  playerMotion.crouchDown = !!keys['KeyC'];
+  playerMotion.crouchDown = playerCrouchHeld();
   playerMotion.gait = playerMotion.slidePose = playerMotion.dashPose = 0;
   playerMotion.stance = player.crouching ? 1 : 0;
   playerMotion.airPose = playerMotion.bob = playerMotion.eyeDrop = 0;
@@ -579,6 +579,12 @@ function sneakDisplacement(axis, amount) {
   return amount;
 }
 
+// C or Ctrl crouch on foot (Ctrl+sprint slides). In flight Ctrl descends and
+// C dashes, so Ctrl never counts as crouch while flying.
+function playerCrouchHeld() {
+  return !!(keys['KeyC'] || (!player.fly && (keys['ControlLeft'] || keys['ControlRight'])));
+}
+
 function playerGravity(dt, gravity, terminal) {
   const start = Math.max(-terminal, player.vel.y);
   const fallTime = Math.min(dt, Math.max(0, (start + terminal) / gravity));
@@ -733,7 +739,7 @@ function updatePlayer(dt) {
     m.waterExitLock = false;
     jumpQueued = false;
   }
-  const crouch = !!keys['KeyC'];
+  const crouch = playerCrouchHeld();
   const space = !!keys['Space'];
   if (!space) { m.jumpHold = 0; m.waterExitLock = false; }
   const shift = !!(keys['ShiftLeft'] || keys['ShiftRight']);

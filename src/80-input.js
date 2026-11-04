@@ -7,12 +7,10 @@ const hintEl = document.getElementById('hint');
 const playBtn = document.getElementById('play');
 const statsEl = document.getElementById('stats');
 const inputButtonsDown = new Set();
-const inputCharacterCtrlHeld = new Set();
-let inputCharacterCtrlPressEvent = null;
 let scoreboardTabHeld = false;
 const GAMEPLAY_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
-  'KeyV', 'KeyC', 'KeyF', 'KeyB', 'KeyR', 'KeyQ', 'KeyM', 'KeyP', 'KeyZ', 'KeyX', 'KeyG', 'KeyT', 'Tab'
+  'KeyV', 'KeyC', 'KeyF', 'KeyB', 'KeyR', 'KeyQ', 'KeyM', 'KeyP', 'KeyZ', 'KeyX', 'KeyG', 'KeyT', 'KeyK', 'Tab'
 ]);
 let inputWindowFocused = typeof document.hasFocus !== 'function' || document.hasFocus();
 let inputWasActive = false;
@@ -174,9 +172,6 @@ function inputClearGameplayHolds() {
   for (const k in keys) keys[k] = false;
   scoreboardTabHeld = false;
   jumpQueued = false;
-  // Keep the physical Ctrl hold across life/map resets: only releasing BOTH
-  // Ctrl keys starts a new logical character press. It never holds movement.
-  inputCharacterCtrlPressEvent = null;
   inputButtonsDown.clear();
   if (typeof setScoreboardVisible === 'function') setScoreboardVisible(false);
   if (typeof resetBuildingInput === 'function') resetBuildingInput();
@@ -485,8 +480,7 @@ document.addEventListener('wheel', (e) => {
     cycleHotbarMaterial(direction);
     if (quickBuild.active) setQuickBuildMaterial(HOTBAR[selected]);
   } else if (quickBuild.active) {
-    selectSlot(selected + direction);
-    setQuickBuildMaterial(HOTBAR[selected]);
+    inputCycleBuildPiece(direction);
   } else if (combatMode) {
     resetBuildingInput();
     cycleWeapon(direction);
@@ -527,22 +521,29 @@ function captureScoreboardTab(e) {
 window.addEventListener('keydown', captureScoreboardTab, true);
 window.addEventListener('keyup', captureScoreboardTab, true);
 
-function inputTrackCharacterCtrl(e) {
-  if (e.code !== 'ControlLeft' && e.code !== 'ControlRight') return;
-  if (e.type === 'keyup') {
-    inputCharacterCtrlHeld.delete(e.code);
-    inputCharacterCtrlPressEvent = null;
-    return;
-  }
-  const first = !e.repeat && inputCharacterCtrlHeld.size === 0;
-  inputCharacterCtrlHeld.add(e.code);
-  inputCharacterCtrlPressEvent = first ? e : null;
+/* Build switching, Fortnite style: Q toggles quick build (last piece, wall by
+   default) and back to the gun; inside build mode 1/2/3 pick wall, floor and
+   ramp, the wheel cycles pieces and R rotates. B is the separate classic
+   block mode for mining and placing single blocks. */
+const INPUT_BUILD_ORDER = ['wall', 'floor', 'ramp'];
+
+function inputToggleQuickBuild() {
+  if (quickBuild.active) { cancelQuickBuild(); return false; }
+  resetBuildingInput();
+  gun.trigger = gun.aiming = false;
+  return selectBuildPiece(INPUT_BUILD_ORDER.indexOf(quickBuild.kind) >= 0 ? quickBuild.kind : 'wall');
 }
-// Window capture sees Ctrl even when a rider or editable menu consumes it at
-// document capture. This prevents a held flight key from becoming a roster
-// change after dismount/resume, and handles left+right Ctrl as one press.
-window.addEventListener('keydown', inputTrackCharacterCtrl, true);
-window.addEventListener('keyup', inputTrackCharacterCtrl, true);
+
+function inputSelectBuildPiece(kind) {
+  if (quickBuild.active && quickBuild.kind === kind) return true; // stay in build mode
+  return selectBuildPiece(kind);
+}
+
+function inputCycleBuildPiece(direction) {
+  const i = Math.max(0, INPUT_BUILD_ORDER.indexOf(quickBuild.kind));
+  const n = INPUT_BUILD_ORDER.length;
+  return inputSelectBuildPiece(INPUT_BUILD_ORDER[(i + direction + n) % n]);
+}
 
 document.addEventListener('keydown', (e) => {
   if (e.isComposing || e.keyCode === 229) return;
@@ -580,9 +581,8 @@ document.addEventListener('keydown', (e) => {
   inputWasActive = true;
   if (digit) {
     const index = Number(digit[1]) - 1;
-    if (quickBuild.active && index < HOTBAR.length) {
-      selectSlot(index);
-      setQuickBuildMaterial(HOTBAR[selected]);
+    if (quickBuild.active) {
+      if (index < INPUT_BUILD_ORDER.length) inputSelectBuildPiece(INPUT_BUILD_ORDER[index]);
     } else if (combatMode) {
       if (index < WEAPONS.length) equipInputWeapon(index);
     } else if (index < HOTBAR.length) selectSlot(index);
@@ -591,21 +591,19 @@ document.addEventListener('keydown', (e) => {
   switch (e.code) {
     case 'Tab': if (typeof setScoreboardVisible === 'function') setScoreboardVisible(true); break;
     case 'Space': jumpQueued = true; break;
-    case 'KeyZ': selectBuildPiece('wall'); break;
-    case 'KeyX': selectBuildPiece('ramp'); break;
-    case 'KeyG': selectBuildPiece('floor'); break;
+    case 'KeyZ': inputSelectBuildPiece('wall'); break;
+    case 'KeyX': inputSelectBuildPiece('ramp'); break;
+    case 'KeyG': inputSelectBuildPiece('floor'); break;
     case 'KeyT': if (quickBuild.active) rotateBuildPiece(); break;
     case 'KeyV':
       thirdPerson = !thirdPerson;
       if (typeof resetCamera === 'function') resetCamera();
       toast(thirdPerson ? 'Over-shoulder' : 'First person');
       break;
-    case 'ControlLeft':
-    case 'ControlRight':
-      // Ctrl is held descent in flight; its first logical press cycles only
-      // on foot. C is left to crouch/slide or the fuel-gated jetpack air dash.
-      if (inputCharacterCtrlPressEvent === e && !player.fly &&
-          !(BC.api.jetpack && BC.api.jetpack.active) && !(BC.api.riding && BC.api.riding.active)) cycleCharacter();
+    case 'KeyK':
+      // Character change has its own key; Ctrl is crouch on foot and
+      // descent in flight (read as a held key by 50-player.js).
+      if (!player.fly && !(BC.api.jetpack && BC.api.jetpack.active) && !(BC.api.riding && BC.api.riding.active)) cycleCharacter();
       break;
     case 'KeyF':
       if (BC.api.jetpack) BC.api.jetpack.toggle();
@@ -616,12 +614,11 @@ document.addEventListener('keydown', (e) => {
       setCombatMode(nextCombatMode);
       break;
     }
-    case 'KeyR': if (combatMode && !quickBuild.active) startReload(); break;
-    case 'KeyQ':
-      resetBuildingInput();
-      if (!combatMode) setCombatMode(true);
-      cycleWeapon(1);
+    case 'KeyR':
+      if (quickBuild.active) rotateBuildPiece();
+      else if (combatMode) startReload();
       break;
+    case 'KeyQ': inputToggleQuickBuild(); break;
     case 'KeyM': toggleMute(); break;
     case 'KeyP': copyRoom(); break;
   }
@@ -637,8 +634,6 @@ function inputPauseForFocusLoss() {
     gameplayKeyboardCapture.requested || gameplayKeyboardCapture.starting;
   // A keyup can be lost outside the browser. Repeat events remain blocked on
   // refocus, but a genuinely new Ctrl press must not inherit a stale hold.
-  inputCharacterCtrlHeld.clear();
-  inputCharacterCtrlPressEvent = null;
   // Losing focus while already editing a paused menu still releases every
   // control/capture, but must not replace Settings with a new resume surface.
   if (capturing || !(BC.api && BC.api.menus)) pauseGameplayInput();
