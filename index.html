@@ -226,8 +226,8 @@
   /* Home: faint blue wash so the world stays visible; no per-element dark blocks. */
   #hint { background: rgba(6,14,38,.28); -webkit-backdrop-filter: none; backdrop-filter: none; }
   .bc-home-shell {
-    display: grid; grid-template-rows: auto minmax(0, 1fr) auto; gap: 28px;
-    width: min(1120px, 100%); height: min(640px, calc(100dvh - 80px)); min-height: 440px;
+    display: grid; grid-template-rows: auto 1fr auto; gap: 24px;
+    width: min(1120px, 100%); height: auto; min-height: min(640px, calc(100dvh - 80px));
   }
   .bc-home-top { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .bc-home-id { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
@@ -277,7 +277,7 @@
   .bc-profile-name { font-size: 14px; font-weight: 700; }
   .bc-profile-character { font-size: 12px; color: var(--menu-muted); }
   .bc-profile-arrow { margin-left: 16px; font-size: 20px; color: var(--bc-blue); }
-  .bc-home-match { display: flex; flex-direction: column; gap: 18px; padding: 24px; border: 1px solid var(--bc-line-strong); border-radius: var(--bc-radius); background: var(--bc-panel); min-width: 0; box-shadow: var(--bc-panel-bevel); }
+  .bc-home-match { display: flex; flex-direction: column; gap: 14px; padding: 24px; border: 1px solid var(--bc-line-strong); border-radius: var(--bc-radius); background: var(--bc-panel); min-width: 0; box-shadow: var(--bc-panel-bevel); }
   .bc-home-match, .bc-page-shell, .bc-pause-shell { position: relative; }
   .bc-home-match::before, .bc-page-shell::before, .bc-pause-shell::before {
     content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; pointer-events: none;
@@ -289,6 +289,24 @@
   .bc-home-map { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-top: 12px; border-top: 1px solid var(--menu-line); font-size: 12px; }
   #homeMapSeed { color: var(--bc-ink); font: 12px/1.5 var(--bc-hud-font); font-variant-numeric: tabular-nums; }
   .bc-home-match > button { justify-content: space-between; width: 100%; }
+  .bc-home-rooms { display: flex; flex-direction: column; gap: 10px; }
+  .bc-home-rooms h3 { font-size: 16px; }
+  .bc-home-room-connect { display: flex; flex-direction: column; gap: 10px; }
+  .bc-home-room-connect > button { width: 100%; }
+  .bc-home-join-label { display: block; margin-bottom: 5px; color: var(--bc-dim); font-size: 12px; }
+  .bc-home-join-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .bc-home-join-row input { min-width: 0; }
+  .bc-home-invite { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+  .bc-home-invite label { color: var(--bc-dim); font-size: 11px; }
+  #homeRoomCode { display: block; margin-top: 3px; color: var(--bc-ink); font: 900 24px/1.15 var(--bc-hud-font); letter-spacing: .12em; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+  .bc-home-room-tools { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 4px 8px; }
+  .bc-home-room-tools button { min-height: 36px; padding: 6px 0; font-size: 11px; }
+  .bc-home-room-tools #menuLeaveRoom { color: var(--bc-red); }
+  .bc-home-match #roomHint { min-height: 18px; margin: 0; font-size: 11px; line-height: 1.5; }
+  .bc-home-match input[aria-invalid="true"] { border-color: var(--bc-red); }
+  #homeMatchHost { border-top: 1px solid var(--bc-line); padding-top: 14px; }
+  #homeMatchHost .bcs-lobby h2 { font-size: 21px; }
+  .bc-page-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
   .bc-home-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; color: var(--bc-dim); font-size: 11px; }
   .bc-home-foot span { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; }
   .bc-page { background: rgba(6,15,32,.76); }
@@ -363,7 +381,7 @@
 
   @media (max-height: 680px) and (min-width: 701px) {
     .bc-menu { padding-block: 24px; }
-    .bc-home-shell { height: calc(100dvh - 48px); gap: 20px; min-height: 400px; }
+    .bc-home-shell { height: auto; gap: 16px; min-height: calc(100dvh - 48px); }
     .bc-home-hero { gap: 18px; }
     .bc-wordmark .brand { font-size: clamp(40px, 5.8vw, 64px); }
     .bc-home-match { gap: 14px; padding: 20px; }
@@ -394,6 +412,7 @@
     .bc-home-profile { padding-block: 0; min-height: 40px; }
     .bc-home-profile .bc-portrait { width: 32px; height: 32px; }
     .bc-home-match { padding: 16px; gap: 12px; }
+    #homeMatchHost .bcs-lobby > p { display: none; }
     .bc-home-map { padding-top: 10px; }
     .bc-home-foot { gap: 6px; line-height: 1.5; }
     .bc-page-shell { height: calc(100dvh - 32px); min-height: 280px; }
@@ -794,9 +813,8 @@
     <header class="bc-home-top">
       <div class="bc-home-id"><span class="bc-team-mark" aria-hidden="true"><i></i><i></i></span><span class="bc-eyebrow bc-publisher">ElsharQia Games</span></div>
       <nav class="bc-home-nav" aria-label="Game home">
-        <button id="menuPlaySetup" class="bc-button bc-button-quiet" type="button" data-menu-open="play" data-menu-screen="play">Play setup</button>
+        <button id="menuPlaySetup" class="bc-button bc-button-quiet" type="button" data-menu-open="play" data-menu-screen="play">Mode &amp; map</button>
         <button id="menuCharacters" class="bc-button bc-button-quiet" type="button" data-menu-open="characters" data-menu-screen="characters">Characters</button>
-        <button id="menuOnline" class="bc-button bc-button-quiet" type="button" data-menu-open="online" data-menu-screen="online">Online</button>
         <button id="menuSettings" class="bc-button bc-button-quiet" type="button" data-menu-open="settings" data-menu-screen="settings">Settings</button>
       </nav>
     </header>
@@ -817,6 +835,22 @@
       </div>
       <aside class="bc-home-match" aria-label="Current world and match">
         <div class="bc-home-connection"><span id="homeConnectionLabel">Solo</span><span id="homeConnectionDetail">Local world</span></div>
+        <section class="bc-home-rooms" aria-labelledby="homeRoomsTitle">
+          <h3 id="homeRoomsTitle">Play with friends</h3>
+          <div id="homeRoomConnect" class="bc-home-room-connect">
+            <button id="createBtn" class="bc-button" type="button" disabled>Create room</button>
+            <form id="roomJoinForm" novalidate>
+              <label class="bc-home-join-label" for="roomInput">Or join with a room code</label>
+              <div class="bc-home-join-row"><input id="roomInput" type="text" maxlength="12" placeholder="Paste code or invite" autocomplete="off" autocapitalize="characters" spellcheck="false" aria-describedby="roomHint" /><button id="onlineBtn" class="bc-button bc-button-primary" type="submit" disabled>Join</button></div>
+            </form>
+          </div>
+          <div id="homeRoomInvite" class="bc-home-invite" hidden inert>
+            <div><span class="bc-home-join-label">Invite code</span><code id="homeRoomCode" aria-label="Current room invite code"></code></div>
+            <button id="menuCopyRoom" class="bc-button" type="button" disabled>Copy code</button>
+          </div>
+          <p id="roomHint" role="status" aria-live="polite">Create a room to invite friends, or paste their code to join.</p>
+          <div class="bc-home-room-tools"><button id="menuLeaveRoom" class="bc-button bc-button-quiet" type="button" hidden disabled>Leave room</button><button id="menuOnline" class="bc-button bc-button-quiet" type="button" data-menu-open="online" data-menu-screen="online">Connection help</button></div>
+        </section>
         <div id="homeMatchHost"></div>
         <div class="bc-home-map"><span class="bc-muted">Map seed</span><code id="homeMapSeed">Loading…</code></div>
         <button class="bc-button bc-button-quiet" type="button" data-menu-open="play" data-menu-screen="play"><span>Mode &amp; map</span><span aria-hidden="true">›</span></button>
@@ -830,10 +864,10 @@
   <div class="bc-page-shell">
     <header class="bc-page-header">
       <button id="playSetupBack" class="bc-button bc-button-quiet" type="button" data-menu-back data-menu-screen="home"><span aria-hidden="true">‹</span> Back</button>
-      <div class="bc-page-heading"><p class="bc-eyebrow">Blockcraft Battle Ground</p><h2 id="playSetupTitle" tabindex="-1">Play setup</h2></div>
+      <div class="bc-page-heading"><p class="bc-eyebrow">Match rules</p><h2 id="playSetupTitle" tabindex="-1">Mode &amp; map</h2></div>
     </header>
     <div class="bc-page-scroll"><div id="playSetupContent"></div><p id="tiny" class="sub">World details appear when generation finishes.</p></div>
-    <footer class="bc-page-footer"><div id="playSetupStatusHost"></div><button class="bc-button" type="button" data-menu-back>Done</button></footer>
+    <footer class="bc-page-footer"><div id="playSetupStatusHost"></div><div class="bc-page-actions"><button class="bc-button bc-button-quiet" type="button" data-menu-back>Back to Home</button><button id="playSetupStart" class="bc-button bc-button-primary" type="button" data-menu-play disabled>Play this match</button></div></footer>
   </div>
 </section>
 
@@ -854,7 +888,7 @@
         <div class="row" id="chars" role="group" aria-labelledby="rosterLabel"></div>
       </div>
     </div>
-    <footer class="bc-page-footer"><p>Character and name are saved on this device when browser storage is available.</p><button class="bc-button" type="button" data-menu-back>Done</button></footer>
+    <footer class="bc-page-footer"><p>Character and name save automatically on this device.</p><button class="bc-button" type="button" data-menu-back>Back to Home</button></footer>
   </div>
 </section>
 
@@ -862,25 +896,23 @@
   <div class="bc-page-shell">
     <header class="bc-page-header">
       <button id="onlineBack" class="bc-button bc-button-quiet" type="button" data-menu-back data-menu-screen="home"><span aria-hidden="true">‹</span> Back</button>
-      <div class="bc-page-heading"><p class="bc-eyebrow">Blockcraft Battle Ground</p><h2 id="onlineTitle" tabindex="-1">Online</h2></div>
+      <div class="bc-page-heading"><p class="bc-eyebrow">Multiplayer</p><h2 id="onlineTitle" tabindex="-1">Connection help</h2></div>
     </header>
     <div class="bc-page-scroll">
       <div class="bc-online-layout">
         <div class="bc-online-connect">
-          <p class="bc-muted">Create a room and share its code, or join a friend’s battleground.</p>
-          <label class="bc-field" for="roomInput"><span>Room code</span><input id="roomInput" type="text" maxlength="12" placeholder="ENTER ROOM CODE" autocomplete="off" spellcheck="false" aria-describedby="roomHint onlineHelp" /></label>
-          <div class="online"><button id="onlineBtn" class="bc-button bc-button-primary" type="button" disabled>Join room</button><button id="createBtn" class="bc-button" type="button" disabled>Create room</button></div>
-          <p class="sub" id="roomHint" role="status" aria-live="polite">Enter a room code, or create a room to get one.</p>
-          <p id="onlineHelp" class="bc-field-help">The host controls mode and map. Your aim, crosshair and audio settings stay personal.</p>
+          <section><h3>Online room codes</h3><p class="bc-field-help">Create, join and copy invite codes directly on Home. Everyone uses the same code. P also copies your current code while playing.</p></section>
+          <section><h3>LAN play</h3><p class="bc-field-help">Run the included server and open its address on each computer. LAN connects automatically and does not use an online room code.</p></section>
+          <section><h3>If a connection stalls</h3><p class="bc-field-help">Cancel on Home, check your internet connection, then try again. Some networks block public relays; LAN play is an alternative.</p></section>
+          <p id="onlineHelp" class="bc-field-help">The host controls mode and map. Your aim, crosshair and audio stay personal. Public room codes are not private passwords.</p>
         </div>
         <aside class="bc-online-session" aria-label="Your connection">
           <p class="bc-eyebrow">Your connection</p><h3 id="onlineSessionName">Solo</h3><p id="onlineSessionStatus">Playing in the local world.</p>
-          <div class="bc-online-actions"><button id="menuCopyRoom" class="bc-button" type="button" disabled>Copy code</button><button id="menuLeaveRoom" class="bc-button bc-button-quiet" type="button" disabled>Leave room</button></div>
           <p id="onlineHomeNote">Back returns home without starting gameplay. Use Play when you are ready.</p>
         </aside>
       </div>
     </div>
-    <footer class="bc-page-footer"><p id="onlineFlowHint">Joining does not capture your mouse. Return home to play.</p><button class="bc-button" type="button" data-menu-back>Back to home</button></footer>
+    <footer class="bc-page-footer"><p id="onlineFlowHint">Create, join and invite from Home.</p><button class="bc-button" type="button" data-menu-back>Back to Home</button></footer>
   </div>
 </section>
 
@@ -892,7 +924,7 @@
     </header>
     <nav id="settingsTabs" class="bc-settings-tabs" role="tablist" aria-label="Settings categories">
       <button id="settingsTabAim" type="button" role="tab" aria-selected="true" aria-controls="settingsAim" data-settings-tab="aim">Aim</button>
-      <button id="settingsTabReticle" type="button" role="tab" aria-selected="false" aria-controls="settingsReticle" tabindex="-1" data-settings-tab="reticle">Crosshair &amp; HUD</button>
+      <button id="settingsTabReticle" type="button" role="tab" aria-selected="false" aria-controls="settingsReticle" tabindex="-1" data-settings-tab="reticle">Crosshair</button>
       <button id="settingsTabAudio" type="button" role="tab" aria-selected="false" aria-controls="settingsAudio" tabindex="-1" data-settings-tab="audio">Audio</button>
       <button id="settingsTabControls" type="button" role="tab" aria-selected="false" aria-controls="settingsControls" tabindex="-1" data-settings-tab="controls">Controls</button>
     </nav>
@@ -923,7 +955,7 @@
         <p class="combatNote">Shoot blocks to break cover. Building materials are unlimited; choose them directly from the nine-slot hotbar. Space jump-cancels a slide when there is room to stand. Four large guardians patrol each world; each seed also has two or three small dragons, all rideable. Rides last up to 30 seconds. Character cycling is disabled while flying or riding.</p>
       </section>
     </div>
-    <footer class="bc-page-footer"><p id="settingsSaveStatus" role="status" aria-live="polite">Changes apply immediately. Back never resumes gameplay.</p><button id="settingsDone" class="bc-button" type="button" data-settings-back data-menu-screen="home">Done</button></footer>
+    <footer class="bc-page-footer"><p id="settingsSaveStatus" role="status" aria-live="polite">Changes save automatically and apply immediately.</p><button id="settingsDone" class="bc-button" type="button" data-settings-back data-menu-screen="home">Back to Home</button></footer>
   </div>
 </section>
 
@@ -931,7 +963,7 @@
   <div class="bc-pause-shell">
     <p class="bc-eyebrow">Blockcraft Battle Ground</p><h2 id="pauseTitle" tabindex="-1">Paused</h2>
     <p id="pauseContext">Current match</p><div class="bc-pause-match"><span id="pauseTeam"></span><span id="pauseScore"></span></div>
-    <div class="bc-pause-actions"><button id="pauseResume" class="bc-button bc-button-primary" type="button" aria-describedby="pauseInputHint" disabled>Resume</button><button id="pauseSettings" class="bc-button" type="button" data-menu-open="settings" data-menu-screen="settings">Settings</button><button id="pauseHome" class="bc-button bc-button-quiet" type="button" data-menu-home data-menu-screen="home">Home</button></div>
+    <div class="bc-pause-actions"><button id="pauseResume" class="bc-button bc-button-primary" type="button" aria-describedby="pauseInputHint" disabled>Resume</button><button id="pauseSettings" class="bc-button" type="button" data-menu-open="settings" data-menu-screen="settings">Settings</button><button id="pauseRoom" class="bc-button bc-button-quiet" type="button" data-menu-home hidden>Room &amp; invite</button><button id="pauseHome" class="bc-button bc-button-quiet" type="button" data-menu-home data-menu-screen="home">Home</button></div>
     <p id="pauseInputHint" role="status" aria-live="polite">Esc to resume.</p><p id="pauseSessionNote">Home keeps this world and your settings.</p>
   </div>
 </section>
@@ -983,10 +1015,12 @@ const SOURCES = [
   '48-outline.js',
   '50-player.js',
   '52-jetpack.js',
+  '53-ground-marker.js',
   '55-building.js',
   '58-killcam.js',
   '60-combat.js',
   '62-combat-fx.js',
+  '63-player-feedback.js',
   '65-destruction.js',
   '70-inventory.js',
   '80-input.js',

@@ -213,6 +213,8 @@ function updateInputState() {
 
 function lockPointer() {
   if (typeof loading === 'undefined' || loading || BC.flags.worldBusy || BC.flags.playerRepairBlocked || !alive || craftOpen || document.hidden || gameplayKeyboardCapture.starting) return false;
+  const menus = BC.api && BC.api.menus;
+  if (menus && typeof menus.canPlay === 'function' && !menus.canPlay()) return false;
   const state = gameplayKeyboardCapture, keyboard = inputKeyboardAPI();
   const fullscreenTarget = document.documentElement;
   state.supported = !!(keyboard && typeof keyboard.lock === 'function' && typeof keyboard.unlock === 'function');

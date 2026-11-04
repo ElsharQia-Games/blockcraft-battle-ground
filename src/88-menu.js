@@ -35,6 +35,8 @@
   var lastRefresh = 0;
   var captureDenied = false;
   var lastNetStatus = null;
+  var enteredWorld = false;
+  var copyBusy = false, copiedRoom = '', copiedUntil = 0;
   var tabButtons = Array.prototype.slice.call(document.querySelectorAll('[data-settings-tab]'));
   if (typeof BC.flags.hasPlayed !== 'boolean') BC.flags.hasPlayed = false;
 
@@ -60,9 +62,16 @@
   }
 
   function canPlay() {
-    if (loadingWorld() || worldBusy() || play.disabled || BC.flags.playerRepairBlocked || document.hidden) return false;
+    var settings = BC.api.settings;
+    if (loadingWorld() || worldBusy() || (settings && settings.busy) || connectionPending(connectionStatus()) ||
+        BC.flags.playerRepairBlocked || document.hidden) return false;
     try { if (typeof alive !== 'undefined' && !alive) return false; } catch (err) { /* reduced build */ }
     return true;
+  }
+
+  function connectionPending(status) {
+    return !!(status.configPending || status.configError ||
+      (status.mode === 'mqtt' && (!status.online || !status.authorityReady)));
   }
 
   function visible(el, on) {
@@ -149,16 +158,25 @@
 
   function openSettings() {
     if (screen !== 'settings') {
-      settingsReturn = BC.flags.hasPlayed ? 'pause' : 'home';
+      settingsReturn = screen === 'play' || screen === 'characters' || screen === 'online'
+        ? screen : BC.flags.hasPlayed ? 'pause' : 'home';
       settingsOrigin = document.activeElement;
     }
     activate('settings');
     releaseCapture();
     refreshSettings();
-    text('settingsBackLabel', settingsReturn === 'pause' ? 'Pause' : 'Home');
-    document.getElementById('settingsBack').setAttribute('aria-label', 'Back to ' + settingsReturn + '; keep gameplay paused');
+    var label = settingsReturn === 'pause' ? 'Pause' : settingsReturn === 'play' ? 'Mode & map'
+      : settingsReturn === 'characters' ? 'Characters' : settingsReturn === 'online' ? 'Connection help' : 'Home';
+    text('settingsBackLabel', label);
+    text('settingsDone', 'Back to ' + label);
+    document.getElementById('settingsBack').setAttribute('aria-label', 'Back to ' + label + '; keep gameplay paused');
     document.getElementById('settingsBack').dataset.menuScreen = settingsReturn;
     document.getElementById('settingsDone').dataset.menuScreen = settingsReturn;
+    var weaponSelect = document.getElementById('bcWeaponSelect');
+    if (settingsReturn === 'pause' && weaponSelect && typeof currentWeapon === 'function') {
+      weaponSelect.value = currentWeapon().id;
+      weaponSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
     refresh();
     return true;
   }
@@ -169,7 +187,8 @@
     activate(settingsReturn, false);
     refresh();
     // Back only changes the screen; it never calls lockPointer().
-    var fallback = document.getElementById(settingsReturn === 'pause' ? 'pauseSettings' : 'menuSettings');
+    var fallback = document.getElementById(settingsReturn === 'pause' ? 'pauseSettings'
+      : settingsReturn === 'home' ? 'menuSettings' : titles[settingsReturn]);
     focus(settingsOrigin && roots[settingsReturn].contains(settingsOrigin) ? settingsOrigin : fallback);
     return true;
   }
@@ -215,6 +234,7 @@
 
   function notifyGameplayStarted() {
     BC.flags.hasPlayed = true;
+    enteredWorld = true;
     captureDenied = false;
     hide();
     return true;
@@ -292,6 +312,7 @@
 
   function roomCode() {
     var input = document.getElementById('roomInput');
+    if (typeof normalizeRoom === 'function') return normalizeRoom(input && input.value);
     return String(input ? input.value : '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 12);
   }
 
@@ -299,19 +320,21 @@
     var status = connectionStatus();
     var room = status.room || '';
     var online = !!status.online;
-    var joining = status.mode === 'mqtt' && (!online || status.configPending || !status.authorityReady);
+    var joining = status.mode === 'mqtt' && connectionPending(status);
     var players = Math.max(1, Number(status.players) || 1);
     var authority = status.canConfigure ? 'You control mode & map' : 'Host controls mode & map';
-    var label = room ? 'Room ' + room : online ? 'LAN multiplayer' : 'Solo';
-    var detail = status.desync ? 'Resyncing world\u2026' : status.configPending ? 'Syncing host world\u2026'
-      : joining ? 'Connecting\u2026' : online ? players + (players === 1 ? ' player' : ' players') + ' \u00b7 ' + authority : 'Local world';
+    var label = room ? 'Online room' : online ? 'LAN multiplayer' : 'Solo';
+    var detail = status.configError ? 'World sync failed. Cancel and try again.'
+      : joining ? online ? 'Preparing the shared world\u2026' : 'Connecting\u2026'
+      : status.desync && online ? 'Resyncing world\u2026'
+      : online ? players + (players === 1 ? ' player' : ' players') + ' \u00b7 ' + authority : 'Local world';
     text('homeConnectionLabel', label);
     text('homeConnectionDetail', detail);
-    text('onlineSessionName', label);
+    text('onlineSessionName', room ? 'Room ' + room : label);
     text('onlineSessionStatus', detail);
     text('onlineHomeNote', online || room
       ? 'Home keeps this connection and world. Online matches continue while menus are open.'
-      : 'Back returns home without starting gameplay. Use Play when you are ready.');
+      : 'Create or join directly on Home. Play starts only when you choose it.');
     text('pauseSessionNote', online || room
       ? 'Online matches continue while you are paused. Home keeps this room, world and your settings.'
       : 'Home keeps this world and your settings. Only Play or Resume captures your mouse.');
@@ -321,17 +344,37 @@
     var create = document.getElementById('createBtn');
     var copy = document.getElementById('menuCopyRoom');
     var leave = document.getElementById('menuLeaveRoom');
+    var connect = document.getElementById('homeRoomConnect');
+    var invite = document.getElementById('homeRoomInvite');
+    var hadJoinFocus = connect && connect.contains(document.activeElement);
+    visible(connect, !room);
+    visible(invite, !!room);
+    text('homeRoomCode', room);
     if (join) {
-      join.disabled = blocked || joining || !roomCode() || typeof startOnline !== 'function';
+      join.disabled = blocked || joining || !!room || !roomCode() || typeof startOnline !== 'function';
       join.setAttribute('aria-busy', joining ? 'true' : 'false');
-      text('onlineBtn', joining ? 'Joining\u2026' : 'Join room');
+      text('onlineBtn', joining ? 'Joining\u2026' : 'Join');
     }
-    if (create) create.disabled = blocked || joining || typeof createRoom !== 'function';
-    if (copy) copy.disabled = !room || typeof copyRoom !== 'function';
-    if (leave) leave.disabled = !status.mode || typeof leaveOnline !== 'function';
+    if (create) create.disabled = blocked || joining || !!room || typeof createRoom !== 'function';
+    var input = document.getElementById('roomInput');
+    if (input) input.disabled = joining || !!room;
+    if (copy) {
+      copy.disabled = !room || copyBusy || typeof copyRoom !== 'function';
+      copy.setAttribute('aria-busy', copyBusy ? 'true' : 'false');
+      text('menuCopyRoom', copyBusy ? 'Copying\u2026'
+        : room === copiedRoom && performance.now() < copiedUntil ? 'Copied!' : 'Copy code');
+      copy.setAttribute('aria-label', 'Copy invite code ' + room);
+    }
+    if (leave) {
+      visible(leave, !!status.mode);
+      leave.disabled = !status.mode || typeof leaveOnline !== 'function';
+      text('menuLeaveRoom', joining ? 'Cancel connection' : room ? 'Leave room' : 'Disconnect LAN');
+    }
+    visible(document.getElementById('pauseRoom'), !!room);
+    if (room && hadJoinFocus && screen === 'home') focus(copy && !copy.disabled ? copy : leave);
     text('onlineFlowHint', blocked ? 'World setup is in progress. You can join once it finishes.'
       : joining ? 'Waiting for the room and host world. You can leave if you want to cancel.'
-      : 'Joining does not capture your mouse. Return home to play.');
+      : 'Create, join and copy invite codes directly on Home.');
   }
 
   function refreshMatch() {
@@ -358,23 +401,43 @@
 
   function refreshProgress() {
     var loading = loadingWorld();
-    var busy = worldBusy() || (play.disabled && !loading);
+    var status = connectionStatus();
+    var linking = connectionPending(status);
+    var settings = BC.api.settings;
+    var busy = worldBusy() || !!(settings && settings.busy) || linking;
     var starting = captureStarting();
+    var dead = typeof alive !== 'undefined' && !alive;
+    var ready = canPlay() && !starting;
     var progress = document.getElementById('homeProgress');
+    if (play.disabled === ready) play.disabled = !ready;
     play.setAttribute('aria-busy', loading || busy || starting ? 'true' : 'false');
     resume.disabled = !canPlay() || starting;
     resume.setAttribute('aria-busy', starting ? 'true' : 'false');
     text('pauseResume', starting ? 'Starting\u2026' : 'Resume');
+    var setupStart = document.getElementById('playSetupStart');
+    if (setupStart) {
+      setupStart.disabled = !ready;
+      setupStart.setAttribute('aria-busy', starting ? 'true' : 'false');
+      text('playSetupStart', starting ? 'Starting\u2026' : 'Play this match');
+    }
     if (progress) {
       progress.hidden = !loading && !busy;
       var percentage = /(?:Building|Rebuilding)\s+(\d+)%/i.exec(play.textContent);
       if (percentage) progress.value = Math.min(100, Number(percentage[1]));
       else progress.removeAttribute('value');
     }
-    if (!loading && !busy) text('play', starting ? 'Starting\u2026' : 'Play');
+    if (!loading && !busy) text('play', starting ? 'Starting\u2026' : dead ? 'Respawning\u2026'
+      : BC.flags.playerRepairBlocked ? 'Waiting for clear space'
+      : enteredWorld ? 'Return to match' : status.online ? 'Play online' : 'Play solo');
+    else if (!loading && linking) text('play', status.configError ? 'Connection problem' : 'Connecting\u2026');
     text('homeLoadHint', loading ? 'Building your world. Character and personal settings are available now.'
+      : linking ? status.configError ? 'Room setup failed. Cancel the connection and try again.'
+        : 'Preparing your room. You can copy the invite code or cancel on the right.'
       : busy ? 'Updating the current world. Play is available when setup finishes.'
       : starting ? 'Starting mouse and keyboard capture\u2026'
+      : dead ? 'Waiting to respawn. Your room and settings are unchanged.'
+      : BC.flags.playerRepairBlocked ? 'Waiting for the obstruction around your character to clear.'
+      : captureDenied ? 'Mouse capture did not start. Click Play again to retry.'
       : 'Play captures your mouse. Esc opens the pause menu.');
     text('pauseInputHint', starting ? 'Starting mouse and keyboard capture\u2026'
       : !canPlay() ? 'Waiting for world setup or respawn. Your settings are still available.'
@@ -390,7 +453,7 @@
   }
 
   BC.api.menus = {
-    showHome: showHome, showPause: showPause, hide: hide,
+    showHome: showHome, showPause: showPause, hide: hide, canPlay: canPlay,
     openSettings: openSettings, closeSettings: closeSettings, handleEscape: handleEscape,
     notifyGameplayStarted: notifyGameplayStarted, refresh: refresh,
     get state() {
@@ -408,26 +471,58 @@
     if (button.hasAttribute('data-menu-home')) showHome(true);
     else if (button.hasAttribute('data-settings-back')) closeSettings();
     else if (button.hasAttribute('data-menu-back')) pageBack();
+    else if (button.hasAttribute('data-menu-play') && screen === 'play' && canPlay() && !captureStarting()) {
+      captureDenied = typeof lockPointer !== 'function' || lockPointer() === false;
+      refresh();
+    }
     else if (button.dataset.menuOpen) openPage(button.dataset.menuOpen, button);
     else if (button.dataset.settingsTab) setSettingsTab(button.dataset.settingsTab, false);
   });
   resume.addEventListener('click', resumeGame);
   play.addEventListener('click', function () { captureDenied = false; refresh(); });
   document.getElementById('menuCopyRoom').addEventListener('click', function () {
-    if (typeof copyRoom === 'function') copyRoom();
+    if (typeof copyRoom !== 'function' || copyBusy) return;
+    var code = connectionStatus().room;
+    copyBusy = true;
+    var task = copyRoom();
+    refreshConnection();
+    Promise.resolve(task).then(function (success) {
+      copyBusy = false;
+      if (success) { copiedRoom = code; copiedUntil = performance.now() + 1600; }
+      refreshConnection();
+    }, function () { copyBusy = false; refreshConnection(); });
   });
   document.getElementById('menuLeaveRoom').addEventListener('click', function () {
-    if (typeof leaveOnline === 'function') leaveOnline();
+    if (typeof leaveOnline === 'function') leaveOnline(false);
     refresh();
+    focus(play);
   });
   var roomInput = document.getElementById('roomInput');
   if (roomInput) {
-    roomInput.addEventListener('input', refreshConnection);
+    roomInput.addEventListener('input', function () {
+      roomInput.removeAttribute('aria-invalid');
+      text('roomHint', 'Create a room to invite friends, or paste their code to join.');
+      refreshConnection();
+    });
+    roomInput.addEventListener('paste', function (event) {
+      if (!event.clipboardData || typeof normalizeRoom !== 'function') return;
+      event.preventDefault();
+      roomInput.value = normalizeRoom(event.clipboardData.getData('text'));
+      roomInput.dispatchEvent(new Event('input', { bubbles: true }));
+      if (!roomInput.value) {
+        roomInput.setAttribute('aria-invalid', 'true');
+        text('roomHint', 'Paste a room code or a link containing ?room=CODE.');
+      }
+    });
     roomInput.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter' && (event.isComposing || event.repeat)) { event.preventDefault(); return; }
       if (event.key === 'Enter' && document.getElementById('onlineBtn').disabled) {
         event.preventDefault();
         event.stopImmediatePropagation();
-        if (!roomCode()) text('roomHint', 'Enter a room code, or use Create room.');
+        if (!roomCode()) {
+          roomInput.setAttribute('aria-invalid', 'true');
+          text('roomHint', 'Enter a room code, or use Create room.');
+        }
       }
     });
   }
@@ -482,6 +577,7 @@
     });
   }
   if (typeof BC.on === 'function') {
+    BC.on('worldWillReset', function () { enteredWorld = false; });
     ['worldReady', 'worldReset', 'worldBusyChanged', 'modeChanged', 'settingsChanged', 'respawn', 'death'].forEach(function (name) {
       BC.on(name, refresh, 40);
     });

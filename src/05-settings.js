@@ -441,6 +441,7 @@
     get muted() { return state.muted; },
     get mode() { return bcActiveModeId() || state.mode; },
     get seed() { return state.seed; },
+    get busy() { return bcConfigBusy(); },
     read: function (key) {
       if (typeof key === 'string') return api.get(key);
       return {
