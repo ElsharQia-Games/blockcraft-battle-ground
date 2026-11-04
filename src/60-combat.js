@@ -467,7 +467,8 @@ function setHealth(v) {
   const pct = (health / MAX_HEALTH) * 100;
   if (healthFillEl) {
     healthFillEl.style.width = pct + '%';
-    healthFillEl.classList.toggle('low', health <= 35);
+    healthFillEl.classList.toggle('low', health <= MAX_HEALTH * 0.35);
+    healthFillEl.classList.toggle('mid', health > MAX_HEALTH * 0.35 && health <= MAX_HEALTH * 0.6);
   }
   if (healthNumEl) healthNumEl.textContent = String(Math.ceil(health));
 }

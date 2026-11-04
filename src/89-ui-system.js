@@ -1,11 +1,15 @@
-/* Blockcraft Battle Ground — lobby layer for Home and Pause.
-   89-lobby.js (after 88-menu.js, whose markup and screens it styles)
-   - One visual system for every menu page: glass panels, clear hierarchy and
-     a single primary action per screen, sized for desktop and landscape phones.
-   - One-tap mode chips on Home (solo or room host).
-   - Players & teams panel on Home and Pause: everyone can switch their own
-     side in team modes and the host can move anyone. Requests go through
-     BC.api.net.requestTeam; the room authority decides and broadcasts. */
+/* Blockcraft Battle Ground — UI design system for menus and the HUD.
+   89-ui-system.js (after 86-hud.js, 87-minimap.js and 88-menu.js, whose
+   markup it styles)
+   One visual language everywhere, "voxel ops": chamfered block panels on dark
+   glass, a team-colour accent stripe, chunky display numerals and
+   letter-spaced labels.
+   - Menus: one primary Play action, mode chips, and a Players & teams panel on
+     Home and Pause. Everyone can switch their own side in team modes and the
+     host can move anyone (BC.api.net.requestTeam; the room authority decides).
+   - HUD: the same panels and positions as 86-hud.js, reskinned, with a
+     segmented health bar (one block per 10 HP) and blocky weapon pips.
+   - Sized for desktop and landscape phones. */
 'use strict';
 (function () {
   BC.style('bc-lobby-v3', LOBBY_CSS());
@@ -298,5 +302,102 @@ function LOBBY_CSS() {
     #hint .bc-home-match { max-height: none; }
   }
   body.touch-ui .bc-home-foot { display: none; }
+
+  /* Shared block shape with the HUD: chamfered corners instead of rounding. */
+  #hint .bc-home-match, .bc-page-shell, .bc-pause-shell {
+    border-radius: 0 !important; clip-path: polygon(16px 0, 100% 0, 100% calc(100% - 16px), calc(100% - 16px) 100%, 0 100%, 0 16px);
+    box-shadow: inset 3px 0 0 var(--bc-accent, var(--lb-red)) !important; }
+  #hint #play, .bc-menu .bc-button, .bc-mode-chip, .bc-team-col, .bc-team-row, #hint .bc-home-profile {
+    border-radius: 0 !important; clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px); }
+  #hint #play { font-family: "Arial Black", Impact, sans-serif; box-shadow: inset 0 -4px 0 rgba(0, 0, 0, .28) !important; }
+  .bc-menu h2, .bc-menu h3, .bc-teams-head h3 { letter-spacing: .02em; }
+  .bc-mode-chip.is-team::before { border-radius: 0; }
+  `;
+}
+
+/* ---------------- HUD skin ---------------- */
+document.body.classList.add('bc-hud-v3');
+BC.style('bc-hud-v3', HUD_CSS());
+
+function HUD_CSS() {
+  const H = 'body.bc-compact-hud.bc-hud-v3';
+  const cut = 'polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px)';
+  const cutSm = 'polygon(6px 0, 100% 0, 100% calc(100% - 6px), calc(100% - 6px) 100%, 0 100%, 0 6px)';
+  return `
+  ${H} {
+    --hv-panel: rgba(11, 14, 21, .80); --hv-panel-2: rgba(22, 27, 38, .86);
+    --hv-line: rgba(255, 255, 255, .16); --hv-ink: #f5f7fa; --hv-dim: rgba(220, 228, 240, .68);
+    --hv-good: #5fe07a; --hv-warn: #ffb547; --hv-bad: #ff4757; --hv-gold: #ffc247;
+    --hv-num: "Arial Black", "Segoe UI Black", Impact, sans-serif;
+    --hv-label: "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  }
+  /* Every HUD surface: dark block with a chamfer and an accent stripe. */
+  ${H} :is(#stats, #pingChip, #healthWrap, #weaponHud, #buildHud, #jetFuel, #dragonRideHud, #dragonRidePrompt) {
+    background: linear-gradient(180deg, var(--hv-panel-2), var(--hv-panel)) !important;
+    border: 0 !important; border-radius: 0 !important; clip-path: ${cut};
+    box-shadow: inset 3px 0 0 var(--bc-accent), inset 0 1px 0 rgba(255, 255, 255, .10) !important;
+  }
+  ${H} :is(#pingLabel, #fpsLabel, .bc-health-label, #weaponName, #minimapTitle, .bc-jet-label) {
+    font-family: var(--hv-label) !important; font-weight: 800 !important; text-transform: uppercase;
+    letter-spacing: .16em !important; font-size: 10px !important; color: var(--hv-dim) !important;
+  }
+  ${H} :is(#fpsValue, #pingMs, #healthNum, #ammoNow) { font-family: var(--hv-num) !important; letter-spacing: -.02em !important; }
+
+  /* Score: three blocks, the team numbers carry the colour. */
+  ${H} #teamScore { background: transparent !important; border: 0 !important; box-shadow: none !important; gap: 4px; overflow: visible; }
+  ${H} #teamScore .ts-side { clip-path: ${cutSm}; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .25) !important; border: 0 !important; }
+  ${H} #teamScore .ts-side.red { background: linear-gradient(180deg, #ff4a58, #c41c33) !important; }
+  ${H} #teamScore .ts-side.blue { background: linear-gradient(180deg, #3a8dff, #1556cc) !important; }
+  ${H} #teamScore .ts-side b { font-family: var(--hv-num) !important; font-size: 26px !important; text-shadow: 0 2px 0 rgba(0, 0, 0, .3); }
+  ${H} #matchChip { background: linear-gradient(180deg, var(--hv-panel-2), var(--hv-panel)) !important; clip-path: ${cutSm};
+    border: 0 !important; }
+  ${H} #matchMode { font-family: var(--hv-label) !important; font-weight: 900 !important; letter-spacing: .14em; text-transform: uppercase; }
+
+  /* Health: big number + one block per 10 HP. */
+  ${H} #healthWrap { box-shadow: inset 3px 0 0 var(--hv-good), inset 0 1px 0 rgba(255, 255, 255, .10) !important;
+    grid-template-rows: 12px 34px 9px 12px !important; gap: 5px !important; padding: 8px 10px !important; }
+  ${H} #healthNum { font-size: 34px !important; line-height: 34px !important; color: var(--hv-ink) !important; }
+  ${H} #healthBar { height: 9px !important; background: rgba(255, 255, 255, .08) !important; position: relative; overflow: hidden; }
+  ${H} #healthBar i { background: var(--hv-good) !important; box-shadow: 0 0 10px rgba(95, 224, 122, .35) !important; transition: width .12s ease-out !important; }
+  ${H} #healthBar i.mid { background: var(--hv-warn) !important; box-shadow: 0 0 10px rgba(255, 181, 71, .35) !important; }
+  ${H} #healthBar i.low { background: var(--hv-bad) !important; box-shadow: 0 0 12px rgba(255, 71, 87, .5) !important; animation: hvPulse 1s ease-in-out infinite; }
+  ${H} #healthBar::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    background: repeating-linear-gradient(90deg, transparent 0, transparent calc(100% / 15 - 2px), rgba(11, 14, 21, .95) calc(100% / 15 - 2px), rgba(11, 14, 21, .95) calc(100% / 15)); }
+  @keyframes hvPulse { 50% { filter: brightness(1.35); } }
+  ${H} #kd { color: var(--hv-dim) !important; font-family: var(--hv-label) !important; font-weight: 700; letter-spacing: .08em; }
+
+  /* Weapon: name, big ammo, blocky slot pips. */
+  ${H} #weaponHud { box-shadow: inset -3px 0 0 var(--bc-accent), inset 0 1px 0 rgba(255, 255, 255, .10) !important; }
+  ${H} #weaponName { color: var(--hv-ink) !important; }
+  ${H} #ammoNow { font-size: 42px !important; color: var(--hv-ink) !important; }
+  ${H} #ammoLine.low b { color: var(--hv-bad) !important; }
+  ${H} #reloadBar { height: 3px !important; background: rgba(255, 255, 255, .1) !important; }
+  ${H} #reloadFill { background: var(--hv-gold) !important; }
+  ${H} #weaponDots > * { border-radius: 0 !important; clip-path: ${cutSm}; background: rgba(255, 255, 255, .08) !important;
+    border: 0 !important; color: var(--hv-dim) !important; font-family: var(--hv-label) !important; font-weight: 800; }
+  ${H} #weaponDots > .on { background: var(--bc-accent-fill) !important; color: #fff !important; box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .3) !important; }
+
+  /* Secondary readouts stay legible but quieter. */
+  ${H} #fpsValue, ${H} #pingMs { color: var(--hv-ink) !important; }
+  ${H} #pingChip.bad #pingMs { color: var(--hv-bad) !important; }
+  ${H} #minimap { border: 2px solid rgba(255, 255, 255, .22) !important; box-shadow: 0 0 0 1px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(0, 0, 0, .4) !important; }
+  ${H} #minimap #minimapTitle { background: var(--bc-accent-fill) !important; color: #fff !important; }
+
+  /* Hotbar and kill feed in the same block language. */
+  ${H} #hotbar { background: transparent !important; border: 0 !important; box-shadow: none !important; }
+  ${H} #hotbar .slot { border-radius: 0 !important; clip-path: ${cutSm}; background: var(--hv-panel) !important; border-color: transparent !important; }
+  ${H} #hotbar .slot.active { background: var(--bc-accent-fill) !important; box-shadow: inset 0 -3px 0 rgba(0, 0, 0, .3) !important; }
+  ${H} #killfeed .kf { border-radius: 0 !important; clip-path: ${cutSm}; background: var(--hv-panel) !important;
+    font-family: var(--hv-label) !important; font-weight: 800; letter-spacing: .02em; box-shadow: inset 3px 0 0 var(--hv-gold); }
+  ${H} #killfeed .kf-red { color: #ff6a77 !important; }
+  ${H} #killfeed .kf-blue { color: #6aa8ff !important; }
+  ${H} #killfeed .kf-hs { color: var(--hv-gold) !important; }
+  ${H} #buildHud.ready { box-shadow: inset 3px 0 0 var(--hv-good) !important; }
+  ${H} #buildHud.blocked { box-shadow: inset 3px 0 0 var(--hv-bad) !important; }
+  ${H} #jetFuel .bc-jet-seg.on { background: var(--hv-gold) !important; }
+  ${H} #jetFuel.low .bc-jet-seg.on { background: var(--hv-bad) !important; }
+  ${H} #toast { border-radius: 0 !important; clip-path: ${cutSm}; background: var(--hv-panel-2) !important;
+    font-family: var(--hv-label) !important; font-weight: 700; box-shadow: inset 3px 0 0 var(--bc-accent) !important; }
+  ${H} #death h2 { font-family: var(--hv-num); letter-spacing: .02em; text-transform: uppercase; }
   `;
 }
