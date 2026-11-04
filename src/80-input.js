@@ -93,6 +93,10 @@ function showInputResumeHint() {
 }
 
 function pauseGameplayInput(exitFullscreen = false) {
+  if (inputTouchPlaying()) {
+    touchState.playing = false;
+    document.body.classList.remove('touch-playing');
+  }
   resetGameplayInput();
   if (document.pointerLockElement === renderer.domElement && typeof document.exitPointerLock === 'function') {
     try { document.exitPointerLock(); } catch (e) { /* already unlocked */ }
@@ -113,8 +117,14 @@ function isInputEditable(target) {
 function isGameplayInputActive(event) {
   return typeof loading !== 'undefined' && !loading && alive && !craftOpen && inputWindowFocused && !document.hidden &&
     !BC.flags.worldBusy && !BC.flags.playerRepairBlocked &&
-    document.pointerLockElement === renderer.domElement &&
+    (document.pointerLockElement === renderer.domElement || inputTouchPlaying()) &&
     !isInputEditable(document.activeElement) && !isInputEditable(event && event.target);
+}
+
+// Phones/tablets have no pointer lock; 82-touch.js owns an equivalent
+// "touch play" state that also counts as active gameplay.
+function inputTouchPlaying() {
+  return typeof touchState !== 'undefined' && touchState.playing === true;
 }
 
 function inputMouseNow() {
@@ -207,6 +217,7 @@ function updateInputState() {
 }
 
 function lockPointer() {
+  if (typeof touchState !== 'undefined' && touchState.enabled) return touchStartPlay();
   if (typeof loading === 'undefined' || loading || BC.flags.worldBusy || BC.flags.playerRepairBlocked || !alive || craftOpen || document.hidden || gameplayKeyboardCapture.starting) return false;
   const menus = BC.api && BC.api.menus;
   if (menus && typeof menus.canPlay === 'function' && !menus.canPlay()) return false;
