@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { installBuildHelpers } = require('./building-probes.cjs');
+const { waitFor } = require('./harness.cjs');
 
 function online() {
   const b = window.__blockcraft;
@@ -36,7 +37,6 @@ function aimAndFire(id) {
   b.player.pitch = Math.asin(direction.y);
   b.gun.aiming = true;
   b.gun.trigger = false;
-  b.gun.cooldown = 0;
   b.updateCamera(1 / 60);
   for (let i = 0; i < 25; i++) b.updateAvatar(1 / 120);
   b.scene.updateMatrixWorld(true);
@@ -97,22 +97,56 @@ async function lanProbe(lab, t) {
   await A.evaluate(() => window.__blockcraft.setCombatMode(true));
   await B.wait('remote combat state restores held gun', (id) => window.__blockcraft.net.players.get(id)?.group.userData.gun?.visible === true, a.id);
 
-  const setupFighter = ({ z }) => {
-    const k = window.__bcTest, { b } = k;
-    k.resetKeys(); b.setCombatMode(true); b.thirdPerson = false;
-    b.player.pos.set(128, b.HEIGHT + 8, z);
-    b.player.fly = true; b.player.vel.set(0, 0, 0);
-    b.health = 100; b.gun.reloading = b.gun.cooldown = 0;
-    b.gun.ammo = b.WEAPONS.map((w) => w.mag);
-    b.updateCamera(1 / 60);
-    return { y: b.player.pos.y, kills: b.kills, deaths: b.deaths, health: b.health };
+  // The hardened server no longer grants arbitrary teleports to `fly` poses.
+  // Set up a supported arena while paused, then move in bounded, acknowledged
+  // steps. Never disable server validation or depend on unlimited hover fuel.
+  await A.evaluate(() => window.__blockcraft.menus.showPause());
+  await A.wait('fight fixture paused before moving', () => !window.__bcTest.api('isGameplayInputActive')());
+  const setupFighter = async (page, observer, id, z) => {
+    const route = await page.evaluate((z) => {
+      const k = window.__bcTest, { b } = k, site = k.pad({ radius: 8 });
+      k.resetKeys(); b.setCombatMode(true); b.thirdPerson = false;
+      b.player.fly = false; b.player.vel.set(0, 0, 0);
+      return { start: b.player.pos.toArray(), target: [128, site.y + 0.001, z] };
+    }, z);
+    const distance = route.target.reduce((total, n, i) => total + Math.abs(n - route.start[i]), 0);
+    const steps = Math.max(1, Math.ceil(distance / 12));
+    for (let step = 1; step <= steps; step++) {
+      const position = route.target.map((n, i) => route.start[i] + (n - route.start[i]) * step / steps);
+      await page.evaluate(({ position, grounded }) => {
+        const k = window.__bcTest, { b, check } = k;
+        b.player.pos.fromArray(position); b.player.vel.set(0, 0, 0);
+        b.player.fly = false; b.player.onGround = grounded;
+        b.updateCamera(0);
+        check(k.api('netSend')(k.api('combatNetState')('state')), 'Bounded fighter pose was not sent');
+      }, { position, grounded: step === steps });
+      await observer.wait('authority accepted bounded fighter position', ({ id, position }) => {
+        const r = window.__blockcraft.net.players.get(id);
+        return r && [r.tx, r.ty, r.tz].every((n, i) => Math.abs(n - position[i]) < 0.03);
+      }, { id, position });
+    }
+    return page.evaluate(() => {
+      const b = window.__blockcraft;
+      b.health = 100; b.gun.reloading = b.gun.cooldown = 0;
+      b.gun.ammo = b.WEAPONS.map((w) => w.mag);
+      return { y: b.player.pos.y, kills: b.kills, deaths: b.deaths, health: b.health };
+    });
   };
-  const [beforeA, beforeB] = await Promise.all([A.evaluate(setupFighter, { z: 132 }), B.evaluate(setupFighter, { z: 127 })]);
+  const beforeA = await setupFighter(A, B, a.id, 132);
+  const beforeB = await setupFighter(B, A, b.id, 127);
+  await A.lock();
   await A.wait('real peer converged at shot target', ({ id, y }) => {
     const r = window.__blockcraft.net.players.get(id);
     return r && Math.abs(r.x - 128) < 0.03 && Math.abs(r.y - y) < 0.03 && Math.abs(r.z - 127) < 0.03;
   }, { id: b.id, y: beforeB.y });
-  const shots = [await A.evaluate(aimAndFire, b.id)];
+  const fireAtPeer = async () => {
+    await A.wait('weapon cooldown elapsed before aimed shot', () => {
+      const b = window.__blockcraft;
+      return b.alive && b.gun.cooldown <= 0 && b.gun.reloading <= 0;
+    });
+    return A.evaluate(aimAndFire, b.id);
+  };
+  const shots = [await fireAtPeer()];
   let victim = await B.wait('aimed ray caused end-to-end damage', () => {
     const b = window.__blockcraft;
     return b.health < 100 ? { health: b.health, alive: b.alive, deaths: b.deaths } : false;
@@ -120,7 +154,7 @@ async function lanProbe(lab, t) {
   assert.ok(victim.health > 0, 'First body shot should damage, not skip directly to the death assertion');
   for (let i = 0; i < 24 && victim.alive; i++) {
     const health = victim.health;
-    shots.push(await A.evaluate(aimAndFire, b.id));
+    shots.push(await fireAtPeer());
     victim = await B.wait('next aimed hit delivered', (before) => {
       const b = window.__blockcraft;
       return b.health < before ? { health: b.health, alive: b.alive, deaths: b.deaths } : false;
@@ -183,17 +217,25 @@ async function lanProbe(lab, t) {
   assert.ok(targetCell, 'No middle wall voxel to test bullet destruction');
   const initialDamage = await B.evaluate(() => window.__bcTest.api('voxelDamageMap').size);
   const destroyShots = [];
+  await A.evaluate(() => {
+    const b = window.__blockcraft;
+    b.setCombatMode(true); b.thirdPerson = false; b.player.fly = false;
+    b.selectWeapon(b.WEAPONS.findIndex((w) => w.id === 'pistol'));
+    b.gun.aiming = true; b.gun.trigger = false;
+  });
   for (let i = 0; i < 32; i++) {
+    await A.evaluate(() => {
+      const b = window.__blockcraft;
+      if (b.gun.ammo[b.gun.index] === 0) b.startReload();
+    });
+    await A.wait('pistol magazine and legal fire cadence ready', () => {
+      const b = window.__blockcraft;
+      return b.gun.reloading <= 0 && b.gun.cooldown <= 0 && b.gun.ammo[b.gun.index] > 0;
+    });
     const shot = await A.evaluate((cell) => {
       const k = window.__bcTest, { b } = k;
-      b.setCombatMode(true); b.thirdPerson = false; b.player.fly = true;
-      b.selectWeapon(b.WEAPONS.findIndex((w) => w.id === 'pistol'));
       const w = b.WEAPONS[b.gun.index];
-      if (b.gun.ammo[b.gun.index] === 0) {
-        b.startReload();
-        for (let i = 0; i < Math.ceil(w.reload * 120) + 2; i++) b.updateCombat(1 / 120, performance.now());
-      }
-      b.gun.aiming = true; b.gun.trigger = false; b.gun.cooldown = 0;
+      b.gun.aiming = true; b.gun.trigger = false;
       b.updateCamera(1 / 60);
       const direction = new b.THREE.Vector3(cell.x + 0.5, cell.y + 0.5, cell.z + 0.5).sub(b.camera.position).normalize();
       b.player.yaw = Math.atan2(-direction.x, -direction.z); b.player.pitch = Math.asin(direction.y);
@@ -212,8 +254,11 @@ async function lanProbe(lab, t) {
   assert.equal(destroyShots.at(-1).block, 0, 'Built wall resisted every real bullet');
   const historyCells = built.cells.map((c) => c === targetCell ? { ...c, to: 0 } : c);
   await B.wait('definitive AIR edit replicated', hasCells, historyCells);
-  assert.ok(B.frames.some((frame) => frame.direction === 'in' && frame.value.t === 'edit' && frame.value.b === 0 &&
-    frame.value.x === targetCell.x && frame.value.y === targetCell.y && frame.value.z === targetCell.z), 'Destruction did not relay a definitive AIR edit');
+  // Damage can predict AIR before the outbound edit batch is flushed. Wait
+  // for the authoritative edit as well, so late-join history is really saved.
+  await waitFor('LAN-B received the authoritative AIR edit', () => B.events.some((frame) => frame.direction === 'in' &&
+    (frame.value.t === 'edits' ? frame.value.edits : frame.value.t === 'edit' ? [frame.value] : []).some((cell) =>
+      cell.b === 0 && cell.x === targetCell.x && cell.y === targetCell.y && cell.z === targetCell.z)));
   await A.evaluate(() => {
     const b = window.__blockcraft;
     b.selectWeapon(b.WEAPONS.findIndex((w) => w.id === 'lmg'));
