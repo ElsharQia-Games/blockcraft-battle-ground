@@ -1,7 +1,8 @@
 /* Blockcraft Battle Ground — Articulated, low-poly ambient dragons.
    45-dragons.js
    Classic script, loaded after characters. Spawn after terrain, before compile.
-   Flight and posing are analytic: no physics catch-up, timers or frame allocations. */
+   Seeded sky poses retain their analytic clock. Live-voxel sweeps bound actual
+   body movement; pooled colliders never include the cosmetic wingspan. */
 'use strict';
 
 const dragons = [];
@@ -20,13 +21,144 @@ const DRAGON_PALETTES = [
     wing: 0xb4867b, wingDark: 0x855667, horn: 0xe4c9af, spine: 0xca9b73, eye: 0xffbe75,
     crest: 1.12, hornLength: 0.92, span: 1.07, fin: 1.2 }
 ];
-const DRAGON_ROUTES = [
-  { x: -7, z: -5, rx: 43, rz: 32, rotation: 0.25, altitude: 58, size: 1.15, period: 69, direction: 1, tiltX: 2.1, tiltZ: 1, flap: 2.6, glide: 17 },
-  { x: 11, z: 9, rx: 57, rz: 41, rotation: 1.1, altitude: 64, size: 0.91, period: 83, direction: -1, tiltX: 1, tiltZ: -2.1, flap: 2.25, glide: 19 },
-  { x: -12, z: 11, rx: 61, rz: 43, rotation: -0.62, altitude: 70, size: 1.02, period: 97, direction: 1, tiltX: 2.4, tiltZ: 0.3, flap: 2.8, glide: 21 },
-  { x: 14, z: -11, rx: 46, rz: 57, rotation: 0.8, altitude: 63, size: 0.85, period: 79, direction: -1, tiltX: -1.2, tiltZ: 1.7, flap: 2.4, glide: 16 }
-];
+const DRAGON_RULES = typeof window !== 'undefined' ? window.BCDragonRules : null;
+// Retain the original inspection name, but shared rules own every route/scale.
+// Active world populations use count(SEED), not this guardian-only legacy list.
+const DRAGON_ROUTES = DRAGON_RULES ? Object.freeze([
+  DRAGON_RULES.descriptor(0, 0), DRAGON_RULES.descriptor(0, 1),
+  DRAGON_RULES.descriptor(0, 2), DRAGON_RULES.descriptor(0, 3)
+]) : Object.freeze([]);
 const DRAGON_TAIL_LENGTHS = [1.7, 1.6, 1.5, 1.35, 1.2, 1.05, 0.85];
+// These resources are private, unlike the cached character/dragon materials.
+// Keep old saddles reachable until the world owner removes the old dragon roots.
+const DRAGON_SADDLES = new Set();
+
+/* ---------------- rideable roll, saddle & mount points ---------------- */
+/* All small mounts have saddles. Guardians can never be mounted, including
+   under a legacy ?ride / forceRideable demo flag. Keep the old helper name for
+   callers, but never duplicate eligibility or count RNG here. */
+function dragonRideableRoll(index) {
+  return !!DRAGON_RULES && DRAGON_RULES.isRideable(SEED, index);
+}
+
+function dragonSaddlePos(out) {
+  this.group.updateWorldMatrix(true, false);
+  return out.copy(this.saddleOffset).applyMatrix4(this.group.matrixWorld);
+}
+
+function dragonMouthPos(out) {
+  // The head geometry's snout reaches z -2.1 locally; -2.0 sits just inside
+  // the open jaws, so breath particles and rays start at the mouth, not the chest.
+  this.parts.head.updateWorldMatrix(true, false);
+  return out.set(0, -0.22, -2.0).applyMatrix4(this.parts.head.matrixWorld);
+}
+
+function dragonSaddleMarker() {
+  const saddle = new THREE.Group();
+  saddle.name = 'dragon-saddle';
+  const builder = dragonGeometryBuilder();
+  dragonBox(builder, 0x3b1f24, 0, 0, 0, 1.26, 0.18, 1.52);
+  dragonBox(builder, 0x2a1418, 0, 0.2, -0.6, 1.02, 0.34, 0.2);
+  dragonBox(builder, 0x2a1418, 0, 0.13, 0.66, 1.02, 0.24, 0.18);
+  dragonBox(builder, 0xe8af57, 0, 0.28, -0.54, 0.2, 0.2, 0.2);
+  dragonBox(builder, 0xff3556, -0.62, 0.11, 0, 0.1, 0.045, 1.42);
+  dragonBox(builder, 0x3585ff, 0.62, 0.11, 0, 0.1, 0.045, 1.42);
+  const geometry = dragonFinishGeometry(builder);
+  const material = new THREE.MeshLambertMaterial({ vertexColors: true });
+  dragonStaticMesh(saddle, geometry, material, 'dragon-saddle-seat');
+  saddle.userData.geometry = geometry;
+  saddle.userData.material = material;
+  if (typeof makeNameTag === 'function') {
+    const tag = makeNameTag('RIDE \u00b7 30s', '#eaf2fa');
+    tag.name = 'dragon-ride-tag';
+    tag.scale.set(1.25, 0.32, 1);
+    tag.position.set(0, 1.12, 0.18);
+    saddle.add(tag);
+    // Unlike population name tags, this tag is disposed with its private seat.
+    // Do not expose userData.tag to WORLD_releasePopulationRoot as well.
+    saddle.userData.rideTag = tag;
+  }
+  DRAGON_SADDLES.add(saddle);
+  return saddle;
+}
+
+function dragonAttachSaddle(dragon) {
+  if (!dragon || dragon.saddle || !dragon.group || !dragonRideableRoll(dragon.index) || dragon.type === 'guardian') return;
+  const saddle = dragonSaddleMarker();
+  saddle.position.copy(dragon.saddleOffset);
+  dragon.group.add(saddle);
+  dragon.saddle = saddle;
+  dragon.tag = saddle.userData.rideTag || null;
+  dragon.group.userData.saddle = saddle;
+}
+
+function dragonDisposeSaddle(saddle) {
+  if (!saddle || !DRAGON_SADDLES.has(saddle)) return;
+  DRAGON_SADDLES.delete(saddle);
+  if (saddle.parent) saddle.parent.remove(saddle);
+  const owned = saddle.userData;
+  if (owned.geometry) owned.geometry.dispose();
+  if (owned.material) owned.material.dispose();
+  if (owned.rideTag && owned.rideTag.material) {
+    if (owned.rideTag.material.map) owned.rideTag.material.map.dispose();
+    owned.rideTag.material.dispose();
+  }
+  saddle.clear();
+  owned.geometry = owned.material = owned.rideTag = null;
+}
+
+function dragonPruneSaddles() {
+  // worldReset is emitted AFTER the new dragons have spawned. Dispose only
+  // retired roots, not the new world's markers, and never dispose shared rigs.
+  for (const saddle of DRAGON_SADDLES) {
+    let current = false;
+    for (let i = 0; i < dragons.length; i++) {
+      if (dragons[i].saddle === saddle && dragons[i].group.parent === scene) {
+        current = true;
+        break;
+      }
+    }
+    if (!current) {
+      const root = saddle.parent;
+      if (root && root.userData.saddle === saddle) root.userData.saddle = null;
+      dragonDisposeSaddle(saddle);
+    }
+  }
+}
+
+/* Keep the ride readable while 46-riding.js flies the body. Reuse the authored
+   rig rather than rebuilding meshes; a breath opens the jaw a little wider. */
+function poseRiddenDragon(dragon, seconds) {
+  const parts = dragon.parts;
+  const motion = DRAGON_MOTION_QUERY && DRAGON_MOTION_QUERY.matches ? 0.28 : 1;
+  const riding = (typeof BC !== 'undefined' && BC.api) ? BC.api.riding : null;
+  const firing = !!(riding && ((riding.active && riding.dragon === dragon &&
+    riding.firing && !riding.overheated) ||
+    (typeof riding.remoteFiring === 'function' && riding.remoteFiring(dragon))));
+  const beat = seconds * 3.1 + dragon.phase;
+  const stroke = Math.sin(beat);
+  for (let wing = 0; wing < parts.wings.length; wing++) {
+    const w = parts.wings[wing];
+    w.upper.rotation.z = w.side * (0.16 + motion * 0.38 * stroke);
+    w.upper.rotation.y = w.side * -0.06;
+    w.outer.rotation.z = -0.04 + motion * 0.2 * Math.sin(beat - 0.68);
+  }
+  parts.hips.rotation.set(
+    0.022 * Math.sin(seconds * 1.2),
+    0.03 * Math.sin(seconds * 0.8),
+    0
+  );
+  parts.neck[0].rotation.set(-0.05, 0, 0);
+  parts.neck[1].rotation.set(0.06, 0, 0);
+  parts.head.rotation.set(-0.12 + (firing ? -0.1 : 0), 0, 0);
+  parts.jaw.rotation.x = firing ? -0.58 : -0.12 - 0.04 * Math.sin(seconds * 2.1);
+  for (let joint = 0; joint < parts.tail.length; joint++) {
+    const follow = seconds * 1.35 - joint * 0.52;
+    parts.tail[joint].rotation.y = motion * 0.05 * Math.sin(follow);
+    parts.tail[joint].rotation.x = -0.02 + motion * 0.022 * Math.sin(follow + 0.7);
+  }
+}
+
 const DRAGON_GEOMETRIES = new Map();
 const DRAGON_COLORS = new Map();
 const DRAGON_MATERIALS = {
@@ -307,10 +439,451 @@ function makeDragon(palette) {
     parts.wings.push({ upper, outer, side });
   }
   group.userData = { kind: 'dragon', ambient: true, palette: p.name, parts };
+  // Keep node references private, not a cyclic root reference in userData.
+  // Cached bounds describe only solid body sections, never wing/tail meshes.
+  DRAGON_BODY_SHAPES.set(group, [
+      { node: group, bounds: geos.body.boundingBox },
+      { node: parts.hips, bounds: geos.hips.boundingBox },
+      { node: parts.neck[0], bounds: geos.neck[0].boundingBox },
+      { node: parts.neck[1], bounds: geos.neck[1].boundingBox },
+      { node: parts.head, bounds: geos.head.boundingBox },
+      { node: parts.jaw, bounds: geos.jaw.boundingBox }
+    ]);
   return group;
 }
 
+/* ---------------- pooled solid-body queries ---------------- */
+const DRAGON_COLLIDER_EPS = 0.00001;
+const DRAGON_COLLIDERS = [];
+const DRAGON_BODY_SHAPES = new WeakMap();
+const DRAGON_SWEEP_BOX = { x: 0, y: 0, z: 0, w: 0, h: 0 };
+const DRAGON_RAY_SCRATCH = { normalX: 0, normalY: 0, normalZ: 0 };
+const DRAGON_RAY_HIT = { distance: 0, index: -1, dragon: null,
+  point: { x: 0, y: 0, z: 0 }, normal: { x: 0, y: 0, z: 0 } };
+const DRAGON_RIDER_BOUNDS = {
+  min: { x: -0.65, y: -0.05, z: -0.95 },
+  max: { x: 0.65, y: 2.65, z: 0.6 }
+};
+
+function dragonColliderRecord(index) {
+  let record = DRAGON_COLLIDERS[index];
+  if (record) return record;
+  record = { index, dragon: null, active: false, revision: 0, notifiedRevision: 0,
+    x: 0, y: 0, z: 0, w: 0, h: 0, halfX: 0, halfZ: 0,
+    minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0,
+    type: '', role: '', rideable: false, indestructible: false, invulnerable: false,
+    rootX: 0, rootY: 0, rootZ: 0, rootQX: 0, rootQY: 0, rootQZ: 0, rootQW: 1,
+    parts: [], partCount: 0, view: null, change: null };
+  // Six articulated body sections, a private saddle and an unscaled rider.
+  for (let i = 0; i < 8; i++) record.parts.push({ minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0 });
+  record.view = { index, dragon: null, active: false, revision: 0,
+    x: 0, y: 0, z: 0, w: 0, h: 0, halfX: 0, halfZ: 0,
+    minX: 0, minY: 0, minZ: 0, maxX: 0, maxY: 0, maxZ: 0,
+    type: '', role: '', rideable: false, indestructible: false, invulnerable: false };
+  record.change = { index, dragon: null, collider: record.view, revision: 0 };
+  DRAGON_COLLIDERS[index] = record;
+  return record;
+}
+
+function dragonTransformBounds(node, bounds, out, rider) {
+  const e = node.matrixWorld.elements;
+  let cx = (bounds.min.x + bounds.max.x) * 0.5;
+  let cy = (bounds.min.y + bounds.max.y) * 0.5;
+  let cz = (bounds.min.z + bounds.max.z) * 0.5;
+  const hx = (bounds.max.x - bounds.min.x) * 0.5;
+  const hy = (bounds.max.y - bounds.min.y) * 0.5;
+  const hz = (bounds.max.z - bounds.min.z) * 0.5;
+  let sx = 1, sy = 1, sz = 1;
+  if (rider) {
+    // The saddle inherits dragon scale, the seated humanoid never does.
+    sx = 1 / Math.abs(node.scale.x); sy = 1 / Math.abs(node.scale.y); sz = 1 / Math.abs(node.scale.z);
+    cx += rider.saddleOffset.x * Math.abs(node.scale.x);
+    cy += rider.saddleOffset.y * Math.abs(node.scale.y) - 0.64;
+    cz += rider.saddleOffset.z * Math.abs(node.scale.z);
+  }
+  const m0 = e[0] * sx, m1 = e[1] * sx, m2 = e[2] * sx;
+  const m4 = e[4] * sy, m5 = e[5] * sy, m6 = e[6] * sy;
+  const m8 = e[8] * sz, m9 = e[9] * sz, m10 = e[10] * sz;
+  const x = m0 * cx + m4 * cy + m8 * cz + e[12];
+  const y = m1 * cx + m5 * cy + m9 * cz + e[13];
+  const z = m2 * cx + m6 * cy + m10 * cz + e[14];
+  const wx = Math.abs(m0) * hx + Math.abs(m4) * hy + Math.abs(m8) * hz;
+  const wy = Math.abs(m1) * hx + Math.abs(m5) * hy + Math.abs(m9) * hz;
+  const wz = Math.abs(m2) * hx + Math.abs(m6) * hy + Math.abs(m10) * hz;
+  const changed = Math.abs(out.minX - (x - wx)) > DRAGON_COLLIDER_EPS || Math.abs(out.maxX - (x + wx)) > DRAGON_COLLIDER_EPS ||
+    Math.abs(out.minY - (y - wy)) > DRAGON_COLLIDER_EPS || Math.abs(out.maxY - (y + wy)) > DRAGON_COLLIDER_EPS ||
+    Math.abs(out.minZ - (z - wz)) > DRAGON_COLLIDER_EPS || Math.abs(out.maxZ - (z + wz)) > DRAGON_COLLIDER_EPS;
+  out.minX = x - wx; out.maxX = x + wx;
+  out.minY = y - wy; out.maxY = y + wy;
+  out.minZ = z - wz; out.maxZ = z + wz;
+  return changed;
+}
+
+function dragonSyncCollider(dragon, notify = true) {
+  if (!dragon || !dragon.group || !Number.isInteger(dragon.index) || dragons[dragon.index] !== dragon) return null;
+  const group = dragon.group, record = dragonColliderRecord(dragon.index);
+  if (group.parent !== scene || !Number.isFinite(group.position.x + group.position.y + group.position.z) ||
+      !(group.scale.x > 0 && group.scale.y > 0 && group.scale.z > 0)) {
+    record.active = false;
+    record.view.active = false;
+    return null;
+  }
+  const shapes = DRAGON_BODY_SHAPES.get(group);
+  if (!shapes || !shapes.length) return null;
+  group.updateWorldMatrix(true, false);
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  let count = shapes.length, partsChanged = false;
+  for (let i = 0; i < count; i++) {
+    const shape = shapes[i], part = record.parts[i];
+    if (shape.node !== group) shape.node.updateWorldMatrix(false, false);
+    partsChanged = dragonTransformBounds(shape.node, shape.bounds, part, null) || partsChanged;
+  }
+  if (dragon.saddle && dragon.saddle.userData.geometry) {
+    dragon.saddle.updateWorldMatrix(false, false);
+    partsChanged = dragonTransformBounds(dragon.saddle, dragon.saddle.userData.geometry.boundingBox, record.parts[count++], null) || partsChanged;
+  }
+  if (dragon.type === 'mount' && group.userData.riderId) {
+    partsChanged = dragonTransformBounds(group, DRAGON_RIDER_BOUNDS, record.parts[count++], dragon) || partsChanged;
+  }
+  for (let i = 0; i < count; i++) {
+    const part = record.parts[i];
+    minX = Math.min(minX, part.minX); minY = Math.min(minY, part.minY); minZ = Math.min(minZ, part.minZ);
+    maxX = Math.max(maxX, part.maxX); maxY = Math.max(maxY, part.maxY); maxZ = Math.max(maxZ, part.maxZ);
+  }
+  if (!Number.isFinite(minX + minY + minZ + maxX + maxY + maxZ)) {
+    record.active = record.view.active = false;
+    return null;
+  }
+  const changed = partsChanged || !record.active || record.dragon !== dragon || record.partCount !== count ||
+    Math.abs(record.minX - minX) > DRAGON_COLLIDER_EPS || Math.abs(record.minY - minY) > DRAGON_COLLIDER_EPS ||
+    Math.abs(record.minZ - minZ) > DRAGON_COLLIDER_EPS || Math.abs(record.maxX - maxX) > DRAGON_COLLIDER_EPS ||
+    Math.abs(record.maxY - maxY) > DRAGON_COLLIDER_EPS || Math.abs(record.maxZ - maxZ) > DRAGON_COLLIDER_EPS;
+  record.dragon = dragon; record.active = true; record.partCount = count;
+  record.rootX = group.position.x; record.rootY = group.position.y; record.rootZ = group.position.z;
+  record.rootQX = group.quaternion.x; record.rootQY = group.quaternion.y;
+  record.rootQZ = group.quaternion.z; record.rootQW = group.quaternion.w;
+  record.minX = minX; record.minY = minY; record.minZ = minZ;
+  record.maxX = maxX; record.maxY = maxY; record.maxZ = maxZ;
+  record.x = (minX + maxX) * 0.5; record.y = minY; record.z = (minZ + maxZ) * 0.5;
+  record.halfX = (maxX - minX) * 0.5; record.halfZ = (maxZ - minZ) * 0.5;
+  record.w = Math.max(record.halfX, record.halfZ); record.h = maxY - minY;
+  record.type = dragon.type; record.role = dragon.role; record.rideable = dragon.rideable === true;
+  record.indestructible = dragon.indestructible === true; record.invulnerable = dragon.invulnerable === true;
+  if (changed) {
+    record.revision++;
+  }
+  dragonCopyCollider(record, record.view);
+  if (notify && record.notifiedRevision !== record.revision && typeof BC !== 'undefined' && typeof BC.emit === 'function') {
+    record.notifiedRevision = record.revision;
+    record.change.dragon = dragon; record.change.revision = record.revision;
+    BC.emit('dragonCollidersChanged', record.change);
+  }
+  return record;
+}
+
+function dragonLiveCollider(index) {
+  const record = DRAGON_COLLIDERS[index];
+  if (!record || !record.active || record.dragon !== dragons[index] || record.dragon.group.parent !== scene) return null;
+  const group = record.dragon.group, p = group.position, q = group.quaternion;
+  if (record.rootX !== p.x || record.rootY !== p.y || record.rootZ !== p.z ||
+      record.rootQX !== q.x || record.rootQY !== q.y || record.rootQZ !== q.z || record.rootQW !== q.w) {
+    return dragonSyncCollider(record.dragon, false);
+  }
+  return record;
+}
+
+function dragonGetCollider(index, out) {
+  if (!Number.isInteger(index) || index < 0) return null;
+  const dragon = dragons[index];
+  const record = dragon ? dragonSyncCollider(dragon, false) : null;
+  if (!record) return null;
+  return out ? dragonCopyCollider(record, out) : record.view;
+}
+
+function dragonCopyCollider(record, out) {
+  out.index = record.index; out.dragon = record.dragon;
+  out.x = record.x; out.y = record.y; out.z = record.z; out.w = record.w; out.h = record.h;
+  out.halfX = record.halfX; out.halfZ = record.halfZ;
+  out.minX = record.minX; out.minY = record.minY; out.minZ = record.minZ;
+  out.maxX = record.maxX; out.maxY = record.maxY; out.maxZ = record.maxZ;
+  out.type = record.type; out.role = record.role; out.rideable = record.rideable;
+  out.indestructible = record.indestructible; out.invulnerable = record.invulnerable;
+  out.active = record.active; out.revision = record.revision;
+  return out;
+}
+
+function dragonValidBox(box) {
+  return !!box && Number.isFinite(box.x) && Number.isFinite(box.y) && Number.isFinite(box.z) &&
+    Number.isFinite(box.w) && Number.isFinite(box.h) && box.w > 0 && box.h > 0;
+}
+
+function dragonIgnoreIndex(box, ignoreIndex) {
+  return Number.isInteger(ignoreIndex) ? ignoreIndex : box && Number.isInteger(box.ignoreDragonIndex) ? box.ignoreDragonIndex : -1;
+}
+
+function dragonBoxIntersects(box, part) {
+  return box.x + box.w > part.minX + DRAGON_COLLIDER_EPS && box.x - box.w < part.maxX - DRAGON_COLLIDER_EPS &&
+    box.y + box.h > part.minY + DRAGON_COLLIDER_EPS && box.y < part.maxY - DRAGON_COLLIDER_EPS &&
+    box.z + box.w > part.minZ + DRAGON_COLLIDER_EPS && box.z - box.w < part.maxZ - DRAGON_COLLIDER_EPS;
+}
+
+function dragonOverlapsAabb(box, ignoreIndex) {
+  if (!dragonValidBox(box)) return false;
+  const ignored = dragonIgnoreIndex(box, ignoreIndex);
+  for (let i = 0; i < dragons.length; i++) {
+    if (i === ignored) continue;
+    const record = dragonLiveCollider(i);
+    if (!record || !dragonBoxIntersects(box, record)) continue;
+    for (let p = 0; p < record.partCount; p++) if (dragonBoxIntersects(box, record.parts[p])) return true;
+  }
+  return false;
+}
+
+// Entirely independent of the physics wrapper. 22-physics composes this sweep
+// with voxel sweeps; calling that wrapper from here would recurse.
+function dragonSweepAxis(box, axis, amount, ignored) {
+  if (!Number.isFinite(amount)) return true;
+  if (!amount) return false;
+  const positive = amount > 0;
+  const edge = box[axis] + (axis === 'y' ? positive ? box.h : 0 : positive ? box.w : -box.w);
+  let allowed = amount;
+  for (let i = 0; i < dragons.length; i++) {
+    if (i === ignored) continue;
+    const record = dragonLiveCollider(i);
+    if (!record) continue;
+    for (let p = 0; p < record.partCount; p++) {
+      const part = record.parts[p];
+      if (axis !== 'x' && (box.x + box.w <= part.minX + DRAGON_COLLIDER_EPS || box.x - box.w >= part.maxX - DRAGON_COLLIDER_EPS) ||
+          axis !== 'y' && (box.y + box.h <= part.minY + DRAGON_COLLIDER_EPS || box.y >= part.maxY - DRAGON_COLLIDER_EPS) ||
+          axis !== 'z' && (box.z + box.w <= part.minZ + DRAGON_COLLIDER_EPS || box.z - box.w >= part.maxZ - DRAGON_COLLIDER_EPS)) continue;
+      const face = axis === 'x' ? positive ? part.minX : part.maxX :
+        axis === 'y' ? positive ? part.minY : part.maxY : positive ? part.minZ : part.maxZ;
+      const gap = face - edge;
+      if (positive && gap >= -DRAGON_COLLIDER_EPS && gap < allowed) allowed = Math.max(0, gap);
+      else if (!positive && gap <= DRAGON_COLLIDER_EPS && gap > allowed) allowed = Math.min(0, gap);
+    }
+  }
+  box[axis] += allowed;
+  return Math.abs(allowed - amount) > DRAGON_COLLIDER_EPS;
+}
+
+function dragonSweepAabb(box, dx, dy, dz, out, ignoreIndex) {
+  const result = out || {}, scratch = DRAGON_SWEEP_BOX;
+  scratch.x = box && Number.isFinite(box.x) ? box.x : 0;
+  scratch.y = box && Number.isFinite(box.y) ? box.y : 0;
+  scratch.z = box && Number.isFinite(box.z) ? box.z : 0;
+  scratch.w = dragonValidBox(box) ? box.w : 0;
+  scratch.h = dragonValidBox(box) ? box.h : 0;
+  const ignored = dragonIgnoreIndex(box, ignoreIndex), valid = dragonValidBox(box);
+  const hitY = valid ? dragonSweepAxis(scratch, 'y', dy, ignored) : true;
+  const hitX = valid ? dragonSweepAxis(scratch, 'x', dx, ignored) : true;
+  const hitZ = valid ? dragonSweepAxis(scratch, 'z', dz, ignored) : true;
+  result.x = scratch.x; result.y = scratch.y; result.z = scratch.z;
+  result.hitX = hitX; result.hitY = hitY; result.hitZ = hitZ;
+  return result;
+}
+
+function dragonRayBounds(origin, dx, dy, dz, maxDistance, part) {
+  let near = 0, far = maxDistance, normalX = 0, normalY = 0, normalZ = 0;
+  for (let axis = 0; axis < 3; axis++) {
+    const position = axis === 0 ? origin.x : axis === 1 ? origin.y : origin.z;
+    const direction = axis === 0 ? dx : axis === 1 ? dy : dz;
+    const min = axis === 0 ? part.minX : axis === 1 ? part.minY : part.minZ;
+    const max = axis === 0 ? part.maxX : axis === 1 ? part.maxY : part.maxZ;
+    if (Math.abs(direction) < 1e-10) { if (position < min || position > max) return -1; continue; }
+    let enter = (min - position) / direction, exit = (max - position) / direction;
+    if (enter > exit) { const swap = enter; enter = exit; exit = swap; }
+    if (enter > near) {
+      near = enter;
+      normalX = axis === 0 ? direction > 0 ? -1 : 1 : 0;
+      normalY = axis === 1 ? direction > 0 ? -1 : 1 : 0;
+      normalZ = axis === 2 ? direction > 0 ? -1 : 1 : 0;
+    }
+    far = Math.min(far, exit);
+    if (near > far || far < 0) return -1;
+  }
+  DRAGON_RAY_SCRATCH.normalX = normalX; DRAGON_RAY_SCRATCH.normalY = normalY; DRAGON_RAY_SCRATCH.normalZ = normalZ;
+  return near;
+}
+
+function dragonRaycast(origin, direction, maxDistance, ignoreIndex) {
+  if (!origin || !direction || !Number.isFinite(origin.x) || !Number.isFinite(origin.y) || !Number.isFinite(origin.z) ||
+      !Number.isFinite(direction.x) || !Number.isFinite(direction.y) || !Number.isFinite(direction.z) ||
+      !Number.isFinite(maxDistance) || maxDistance < 0) return null;
+  const length = Math.hypot(direction.x, direction.y, direction.z);
+  if (!Number.isFinite(length) || length < 1e-10) return null;
+  const dx = direction.x / length, dy = direction.y / length, dz = direction.z / length;
+  let closest = maxDistance, found = false;
+  for (let i = 0; i < dragons.length; i++) {
+    if (i === ignoreIndex) continue;
+    const record = dragonLiveCollider(i);
+    if (!record || dragonRayBounds(origin, dx, dy, dz, closest, record) < 0) continue;
+    for (let p = 0; p < record.partCount; p++) {
+      const distance = dragonRayBounds(origin, dx, dy, dz, closest, record.parts[p]);
+      if (distance < 0 || found && distance >= closest) continue;
+      found = true; closest = distance;
+      DRAGON_RAY_HIT.distance = distance; DRAGON_RAY_HIT.index = i; DRAGON_RAY_HIT.dragon = record.dragon;
+      DRAGON_RAY_HIT.normal.x = DRAGON_RAY_SCRATCH.normalX;
+      DRAGON_RAY_HIT.normal.y = DRAGON_RAY_SCRATCH.normalY;
+      DRAGON_RAY_HIT.normal.z = DRAGON_RAY_SCRATCH.normalZ;
+    }
+  }
+  if (!found) return null;
+  DRAGON_RAY_HIT.point.x = origin.x + dx * closest;
+  DRAGON_RAY_HIT.point.y = origin.y + dy * closest;
+  DRAGON_RAY_HIT.point.z = origin.z + dz * closest;
+  return DRAGON_RAY_HIT;
+}
+
+if (typeof BC !== 'undefined' && BC.api) {
+  BC.api.dragons = { getCollider: dragonGetCollider, overlapsAabb: dragonOverlapsAabb,
+    sweepAabb: dragonSweepAabb, raycast: dragonRaycast };
+}
+
 /* ---------------- terrain-safe, deterministic flight ---------------- */
+const DRAGON_MOTION_STEP = 0.4;
+const DRAGON_MOTION_STEPS = 12;
+const DRAGON_RETURN_SPEED = 12;
+const DRAGON_MOUNT_TRIES = 16;
+
+function dragonVoxelPhysics() {
+  const physics = typeof BC !== 'undefined' && BC.api ? BC.api.physics : null;
+  return physics && (typeof physics.sweepVoxels === 'function' || typeof physics.sweepAabb === 'function') ? physics : null;
+}
+
+function dragonPartBox(part, motion, box, index) {
+  box.x = (part.minX + part.maxX) * 0.5 + motion.dx;
+  box.y = part.minY + motion.dy;
+  box.z = (part.minZ + part.maxZ) * 0.5 + motion.dz;
+  box.w = Math.max(part.maxX - part.minX, part.maxZ - part.minZ) * 0.5;
+  box.h = part.maxY - part.minY;
+  box.ignoreDragonIndex = index;
+  return box;
+}
+
+function dragonVoxelBoxClear(box, physics) {
+  if (!dragonValidBox(box)) return false;
+  if (physics && typeof physics.overlapsVoxels === 'function') return !physics.overlapsVoxels(box);
+  // solidAt remains the physics API's voxel-only primitive. Never invoke the
+  // dynamic overlaps wrapper while posing our own collider.
+  if ((!physics || typeof physics.solidAt !== 'function') && typeof getBlock !== 'function') return false;
+  for (let x = Math.floor(box.x - box.w + DRAGON_COLLIDER_EPS); x <= Math.floor(box.x + box.w - DRAGON_COLLIDER_EPS); x++) {
+    for (let y = Math.floor(box.y + DRAGON_COLLIDER_EPS); y <= Math.floor(box.y + box.h - DRAGON_COLLIDER_EPS); y++) {
+      for (let z = Math.floor(box.z - box.w + DRAGON_COLLIDER_EPS); z <= Math.floor(box.z + box.w - DRAGON_COLLIDER_EPS); z++) {
+        if (physics && typeof physics.solidAt === 'function') { if (physics.solidAt(x, y, z)) return false; }
+        else { const block = getBlock(x, y, z); if (block !== AIR && block !== WATER) return false; }
+      }
+    }
+  }
+  return true;
+}
+
+function dragonBodyVoxelsClear(dragon, record, physics) {
+  const motion = dragon.motion;
+  for (let i = 0; i < record.partCount; i++) {
+    if (!dragonVoxelBoxClear(dragonPartBox(record.parts[i], motion, motion.box, dragon.index), physics)) return false;
+  }
+  return true;
+}
+
+function dragonSaveBodyPose(dragon) {
+  const shapes = DRAGON_BODY_SHAPES.get(dragon.group), saved = dragon.motion.savedPose;
+  for (let i = 0; i < shapes.length; i++) {
+    const rotation = shapes[i].node.rotation;
+    saved[i * 3] = rotation.x; saved[i * 3 + 1] = rotation.y; saved[i * 3 + 2] = rotation.z;
+  }
+}
+
+function dragonRestoreBodyPose(dragon) {
+  const shapes = DRAGON_BODY_SHAPES.get(dragon.group), saved = dragon.motion.savedPose;
+  for (let i = 0; i < shapes.length; i++) {
+    shapes[i].node.rotation.set(saved[i * 3], saved[i * 3 + 1], saved[i * 3 + 2]);
+  }
+}
+
+function dragonAmbientAxis(dragon, record, physics, axis, amount) {
+  if (!amount) return 0;
+  const motion = dragon.motion, box = motion.box, out = motion.sweep;
+  let allowed = amount;
+  for (let i = 0; i < record.partCount; i++) {
+    dragonPartBox(record.parts[i], motion, box, dragon.index);
+    const sweep = typeof physics.sweepVoxels === 'function' ? physics.sweepVoxels : physics.sweepAabb;
+    sweep.call(physics, box, axis === 'x' ? allowed : 0, axis === 'y' ? allowed : 0, axis === 'z' ? allowed : 0, out);
+    const moved = out[axis] - box[axis];
+    if (!Number.isFinite(moved)) { allowed = 0; break; }
+    allowed = amount > 0 ? Math.max(0, Math.min(allowed, moved)) : Math.min(0, Math.max(allowed, moved));
+    if (!allowed) break;
+  }
+  if (Math.abs(allowed - amount) > DRAGON_COLLIDER_EPS) motion.blocked = true;
+  if (axis === 'x') motion.dx += allowed;
+  else if (axis === 'y') motion.dy += allowed;
+  else motion.dz += allowed;
+  return allowed;
+}
+
+function dragonMoveAmbient(dragon, seconds) {
+  const motion = dragon.motion, position = dragon.group.position, physics = dragonVoxelPhysics();
+  const elapsed = Math.max(0, Math.min(0.05, seconds - motion.lastSeconds));
+  motion.lastSeconds = seconds;
+  if (!physics) { dragonRestoreBodyPose(dragon); dragonSyncCollider(dragon); return; }
+  motion.dx = motion.dy = motion.dz = 0;
+  motion.blocked = false;
+  let record = dragonSyncCollider(dragon, false);
+  if (!record) return;
+  if (!dragonBodyVoxelsClear(dragon, record, physics)) {
+    // Rotation/jaw/neck posing cannot grow the body into a builder's wall.
+    dragonRestoreBodyPose(dragon);
+    record = dragonSyncCollider(dragon, false);
+    motion.blocked = true;
+    if (!record || !dragonBodyVoxelsClear(dragon, record, physics)) {
+      motion.perched = true; dragon.routeReady = false; dragonSyncCollider(dragon); return;
+    }
+  }
+  const clockBucket = Math.floor(seconds / 2);
+  if (motion.perched && clockBucket >= motion.retryBucket) motion.perched = false;
+  if (motion.perched || motion.blocked) motion.wanted.copy(motion.home);
+  else motion.wanted.copy(motion.target);
+  let dx = motion.wanted.x - position.x, dy = motion.wanted.y - position.y, dz = motion.wanted.z - position.z;
+  let distance = Math.hypot(dx, dy, dz);
+  if (!Number.isFinite(distance)) { dragonRestoreBodyPose(dragon); dragonSyncCollider(dragon); return; }
+  // Normal analytic flight fits this envelope. A long tab pause, blocked loop
+  // or expired distant lease cannot turn a capped frame into a sky teleport.
+  const cap = Math.min(DRAGON_MOTION_STEP * DRAGON_MOTION_STEPS, DRAGON_RETURN_SPEED * elapsed);
+  if (distance > cap) { const scale = cap / distance; dx *= scale; dy *= scale; dz *= scale; distance = cap; }
+  const steps = distance > DRAGON_COLLIDER_EPS ? Math.min(DRAGON_MOTION_STEPS, Math.ceil(distance / DRAGON_MOTION_STEP)) : 0;
+  for (let step = 0; step < steps; step++) {
+    dragonAmbientAxis(dragon, record, physics, 'y', dy / steps);
+    dragonAmbientAxis(dragon, record, physics, 'x', dx / steps);
+    dragonAmbientAxis(dragon, record, physics, 'z', dz / steps);
+  }
+  if (!dragonBodyVoxelsClear(dragon, record, physics)) {
+    // Raced live edits fail closed; never carve cover or jump to a clear sample.
+    motion.dx = motion.dy = motion.dz = 0;
+    dragonRestoreBodyPose(dragon);
+    motion.blocked = true;
+  }
+  position.x += motion.dx; position.y += motion.dy; position.z += motion.dz;
+  if (motion.blocked) {
+    // A fixed, seed/terrain-defined home is the bounded fallback, not a new
+    // per-peer orbit integrator. Retry against the common two-second clock.
+    motion.perched = true; motion.retryBucket = clockBucket + 1;
+  }
+  // The tiny mount yard is always inside the authority's existing root range.
+  // After a lease ends far away, suppress the prompt until the swept return is
+  // back in that range; class eligibility itself never changes.
+  dragon.routeReady = dragon.type !== 'mount' || position.distanceToSquared(motion.target) <= 81;
+  dragonSyncCollider(dragon);
+}
+
+function dragonResumeAmbient(dragon) {
+  if (!dragon || !dragon.motion) return;
+  dragon.motion.perched = false;
+  dragon.motion.retryBucket = 0;
+  dragon.routeReady = dragon.type !== 'mount' || dragon.group.position.distanceToSquared(dragon.motion.target) <= 81;
+  dragonSyncCollider(dragon);
+}
+
 function dragonOrbitAltitude(orbit, size, heights) {
   // Cover the whole orbit AND the entire swept model, rather than merely its
   // centerline. One boot-time scan also covers hills between path samples.
@@ -333,13 +906,72 @@ function dragonOrbitAltitude(orbit, size, heights) {
   return Math.max(orbit.altitude, highest + 13 + 11.5 * size + Math.hypot(orbit.tiltX, orbit.tiltZ) + 0.78);
 }
 
+function dragonMountAltitude(orbit, size, heights) {
+  const reach = 8 * size;
+  const ex = Math.hypot(orbit.rx * orbit.cos, orbit.rz * orbit.sin) + reach;
+  const ez = Math.hypot(orbit.rx * orbit.sin, orbit.rz * orbit.cos) + reach;
+  let highest = SEA + 1, minGround = Infinity, maxGround = SEA + 1, excess = 0;
+  for (let x = Math.max(0, Math.floor(orbit.cx - ex)); x <= Math.min(WORLD - 1, Math.ceil(orbit.cx + ex)); x++) {
+    for (let z = Math.max(0, Math.floor(orbit.cz - ez)); z <= Math.min(WORLD - 1, Math.ceil(orbit.cz + ez)); z++) {
+      const at = x * WORLD + z;
+      if (heights[at] < 0) heights[at] = terrainHeight(x, z);
+      const ground = heights[at] + 1;
+      minGround = Math.min(minGround, ground); maxGround = Math.max(maxGround, ground);
+      let live = SEA + 1;
+      for (let y = HEIGHT - 1; y >= 0; y--) {
+        const block = getBlock(x, y, z);
+        if (block !== AIR && block !== WATER) { live = Math.max(live, y + 1); break; }
+      }
+      highest = Math.max(highest, live);
+      excess = Math.max(excess, live - ground);
+    }
+  }
+  // A low hover/perch, within E range from the yard. Natural canopy/roofs make
+  // a candidate expensive instead of forcing every small dragon into the sky.
+  orbit.mountScore = excess * 12 + (maxGround - minGround) * 2 + Math.max(0, SEA + 2 - minGround) * 5;
+  return Math.max(orbit.altitude, highest + 4.35 * size + Math.hypot(orbit.tiltX, orbit.tiltZ) + 1.25);
+}
+
+function dragonMountCenter(orbit, route, heights) {
+  const sites = typeof villageSites !== 'undefined' ? villageSites : null;
+  const site = sites && sites.length ? sites[route.villageSlot % sites.length] : null;
+  const baseX = site ? site.x : WORLD * 0.5 + route.x;
+  const baseZ = site ? site.z : WORLD * 0.5 + route.z;
+  const distance = site ? route.villageDistance : 0;
+  let best = Infinity, bx = baseX, bz = baseZ, by = route.altitude;
+  for (let candidate = 0; candidate < DRAGON_MOUNT_TRIES; candidate++) {
+    const angle = route.villageAngle + candidate * DRAGON_TAU / DRAGON_MOUNT_TRIES;
+    const radius = site ? distance + (candidate > 7 ? 6 : 0) : candidate === 0 ? 0 : 4 + candidate * 2;
+    orbit.cx = Math.max(route.catalog.minCX, Math.min(route.catalog.maxCX, baseX + Math.cos(angle) * radius));
+    orbit.cz = Math.max(route.catalog.minCZ, Math.min(route.catalog.maxCZ, baseZ + Math.sin(angle) * radius));
+    const altitude = dragonMountAltitude(orbit, route.size, heights);
+    let score = orbit.mountScore + candidate * 0.015;
+    for (let i = 0; i < dragons.length; i++) {
+      if (dragons[i].type === 'mount' && Math.hypot(orbit.cx - dragons[i].orbit.cx, orbit.cz - dragons[i].orbit.cz) < 24) score += 1000;
+    }
+    if (score < best) { best = score; bx = orbit.cx; bz = orbit.cz; by = altitude; }
+    if (score < 2.1) break;
+  }
+  orbit.cx = bx; orbit.cz = bz;
+  orbit.altitude = Math.min(route.catalog.maxAltitude, by);
+}
+
 function spawnDragons() {
   if (dragons.length) return dragons;
+  if (!DRAGON_RULES || typeof getBlock !== 'function') return dragons;
+  dragonPruneSaddles();
   // Shared only during spawning, then collectible. No terrain queries in updates.
   const heights = new Int16Array(WORLD * WORLD);
   heights.fill(-1);
-  for (let i = 0; i < DRAGON_ROUTES.length; i++) {
-    const route = DRAGON_ROUTES[i];
+  const count = DRAGON_RULES.count(SEED);
+  DRAGON_RAY_HIT.dragon = null; DRAGON_RAY_HIT.index = -1;
+  for (let i = 0; i < DRAGON_COLLIDERS.length; i++) {
+    DRAGON_COLLIDERS[i].active = false;
+    DRAGON_COLLIDERS[i].dragon = DRAGON_COLLIDERS[i].change.dragon = null;
+    DRAGON_COLLIDERS[i].view.active = false; DRAGON_COLLIDERS[i].view.dragon = null;
+  }
+  for (let i = 0; i < count; i++) {
+    const route = DRAGON_RULES.descriptor(SEED, i);
     const orbit = Object.assign({}, route, {
       cx: WORLD / 2 + route.x, cz: WORLD / 2 + route.z,
       cos: Math.cos(route.rotation), sin: Math.sin(route.rotation),
@@ -347,19 +979,49 @@ function spawnDragons() {
     });
     // Gently bias loops toward generated villages while keeping them in the
     // central skyline and within the world's existing fog range.
-    if (villageSites.length) {
+    if (route.type === 'guardian' && villageSites.length) {
       const site = villageSites[i % villageSites.length];
       orbit.cx += Math.max(-15, Math.min(15, (site.x - orbit.cx) * 0.22));
       orbit.cz += Math.max(-15, Math.min(15, (site.z - orbit.cz) * 0.22));
     }
-    orbit.altitude = dragonOrbitAltitude(orbit, route.size, heights);
-    const group = makeDragon(DRAGON_PALETTES[i]);
+    if (route.type === 'guardian') orbit.altitude = Math.min(route.catalog.maxAltitude, dragonOrbitAltitude(orbit, route.size, heights));
+    else dragonMountCenter(orbit, route, heights);
+    const group = makeDragon(DRAGON_PALETTES[route.paletteIndex]);
+    group.name = 'dragon-' + route.name;
     group.scale.setScalar(route.size);
+    const rideable = dragonRideableRoll(i);
     const dragon = {
       group, parts: group.userData.parts, orbit,
-      phase: hash2(771 + i * 41, 1553 - i * 67) * DRAGON_TAU,
-      flapPeriod: route.flap, glidePeriod: route.glide, swayPeriod: 9.4 + i * 0.8
+      index: i, seed: SEED >>> 0, descriptor: route,
+      name: route.name, type: route.type, role: route.role,
+      indestructible: route.indestructible, invulnerable: route.invulnerable,
+      // Finite metadata; guardians have no damage/death/despawn controller.
+      health: 100, maxHealth: 100, damageable: false,
+      rideable,
+      saddleOffset: new THREE.Vector3(0, 1.36, 0.34),
+      saddlePos: dragonSaddlePos,
+      mouthPos: dragonMouthPos,
+      saddle: null, tag: null,
+      phase: route.phase,
+      flapPeriod: route.flap, glidePeriod: route.glide, swayPeriod: route.swayPeriod,
+      routeReady: true,
+      motion: { target: new THREE.Vector3(), wanted: new THREE.Vector3(),
+        home: new THREE.Vector3(orbit.cx, orbit.altitude, orbit.cz),
+        box: { x: 0, y: 0, z: 0, w: 0, h: 0, ignoreDragonIndex: i },
+        sweep: { x: 0, y: 0, z: 0, hitX: false, hitY: false, hitZ: false },
+        savedPose: new Float64Array(18), dx: 0, dy: 0, dz: 0,
+        ready: false, blocked: false, perched: false, retryBucket: 0, lastSeconds: 0 }
     };
+    group.userData.palette = route.name;
+    group.userData.type = route.type; group.userData.role = route.role;
+    group.userData.guardian = route.type === 'guardian';
+    group.userData.indestructible = route.indestructible; group.userData.invulnerable = route.invulnerable;
+    group.userData.damageable = false; group.userData.health = group.userData.maxHealth = 100;
+    group.userData.dragonIndex = i;
+    group.userData.rideable = rideable;
+    if (rideable) {
+      dragonAttachSaddle(dragon);
+    }
     dragons.push(dragon);
     scene.add(group);
   }
@@ -368,13 +1030,24 @@ function spawnDragons() {
 }
 
 function updateDragons(dt, now) {
-  // dt is deliberately not integrated: seek, background-tab pauses and peers
-  // with different frame rates all resolve directly to the same current pose.
+  // Clock/route/phase stay absolute and seeded. Only bounded collision response
+  // can delay a body; there is no free-running per-peer velocity/random route.
   if (!Number.isFinite(now)) return;
   const seconds = DRAGON_TIME_ORIGIN * 0.001 + now * 0.001;
   const motion = DRAGON_MOTION_QUERY && DRAGON_MOTION_QUERY.matches ? 0.28 : 1;
   for (let i = 0; i < dragons.length; i++) {
     const dragon = dragons[i], o = dragon.orbit, parts = dragon.parts;
+    const ridingApi = (typeof BC !== 'undefined' && BC.api) ? BC.api.riding : null;
+    if (ridingApi && ((ridingApi.active && ridingApi.dragon === dragon) ||
+        (typeof ridingApi.occupied === 'function' && ridingApi.occupied(dragon)))) {
+      // An exclusive local/remote lease pauses this dragon's ambient orbit.
+      // 46-riding.js applies the actual ride transform once in lateFrame.
+      poseRiddenDragon(dragon, seconds);
+      dragon.motion.lastSeconds = seconds;
+      dragonSyncCollider(dragon);
+      if (dragon.tag) dragon.tag.visible = false;
+      continue;
+    }
     const angle = (seconds % o.period) / o.period * DRAGON_TAU * o.direction + dragon.phase;
     const c = Math.cos(angle), s = Math.sin(angle);
     const x = o.rx * c, z = o.rz * s;
@@ -394,9 +1067,12 @@ function updateDragons(dt, now) {
     const y = o.altitude + o.tiltX * c + o.tiltZ * s + 0.6 * Math.sin(altitudeWave) + 0.18 * drive * Math.cos(beat);
     const vy = o.omega * (-o.tiltX * s + o.tiltZ * c + 1.2 * Math.cos(altitudeWave));
     const pitch = Math.atan2(vy, speed);
-    dragon.group.position.set(o.cx + x * o.cos - z * o.sin, y, o.cz + x * o.sin + z * o.cos);
+    if (dragon.motion.ready) dragonSaveBodyPose(dragon);
+    dragon.motion.target.set(o.cx + x * o.cos - z * o.sin, y, o.cz + x * o.sin + z * o.cos);
     // Authored facing -Z, matching humanoids. YXZ keeps roll around flight heading.
-    dragon.group.rotation.set(pitch, Math.atan2(-worldVX, -worldVZ), bank * motion, 'YXZ');
+    // Collision-bearing poses are shared across peers. Reduced motion affects
+    // cosmetic wings/tail, never the route or a builder's solid-body clearance.
+    dragon.group.rotation.set(pitch, Math.atan2(-worldVX, -worldVZ), bank, 'YXZ');
 
     for (let wing = 0; wing < parts.wings.length; wing++) {
       const w = parts.wings[wing];
@@ -406,18 +1082,36 @@ function updateDragons(dt, now) {
       // Rotating only around this hinge preserves the membrane seam exactly.
       w.outer.rotation.z = -0.06 + motion * drive * 0.26 * Math.sin(beat - 0.72);
     }
-    parts.hips.rotation.y = -turnRate * 0.3 + motion * 0.025 * Math.sin(sway - 0.9);
-    parts.hips.rotation.x = -0.015 + motion * 0.018 * Math.sin(sway);
-    parts.neck[0].rotation.set(-0.035 + motion * 0.035 * Math.sin(sway + 0.8), turnRate * 0.38, -bank * motion * 0.16);
-    parts.neck[1].rotation.x = 0.1 + motion * 0.035 * Math.sin(sway + 0.35);
-    parts.neck[1].rotation.y = motion * 0.025 * Math.sin(sway);
-    parts.head.rotation.x = -0.1 - pitch * 0.25 + motion * 0.026 * Math.sin(sway - 0.25);
-    parts.head.rotation.y = motion * 0.04 * Math.sin(angle + dragon.phase);
-    parts.jaw.rotation.x = -0.035 - motion * 0.055 * (0.5 + 0.5 * Math.sin(cruise + 0.6));
+    parts.hips.rotation.y = -turnRate * 0.3 + 0.025 * Math.sin(sway - 0.9);
+    parts.hips.rotation.x = -0.015 + 0.018 * Math.sin(sway);
+    parts.neck[0].rotation.set(-0.035 + 0.035 * Math.sin(sway + 0.8), turnRate * 0.38, -bank * 0.16);
+    parts.neck[1].rotation.x = 0.1 + 0.035 * Math.sin(sway + 0.35);
+    parts.neck[1].rotation.y = 0.025 * Math.sin(sway);
+    parts.head.rotation.x = -0.1 - pitch * 0.25 + 0.026 * Math.sin(sway - 0.25);
+    parts.head.rotation.y = 0.04 * Math.sin(angle + dragon.phase);
+    parts.jaw.rotation.x = -0.035 - 0.055 * (0.5 + 0.5 * Math.sin(cruise + 0.6));
     for (let joint = 0; joint < parts.tail.length; joint++) {
       const tail = parts.tail[joint], follow = sway - joint * 0.55;
       tail.rotation.y = -turnRate * (0.16 + joint * 0.045) + motion * (0.045 + joint * 0.005) * Math.sin(follow);
       tail.rotation.x = -0.035 + motion * (0.025 * Math.sin(follow + 0.7) + drive * 0.012 * Math.sin(beat - joint * 0.5));
     }
+    if (!dragon.motion.ready) {
+      // Cold spawn only: the terrain/yard scan covers this entire body/route.
+      // All subsequent motion, including lease returns and tab resumes, sweeps.
+      dragon.group.position.copy(dragon.motion.target);
+      dragon.motion.ready = true;
+      dragon.motion.lastSeconds = seconds;
+      dragonSyncCollider(dragon);
+    } else dragonMoveAmbient(dragon, seconds);
+    if (dragon.tag && typeof camera !== 'undefined') {
+      const dx = camera.position.x - dragon.group.position.x;
+      const dy = camera.position.y - dragon.group.position.y;
+      const dz = camera.position.z - dragon.group.position.z;
+      dragon.tag.visible = !!dragon.rideable && dx * dx + dy * dy + dz * dz < 3600;
+    }
   }
+}
+
+if (typeof BC !== 'undefined' && typeof BC.on === 'function') {
+  BC.on('worldReset', dragonPruneSaddles, -30);
 }
