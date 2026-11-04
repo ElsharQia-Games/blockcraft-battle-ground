@@ -1180,7 +1180,9 @@ function attachAvatarGun(avatar, weaponId) {
   let g = u.combatGuns.get(weaponId);
   if (!g) { g = makeGunModel(weaponId); u.combatGuns.set(weaponId, g); }
   combatResetGunParts(g);
-  g.scale.setScalar(g.userData.heldScale);
+  // Slightly oversized in third person so the weapon reads clearly from the
+  // shoulder camera and to other players.
+  g.scale.setScalar(g.userData.heldScale * 1.12);
   g.userData.held = true;
   g.rotation.set(-Math.PI / 2, 0, 0);
   combatBindGrip(g);
@@ -1194,6 +1196,24 @@ function combatBindGrip(model) {
   combatGripTemp.copy(model.userData.grip).multiply(model.scale).applyQuaternion(model.quaternion);
   model.position.set(-combatGripTemp.x, -0.66 - combatGripTemp.y, -combatGripTemp.z);
 }
+
+/* How each weapon sits in the right arm. hip/ads: shoulder lift (radians,
+   added to camera pitch) at the ready and when aiming; roll/adsRoll: inward
+   arm roll that brings the grip to the body's centre line; kick: recoil
+   multiplier on the arm.
+   - Handguns are held out in a two-handed isosceles grip.
+   - Rifles, the shotgun and the sniper are tucked into the shoulder pocket.
+   - The SMG rides compact at the chest; the heavy LMG hangs at the hip
+     until aimed. */
+const COMBAT_HOLD_STANCES = {
+  pistol:   { hip: 1.40, ads: 1.52, roll: -0.40, adsRoll: -0.30, kick: 1.3 },
+  revolver: { hip: 1.38, ads: 1.54, roll: -0.42, adsRoll: -0.30, kick: 1.6 },
+  smg:      { hip: 1.18, ads: 1.32, roll: -0.78, adsRoll: -0.86, kick: 0.8 },
+  rifle:    { hip: 1.20, ads: 1.36, roll: -0.90, adsRoll: -0.98, kick: 1.0 },
+  shotgun:  { hip: 1.12, ads: 1.32, roll: -0.86, adsRoll: -0.96, kick: 1.4 },
+  sniper:   { hip: 1.16, ads: 1.40, roll: -0.94, adsRoll: -1.02, kick: 1.2 },
+  lmg:      { hip: 0.98, ads: 1.26, roll: -0.72, adsRoll: -0.90, kick: 0.9 }
+};
 
 const combatPoseEuler = new THREE.Euler(0, 0, 0, 'YXZ');
 const combatPoseQuat = new THREE.Quaternion();
@@ -1235,20 +1255,25 @@ function updateAvatarWeaponPose(avatar, state, dt) {
     parts.armR.rotation.x += (swing - parts.armR.rotation.x) * k;
     if (parts.armL) parts.armL.rotation.x += (-swing - parts.armL.rotation.x) * k;
   }
-  if (pose.weight < 0.001) return;
+  // Walking only drives the arms' X swing. Every weapon frame also writes Y/Z
+  // (and the support arm's full quaternion), so those must be blended
+  // ABSOLUTELY toward the relaxed pose. Blending relative to last frame left
+  // the right arm stuck diagonally in front after building, riding or death.
+  const right = parts.armR, free = 1 - pose.weight;
+  right.rotation.y *= free;
+  if (parts.armL) { parts.armL.rotation.y *= free; parts.armL.rotation.z *= free; }
+  if (pose.weight < 0.001) { right.rotation.z = 0; return; }
   const pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, Number.isFinite(state.pitch) ? state.pitch : 0));
   const rp = model.userData.reloadPose;
   const w = WEAPON_BY_ID[model.userData.weaponId] || WEAPONS[0];
   const recoil = reload < 0 ? combatClamp01(state.kick) * w.recoil * 0.75 : 0;
-  const right = parts.armR;
-  const handgun = w.id === 'pistol' || w.id === 'revolver';
-  // Bring the grip inward instead of fully extending a rifle at arm's length;
-  // the support hand can then reach its rear foregrip without stretched limbs.
-  const shoulder = handgun ? (state.aim ? 1.50 : 1.42) : (state.aim ? 1.35 : 1.20);
-  const targetR = shoulder + pitch + rp.pitch * 0.5 + recoil;
+  const stance = COMBAT_HOLD_STANCES[w.id] || COMBAT_HOLD_STANCES.rifle;
+  const aimBlend = state.aim ? 1 : 0;
+  const shoulder = stance.hip + (stance.ads - stance.hip) * aimBlend;
+  const roll = stance.roll + (stance.adsRoll - stance.roll) * aimBlend;
+  const targetR = shoulder + pitch + rp.pitch * 0.5 + recoil * stance.kick;
   right.rotation.x += (targetR - right.rotation.x) * pose.weight;
-  right.rotation.y *= 1 - pose.weight;
-  right.rotation.z += ((handgun ? -0.48 : -0.90) - right.rotation.z) * pose.weight;
+  right.rotation.z = roll * pose.weight;
   combatPoseQuat.setFromEuler(combatPoseEuler.set(pitch + rp.pitch + recoil, rp.yaw, rp.roll));
   combatPoseInverse.copy(right.quaternion).invert();
   model.quaternion.copy(combatPoseInverse).multiply(combatPoseQuat);
