@@ -195,7 +195,8 @@ function cleanText(value, fallback, max) {
 }
 
 function cleanCharacter(value) {
-  const allowed = ['steve', 'cj', 'mario', 'ashen', 'undead', 'wolf', 'tarnished'];
+  const allowed = ['steve', 'cj', 'mario', 'ashen', 'undead', 'wolf', 'tarnished', 'fayoum',
+    'seif', 'meedo', 'mko', 'mj', 'hokage', 'kestrel', 'oren', 'kratos', 'leon'];
   return allowed.includes(value) ? value : 'steve';
 }
 
@@ -204,6 +205,8 @@ function finite(value, fallback) {
 }
 
 function publicPlayer(client) {
+  const reload = serverReloadProgress(client);
+  const ready = client.combat && client.hp > 0 && reload < 0;
   return {
     id: client.id,
     name: client.name,
@@ -215,13 +218,92 @@ function publicPlayer(client) {
     pitch: client.pitch,
     weapon: client.weapon,
     hp: client.hp,
-    aim: client.aim
+    kills: client.kills,
+    deaths: client.deaths,
+    aim: ready ? client.aim : 0,
+    firing: ready ? client.firing : 0,
+    combat: client.combat,
+    build: client.build,
+    reload,
+    reloadTotal: client.reloadTotal,
+    reloadRounds: client.reloadRounds,
+    crouch: client.crouch,
+    slide: client.slide
   };
 }
 
-function cleanWeapon(value) {
-  const allowed = ['pistol', 'rifle', 'shotgun'];
-  return allowed.includes(value) ? value : 'pistol';
+// Match the classic-script weapon catalogue; the server has no browser imports.
+const SERVER_WEAPONS = {
+  pistol: { reload: 1.15, mag: 12, damage: 26 }, rifle: { reload: 1.85, mag: 30, damage: 17 },
+  shotgun: { reload: 2.35, mag: 6, damage: 10 }, smg: { reload: 1.45, mag: 32, damage: 12 },
+  sniper: { reload: 2.80, mag: 5, damage: 76 }, revolver: { reload: 2.40, mag: 6, damage: 46 },
+  lmg: { reload: 3.60, mag: 60, damage: 19 }
+};
+
+function cleanWeapon(value, fallback) {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(SERVER_WEAPONS, value) ? value : fallback || 'pistol';
+}
+
+function poseFlag(value, fallback) {
+  return value === true || value === 1 ? 1 : value === false || value === 0 ? 0 : fallback;
+}
+
+function poseNumber(value, fallback, min, max) {
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+function poseYaw(value, fallback) {
+  return Number.isFinite(value) ? Math.atan2(Math.sin(value), Math.cos(value)) : fallback;
+}
+
+function cleanVoxelHit(msg, by) {
+  if (!Number.isInteger(msg.x) || !Number.isInteger(msg.y) || !Number.isInteger(msg.z) ||
+      msg.x < 0 || msg.z < 0 || msg.x >= 256 || msg.z >= 256 || msg.y < 1 || msg.y >= 80 ||
+      !Number.isInteger(msg.block) || msg.block < 1 || msg.block > 22 || msg.block === 10 ||
+      typeof msg.weapon !== 'string' || !Object.prototype.hasOwnProperty.call(SERVER_WEAPONS, msg.weapon) ||
+      !Number.isFinite(msg.amount) || msg.amount <= 0 ||
+      typeof msg.hitId !== 'string' || !/^[\w.:-]{1,96}$/.test(msg.hitId)) return null;
+  return {
+    t: 'voxelHit', x: msg.x, y: msg.y, z: msg.z, block: msg.block, weapon: msg.weapon,
+    amount: Math.max(1, Math.floor(Math.min(SERVER_WEAPONS[msg.weapon].damage, msg.amount))), hitId: msg.hitId, by
+  };
+}
+
+function serverReloadProgress(client) {
+  if (!client.combat || client.hp <= 0 || client.reload < 0) return -1;
+  const p = client.reload + Math.max(0, Date.now() - client.reloadAt) / (client.reloadTotal * 1000);
+  if (p >= 1) { client.reload = -1; return -1; }
+  return Math.max(0, p);
+}
+
+function applyClientPose(client, msg) {
+  const weapon = cleanWeapon(msg.weapon, client.weapon);
+  if (weapon !== client.weapon) { client.reload = -1; client.firing = 0; }
+  client.weapon = weapon;
+  const w = SERVER_WEAPONS[weapon];
+  client.yaw = poseYaw(msg.yaw, client.yaw);
+  client.pitch = poseNumber(msg.pitch, client.pitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+  const oldHp = client.hp;
+  client.hp = poseNumber(msg.hp, client.hp, 0, 100);
+  if (oldHp <= 0 && client.hp > 0) client.deathReported = false;
+  client.kills = Math.max(client.kills, Math.floor(poseNumber(msg.kills, client.kills, 0, 999999)));
+  client.deaths = Math.max(client.deaths, Math.floor(poseNumber(msg.deaths, client.deaths, 0, 999999)));
+  const fallbackCombat = msg.build === undefined ? client.combat : 1 - poseFlag(msg.build, 1 - client.combat);
+  client.combat = poseFlag(msg.combat, fallbackCombat);
+  if (poseFlag(msg.build, 0)) client.combat = 0;
+  client.build = 1 - client.combat;
+  if (msg.reload !== undefined) {
+    client.reload = Number.isFinite(msg.reload) && msg.reload >= 0 ? Math.min(1, msg.reload) : -1;
+    client.reloadAt = Date.now();
+    client.reloadTotal = poseNumber(msg.reloadTotal, w.reload, 0.25, w.reload);
+    client.reloadRounds = Math.round(poseNumber(msg.reloadRounds, w.mag, 1, w.mag));
+  }
+  if (!client.combat || client.hp <= 0) client.reload = -1;
+  const ready = client.combat && client.hp > 0 && serverReloadProgress(client) < 0;
+  client.aim = ready ? poseFlag(msg.aim, client.aim) : 0;
+  client.firing = ready ? poseFlag(msg.firing, client.firing) : 0;
+  client.crouch = poseFlag(msg.crouch, client.crouch);
+  client.slide = poseFlag(msg.slide, client.slide);
 }
 
 function cleanId(value) {
@@ -243,11 +325,7 @@ function handleMessage(client, msg) {
     client.x = finite(msg.x, client.x);
     client.y = finite(msg.y, client.y);
     client.z = finite(msg.z, client.z);
-    client.yaw = finite(msg.yaw, client.yaw);
-    client.pitch = clampNumber(msg.pitch, client.pitch, -2, 2);
-    client.weapon = cleanWeapon(msg.weapon);
-    client.hp = clampNumber(msg.hp, client.hp, 0, 100);
-    client.aim = msg.aim ? 1 : 0;
+    applyClientPose(client, msg);
 
     sendJSON(client, {
       t: 'welcome',
@@ -264,27 +342,16 @@ function handleMessage(client, msg) {
     client.x = finite(msg.x, client.x);
     client.y = finite(msg.y, client.y);
     client.z = finite(msg.z, client.z);
-    client.yaw = finite(msg.yaw, client.yaw);
-    client.pitch = clampNumber(msg.pitch, client.pitch, -2, 2);
-    client.weapon = cleanWeapon(msg.weapon);
-    client.hp = clampNumber(msg.hp, client.hp, 0, 100);
-    client.aim = msg.aim ? 1 : 0;
+    applyClientPose(client, msg);
     if (typeof msg.name === 'string') client.name = cleanText(msg.name, client.name, 14);
     if (typeof msg.character === 'string') client.character = cleanCharacter(msg.character);
-    broadcast({
-      t: 'state',
-      id: client.id,
-      name: client.name,
-      character: client.character,
-      x: client.x,
-      y: client.y,
-      z: client.z,
-      yaw: client.yaw,
-      pitch: client.pitch,
-      weapon: client.weapon,
-      hp: client.hp,
-      aim: client.aim
-    }, client);
+    broadcast({ t: 'state', ...publicPlayer(client) }, client);
+    return;
+  }
+
+  if (msg.t === 'reload') {
+    applyClientPose(client, msg);
+    broadcast({ t: 'reload', ...publicPlayer(client) }, client);
     return;
   }
 
@@ -298,26 +365,38 @@ function handleMessage(client, msg) {
     return;
   }
 
+  if (msg.t === 'voxelHit') {
+    if (!client.combat || client.hp <= 0 || serverReloadProgress(client) >= 0) return;
+    const hit = cleanVoxelHit(msg, client.id);
+    if (hit) broadcast(hit, client);
+    return;
+  }
+
   if (msg.t === 'shot') {
+    applyClientPose(client, msg);
+    if (!client.combat || client.hp <= 0 || serverReloadProgress(client) >= 0) return;
     broadcast({
       t: 'shot',
       id: client.id,
-      weapon: cleanWeapon(msg.weapon),
+      weapon: client.weapon,
       x: finite(msg.x, client.x),
       y: finite(msg.y, client.y + 1.4),
-      z: finite(msg.z, client.z)
+      z: finite(msg.z, client.z),
+      yaw: client.yaw, pitch: client.pitch, aim: client.aim, firing: 1,
+      combat: client.combat, build: client.build, reload: -1
     }, client);
     return;
   }
 
   if (msg.t === 'hit') {
+    if (!client.combat || client.hp <= 0 || serverReloadProgress(client) >= 0) return;
     const target = clients.get(cleanId(msg.target));
     if (!target || target === client) return;
     sendJSON(target, {
       t: 'hit',
       target: target.id,
-      dmg: clampNumber(msg.dmg, 1, 1, 120),
-      head: msg.head ? 1 : 0,
+      dmg: poseNumber(msg.dmg, 1, 1, 120),
+      head: poseFlag(msg.head, 0),
       weapon: cleanWeapon(msg.weapon),
       byId: client.id,
       by: client.name
@@ -326,13 +405,24 @@ function handleMessage(client, msg) {
   }
 
   if (msg.t === 'died') {
+    if (client.deathReported) return;
+    client.deathReported = true;
+    client.deaths = Math.max(client.deaths, Math.floor(poseNumber(msg.deaths, client.deaths + 1, 0, 999999)));
+    client.kills = Math.max(client.kills, Math.floor(poseNumber(msg.kills, client.kills, 0, 999999)));
+    const killer = clients.get(cleanId(msg.byId));
+    if (killer && killer !== client) killer.kills = Math.min(999999, killer.kills + 1);
+    client.hp = 0;
+    client.reload = -1;
+    client.aim = client.firing = 0;
     broadcast({
       t: 'died',
       id: client.id,
       victim: client.name,
       by: cleanText(msg.by, '???', 14),
       byId: cleanId(msg.byId),
-      weapon: cleanWeapon(msg.weapon)
+      weapon: cleanWeapon(msg.weapon),
+      kills: client.kills, deaths: client.deaths,
+      killerKills: killer && killer !== client ? killer.kills : undefined
     }, client);
     return;
   }
@@ -341,22 +431,12 @@ function handleMessage(client, msg) {
     client.x = finite(msg.x, client.x);
     client.y = finite(msg.y, client.y);
     client.z = finite(msg.z, client.z);
-    client.hp = clampNumber(msg.hp, 100, 0, 100);
-    client.weapon = cleanWeapon(msg.weapon);
-    broadcast({
-      t: 'respawn',
-      id: client.id,
-      name: client.name,
-      character: client.character,
-      x: client.x,
-      y: client.y,
-      z: client.z,
-      yaw: client.yaw,
-      pitch: client.pitch,
-      weapon: client.weapon,
-      hp: client.hp,
-      aim: 0
-    }, client);
+    client.hp = poseNumber(msg.hp, 100, 1, 100);
+    applyClientPose(client, msg);
+    client.reload = -1;
+    client.aim = client.firing = 0;
+    client.deathReported = false;
+    broadcast({ t: 'respawn', ...publicPlayer(client) }, client);
   }
 }
 
@@ -394,7 +474,19 @@ server.on('upgrade', (req, socket) => {
     pitch: 0,
     weapon: 'pistol',
     hp: 100,
+    kills: 0,
+    deaths: 0,
+    deathReported: false,
     aim: 0,
+    firing: 0,
+    combat: 1,
+    build: 0,
+    reload: -1,
+    reloadAt: 0,
+    reloadTotal: SERVER_WEAPONS.pistol.reload,
+    reloadRounds: SERVER_WEAPONS.pistol.mag,
+    crouch: 0,
+    slide: 0,
     buffer: Buffer.alloc(0)
   };
   clients.set(client.id, client);

@@ -45,6 +45,10 @@ function randomRoom() {
 
 function netSend(msg) {
   if (!msg) return;
+  if (msg.t === 'voxelHit') {
+    msg = netVoxelHitMessage(msg, net.id);
+    if (!msg) return;
+  }
   if (net.mode === 'mqtt') {
     if (!mqtt.ws || mqtt.ws.readyState !== 1 || !mqtt.connected) return;
     if (msg.t === 'edit') {
@@ -107,11 +111,134 @@ function copyRoom() {
 }
 
 /* ---------------- shared world edits & remote avatars ---------------- */
+const netDirtyChunks = new Set();
+let netEditFlushHandle = null;
+let netEditFlushIsFrame = false;
+
+function flushNetEdits() {
+  if (netEditFlushHandle !== null) {
+    if (netEditFlushIsFrame) cancelAnimationFrame(netEditFlushHandle);
+    else clearTimeout(netEditFlushHandle);
+    netEditFlushHandle = null;
+  }
+  if (!netDirtyChunks.size) return;
+  // Voxel writes already happened. Deduplicate expensive terrain remeshes,
+  // including the adjacent chunk whose boundary face changed.
+  for (const key of netDirtyChunks) {
+    const [cx, cz] = key.split(',').map(Number);
+    rebuildChunk(cx, cz);
+  }
+  netDirtyChunks.clear();
+}
+
+function netQueueDirty(x, z) {
+  // Corner edits also affect the diagonal chunk's vertex ambient occlusion.
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+    const cx = Math.floor((x + dx) / CHUNK), cz = Math.floor((z + dz) / CHUNK);
+    if (cx >= 0 && cz >= 0 && cx < CHUNKS && cz < CHUNKS) netDirtyChunks.add(cx + ',' + cz);
+  }
+  if (netEditFlushHandle !== null) return;
+  // Also drain before the main loop starts, or while a menu pauses movement.
+  netEditFlushIsFrame = typeof requestAnimationFrame === 'function';
+  const run = () => { netEditFlushHandle = null; flushNetEdits(); };
+  netEditFlushHandle = netEditFlushIsFrame ? requestAnimationFrame(run) : setTimeout(run, 16);
+}
+
 function applyNetEdit(m) {
+  if (!m || !Number.isFinite(m.x) || !Number.isFinite(m.y) || !Number.isFinite(m.z) || !Number.isFinite(m.b)) return;
   const x = m.x | 0, y = m.y | 0, z = m.z | 0, b = m.b | 0;
-  if (x < 0 || z < 0 || x >= WORLD || z >= WORLD || y < 0 || y >= HEIGHT || b > 255) return;
+  if (x < 0 || z < 0 || x >= WORLD || z >= WORLD || y < 0 || y >= HEIGHT || b < 0 || b > 255) return;
+  if (getBlock(x, y, z) === b) return;
   setBlock(x, y, z, b);
-  markDirty(x, z);
+  netQueueDirty(x, z);
+}
+
+function netPoseFlag(value, fallback) {
+  return value === true || value === 1 ? 1 : value === false || value === 0 ? 0 : fallback;
+}
+
+function netPoseNumber(value, fallback, min, max) {
+  return Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+}
+
+function netPoseYaw(value, fallback) {
+  return Number.isFinite(value) ? Math.atan2(Math.sin(value), Math.cos(value)) : fallback;
+}
+
+function netPoseWeapon(value, fallback) {
+  return typeof value === 'string' && WEAPON_BY_ID[value] ? value : fallback || WEAPONS[0].id;
+}
+
+function netPoseReload(value) {
+  return Number.isFinite(value) && value >= 0 ? Math.min(1, value) : -1;
+}
+
+function netVoxelHitMessage(m, sender) {
+  if (!m || !Number.isInteger(m.x) || !Number.isInteger(m.y) || !Number.isInteger(m.z) ||
+      m.x < 0 || m.z < 0 || m.x >= WORLD || m.z >= WORLD || m.y < 1 || m.y >= HEIGHT ||
+      !Number.isInteger(m.block) || m.block < 1 || m.block > 22 || m.block === WATER ||
+      typeof m.weapon !== 'string' || !WEAPON_BY_ID[m.weapon] ||
+      !Number.isFinite(m.amount) || m.amount <= 0 ||
+      typeof m.hitId !== 'string' || !/^[\w.:-]{1,96}$/.test(m.hitId)) return null;
+  const by = sender || m.by;
+  if (typeof by !== 'string' || !/^[\w-]{1,40}$/.test(by)) return null;
+  return {
+    t: 'voxelHit', x: m.x, y: m.y, z: m.z, block: m.block, weapon: m.weapon,
+    amount: Math.max(1, Math.floor(Math.min(WEAPON_BY_ID[m.weapon].damage, m.amount))), hitId: m.hitId, by
+  };
+}
+
+function netRemoteReloadProgress(r, now) {
+  if (!r.combat || r.hp <= 0 || r.reload < 0) return -1;
+  const elapsed = Math.max(0, now - r.reloadAt) / 1000;
+  const p = r.reload + elapsed / r.reloadTotal;
+  if (p >= 1) { r.reload = -1; return -1; }
+  return Math.max(0, p);
+}
+
+function netSetRemoteWeapon(r, id) {
+  if (r.weapon === id) return;
+  r.weapon = id;
+  r.reload = -1;
+  r.kick = r.firePose = 0;
+  r.gun = attachAvatarGun(r.group, id);
+}
+
+function netApplyRemotePose(r, p) {
+  const w = WEAPON_BY_ID[r.weapon];
+  const oldHp = r.hp;
+  r.hp = netPoseNumber(p.hp, r.hp, 0, MAX_HEALTH);
+  if (oldHp <= 0 && r.hp > 0) r.deathNoted = false;
+  // State scores are absolute, never added to event-side increments. In MQTT a
+  // killer's state can beat another peer's died event; the next snapshot also
+  // corrects that ordering instead of permanently keeping an extra kill.
+  r.kills = Math.floor(netPoseNumber(p.kills, r.kills, 0, 999999));
+  r.deaths = Math.floor(netPoseNumber(p.deaths, r.deaths, 0, 999999));
+  const fallbackCombat = p.build === undefined ? r.combat : 1 - netPoseFlag(p.build, 1 - r.combat);
+  r.combat = netPoseFlag(p.combat, fallbackCombat);
+  if (netPoseFlag(p.build, 0)) r.combat = 0;
+  r.build = 1 - r.combat;
+  if (p.reload !== undefined) {
+    r.reload = netPoseReload(p.reload);
+    r.reloadAt = performance.now();
+    r.reloadTotal = netPoseNumber(p.reloadTotal, w.reload, 0.25, w.reload);
+    r.reloadRounds = Math.round(netPoseNumber(p.reloadRounds, w.mag, 1, w.mag));
+  }
+  if (!r.combat || r.hp <= 0) { r.reload = -1; r.firePose = r.kick = 0; }
+  const ready = r.combat && r.hp > 0 && netRemoteReloadProgress(r, performance.now()) < 0;
+  r.aim = ready ? netPoseFlag(p.aim, r.aim) : 0;
+  r.firing = ready ? netPoseFlag(p.firing, r.firing) : 0;
+  r.crouch = netPoseFlag(p.crouch, r.crouch);
+  r.slide = netPoseFlag(p.slide, r.slide);
+}
+
+function netRemotePoseState(r, now) {
+  return {
+    pitch: r.pitch, aim: r.aim, firing: r.firing || r.firePose > 0,
+    reload: netRemoteReloadProgress(r, now), reloadRounds: r.reloadRounds,
+    weapon: r.weapon, combat: r.combat, alive: r.hp > 0 && !(r.deadUntil > now),
+    kick: r.kick, crouch: r.crouch, slide: r.slide
+  };
 }
 
 function removeRemote(id) {
@@ -124,14 +251,18 @@ function removeRemote(id) {
 }
 
 function addRemote(p) {
-  if (!p || !p.id || p.id === net.id) return;
-  const incomingChar = p.character || 'steve';
-  const incomingName = p.name || 'Player';
+  if (!p || typeof p.id !== 'string' || !/^[\w-]{1,40}$/.test(p.id) || p.id === net.id) return;
   const existing = net.players.get(p.id);
+  const incomingChar = typeof p.character === 'string' && Object.prototype.hasOwnProperty.call(CHARACTERS, p.character)
+    ? p.character : existing ? existing.character : 'steve';
+  const incomingName = typeof p.name === 'string' ? safeName(p.name) : existing ? existing.name : 'Player';
   if (existing && (existing.character !== incomingChar || existing.name !== incomingName)) {
+    const seen = mqtt.peerSeen.get(p.id);
     removeRemote(p.id);
+    if (seen) mqtt.peerSeen.set(p.id, seen);
   }
   let r = net.players.get(p.id);
+  let added = false;
   if (!r) {
     const group = makeHumanoid(incomingChar, incomingName);
     const x = Number.isFinite(p.x) ? p.x : WORLD / 2;
@@ -142,28 +273,28 @@ function addRemote(p) {
     r = {
       id: p.id, name: incomingName, character: incomingChar,
       group, x, y, z, tx: x, ty: y, tz: z,
-      yaw: Number.isFinite(p.yaw) ? p.yaw : 0,
-      tyaw: Number.isFinite(p.yaw) ? p.yaw : 0,
+      yaw: netPoseYaw(p.yaw, 0),
+      tyaw: netPoseYaw(p.yaw, 0),
       pitch: 0, tpitch: 0,
       phase: 0, speed: 0, weapon: 'pistol', hp: 100,
-      aim: 0, deadUntil: 0, gun: null
+      aim: 0, deadUntil: 0, gun: null, combat: 1, build: 0, firing: 0,
+      firePose: 0, kick: 0, reload: -1, reloadAt: 0, reloadTotal: WEAPONS[0].reload,
+      reloadRounds: WEAPONS[0].mag, crouch: 0, slide: 0, stance: 0, slidePose: 0,
+      kills: 0, deaths: 0, deathNoted: false
     };
     net.players.set(p.id, r);
     r.gun = attachAvatarGun(group, r.weapon);
+    added = true;
   }
   if (Number.isFinite(p.x)) r.tx = p.x;
   if (Number.isFinite(p.y)) r.ty = p.y;
   if (Number.isFinite(p.z)) r.tz = p.z;
-  if (Number.isFinite(p.yaw)) r.tyaw = p.yaw;
-  if (Number.isFinite(p.pitch)) r.tpitch = p.pitch;
-  if (typeof p.weapon === 'string' && WEAPON_BY_ID[p.weapon] && r.weapon !== p.weapon) {
-    r.weapon = p.weapon;
-    r.gun = attachAvatarGun(r.group, r.weapon);
-  }
-  if (Number.isFinite(p.hp)) r.hp = p.hp;
-  r.aim = p.aim ? 1 : 0;
+  r.tyaw = netPoseYaw(p.yaw, r.tyaw);
+  r.tpitch = netPoseNumber(p.pitch, r.tpitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+  netSetRemoteWeapon(r, netPoseWeapon(p.weapon, r.weapon));
+  netApplyRemotePose(r, p);
   r.name = incomingName;
-  updateRoomBadge();
+  if (added) updateRoomBadge();
 }
 
 function handleNet(msg) {
@@ -174,7 +305,7 @@ function handleNet(msg) {
       net.id = msg.id;
       net.online = true;
       net.attempts = 0;
-      net.players.clear();
+      for (const id of [...net.players.keys()]) removeRemote(id);
       for (const p of (msg.players || [])) addRemote(p);
       for (const e of (msg.edits || [])) applyNetEdit(e);
       if (!net.warned) toast('Connected — ' + netPlayerCount() + ' player(s) online');
@@ -196,46 +327,91 @@ function handleNet(msg) {
     case 'edit':
       applyNetEdit(msg);
       break;
-    case 'hit':
-      if (msg.target === net.id) applyDamage(msg.dmg, msg.by, !!msg.head, msg.byId);
+    case 'voxelHit': {
+      const hit = netVoxelHitMessage(msg, msg.id || msg.by);
+      if (hit && hit.by !== net.id && typeof applyVoxelDamage === 'function') applyVoxelDamage(hit);
       break;
+    }
+    case 'hit':
+      if (msg.target === net.id) applyDamage(netPoseNumber(msg.dmg, 1, 1, 120), msg.by, !!netPoseFlag(msg.head, 0), msg.byId);
+      break;
+    case 'reload': {
+      if (msg.id === net.id) break;
+      addRemote(msg);
+      const r = net.players.get(msg.id);
+      if (r) updateAvatarWeaponPose(r.group, netRemotePoseState(r, performance.now()), 0);
+      break;
+    }
     case 'shot': {
       if (msg.id === net.id) break;
       const r = net.players.get(msg.id);
-      if (!r) break;
+      if (!r || r.hp <= 0 || r.deadUntil > performance.now()) break;
+      if (netPoseFlag(msg.build, r.build) || !netPoseFlag(msg.combat, r.combat)) break;
+      netSetRemoteWeapon(r, netPoseWeapon(msg.weapon, r.weapon));
+      r.combat = 1;
+      r.build = 0;
+      r.pitch = r.tpitch = netPoseNumber(msg.pitch, r.tpitch, -Math.PI / 2 + 0.02, Math.PI / 2 - 0.02);
+      r.yaw = r.tyaw = netPoseYaw(msg.yaw, r.tyaw);
+      r.group.rotation.y = r.yaw;
+      r.aim = netPoseFlag(msg.aim, r.aim);
+      r.reload = -1;
+      r.firePose = r.kick = 1;
+      updateAvatarWeaponPose(r.group, netRemotePoseState(r, performance.now()), 0);
+      r.group.updateWorldMatrix(true, true);
       const pos = new THREE.Vector3();
       if (r.group.userData.gun) r.group.userData.gun.userData.muzzle.getWorldPosition(pos);
       else pos.set(r.x, r.y + 1.4, r.z);
       remoteMuzzle(pos);
       const dist = pos.distanceTo(camera.position);
       if (dist < 75) {
-        const w = WEAPON_BY_ID[msg.weapon] || WEAPONS[0];
+        const w = WEAPON_BY_ID[r.weapon];
         playShot(w, Math.max(0.05, 1 - dist / 75) * 0.95);
       }
       break;
     }
-    case 'died':
+    case 'died': {
       if (msg.id === net.id) break; // already handled locally
+      const victim = net.players.get(msg.id);
+      const firstDeath = !victim || !victim.deathNoted;
+      if (victim) {
+        const count = Math.floor(netPoseNumber(msg.deaths, victim.deaths + (firstDeath ? 1 : 0), 0, 999999));
+        victim.deaths = Math.max(victim.deaths, count);
+        victim.kills = Math.max(victim.kills, Math.floor(netPoseNumber(msg.kills, victim.kills, 0, 999999)));
+        victim.deathNoted = true;
+      }
+      if (!firstDeath) break;
       if (msg.byId && msg.byId === net.id) {
-        kills++;
+        kills = Math.max(kills, Math.floor(netPoseNumber(msg.killerKills, kills + 1, 0, 999999)));
         setKd();
         toast('You eliminated ' + safeName(msg.victim));
         playTone(880, 0.08, 'triangle', 0.08);
+      } else if (msg.byId && msg.byId !== msg.id) {
+        const killer = net.players.get(msg.byId);
+        if (killer) killer.kills = Math.max(killer.kills, Math.floor(netPoseNumber(msg.killerKills, killer.kills + 1, 0, 999999)));
       }
       addKillFeed(msg.by, msg.victim);
       {
         const r = net.players.get(msg.id);
         if (r) {
           r.deadUntil = performance.now() + 3300;
+          r.hp = 0;
+          r.reload = -1;
+          r.firePose = r.kick = r.firing = 0;
+          updateAvatarWeaponPose(r.group, netRemotePoseState(r, performance.now()), 0);
           r.group.visible = false;
         }
       }
       break;
+    }
     case 'respawn': {
       if (msg.id === net.id) break;
       const r = net.players.get(msg.id);
       if (r) {
         r.deadUntil = 0;
+        r.deathNoted = false;
+        r.hp = netPoseNumber(msg.hp, MAX_HEALTH, 1, MAX_HEALTH);
+        r.reload = -1;
+        r.firePose = r.kick = r.firing = r.aim = 0;
         r.group.visible = true;
         if (Number.isFinite(msg.x)) { r.x = r.tx = msg.x; }
         if (Number.isFinite(msg.y)) { r.y = r.ty = msg.y; }
@@ -267,11 +443,7 @@ function connectNet() {
 
   ws.onopen = () => {
     net.attempts = 0;
-    netSend({
-      t: 'join', name: playerName, character: charKey,
-      x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw,
-      pitch: player.pitch, weapon: currentWeapon().id, hp: health, aim: 0
-    });
+    netSend(combatNetState('join'));
   };
   ws.onmessage = (ev) => {
     try { handleNet(JSON.parse(ev.data)); } catch (e) { /* ignore bad frames */ }
@@ -457,11 +629,7 @@ function mqttOnSuback(body) {
   mqtt.fails = 0;
   mqttStartTimers();
   updateRoomBadge();
-  const join = {
-    t: 'join', id: mqtt.clientId, name: playerName, character: charKey,
-    x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw,
-    pitch: player.pitch, weapon: currentWeapon().id, hp: health, aim: gun.aiming ? 1 : 0
-  };
+  const join = { ...combatNetState('join'), id: mqtt.clientId };
   mqttPublish('blockcraft/' + mqtt.room + '/msg/' + mqtt.clientId, JSON.stringify(join), false);
   net.lastSent = 0;
   if (!net.warned) toast('Online — room ' + mqtt.room + ' · share the code');
@@ -505,10 +673,15 @@ function mqttHandlePublish(first, body) {
 
   if (parts[2] !== 'msg') return;
   const from = parts[3] || '';
+  if (!/^[\w-]{1,40}$/.test(from)) return;
   let msg;
   try { msg = JSON.parse(payload); } catch (e) { return; }
   if (!msg || typeof msg !== 'object') return;
-  if (!msg.id) msg.id = from;
+  // WS assigns identity at the connection; MQTT assigns it at the peer topic.
+  msg.id = from;
+  if (msg.t === 'join' && msg.player && typeof msg.player === 'object') msg.player.id = from;
+  if (msg.t === 'hit') msg.byId = from;
+  if (msg.t === 'voxelHit') msg.by = from;
   if (from && from !== mqtt.clientId) mqtt.peerSeen.set(from, Date.now());
   handleNet(msg);
 }
@@ -630,30 +803,29 @@ function sendNetState(now) {
   } else if (!net.ws || net.ws.readyState !== 1) return;
   if (now - net.lastSent < 90) return;
   net.lastSent = now;
-  netSend({
-    t: 'state', x: player.pos.x, y: player.pos.y, z: player.pos.z,
-    yaw: player.yaw, pitch: player.pitch, character: charKey, name: playerName,
-    weapon: currentWeapon().id, hp: health, aim: gun.aiming ? 1 : 0
-  });
+  netSend(combatNetState());
 }
 
 function updateNetPlayers(dt) {
+  flushNetEdits();
+  dt = Math.max(0, Number.isFinite(dt) ? dt : 0);
   const now = performance.now();
   for (const r of net.players.values()) {
-    const dead = r.deadUntil && r.deadUntil > now;
-    if (r.deadUntil && !dead) { r.deadUntil = 0; r.group.visible = true; }
+    const dead = r.hp <= 0 || r.deadUntil > now;
+    if (r.deadUntil && r.deadUntil <= now) r.deadUntil = 0;
+    r.group.visible = !dead;
 
-    const k = Math.min(1, dt * 9);
+    const k = combatDamp(12, dt);
     const dx = r.tx - r.x, dz = r.tz - r.z;
     const dist = Math.hypot(dx, dz);
     r.x += dx * k;
     r.z += dz * k;
-    r.y += (r.ty - r.y) * Math.min(1, dt * 6);
-    let dy = r.tyaw - r.yaw;
-    while (dy > Math.PI) dy -= Math.PI * 2;
-    while (dy < -Math.PI) dy += Math.PI * 2;
-    r.yaw += dy * Math.min(1, dt * 8);
-    r.pitch += (r.tpitch - r.pitch) * Math.min(1, dt * 9);
+    r.y += (r.ty - r.y) * combatDamp(12, dt);
+    const dy = Math.atan2(Math.sin(r.tyaw - r.yaw), Math.cos(r.tyaw - r.yaw));
+    r.yaw += dy * combatDamp(16, dt);
+    r.pitch += (r.tpitch - r.pitch) * combatDamp(18, dt);
+    r.firePose = Math.max(0, r.firePose - dt * 3.5);
+    r.kick *= Math.exp(-WEAPON_BY_ID[r.weapon].recover * dt);
     r.speed = dist / Math.max(dt, 0.0001);
     if (dist > 0.02) r.phase += dt * 9;
 
@@ -665,19 +837,27 @@ function updateNetPlayers(dt) {
     const parts = r.group.userData.parts;
     if (parts) {
       const moving = r.speed > 0.6;
-      const swing = Math.sin(r.phase) * (moving ? 0.75 : 0);
-      const aiming = r.aim > 0.5;
-      const hk = Math.min(1, dt * 12);
-      parts.legL.rotation.x += (swing - parts.legL.rotation.x) * hk;
-      parts.legR.rotation.x += (-swing - parts.legR.rotation.x) * hk;
-      const targetL = aiming ? Math.PI / 2 - 0.16 : -swing * 0.8;
-      const targetR = aiming ? Math.PI / 2 - 0.05 : swing * 0.8;
-      parts.armL.rotation.x += (targetL - parts.armL.rotation.x) * hk;
-      parts.armR.rotation.x += (targetR - parts.armR.rotation.x) * hk;
-      const pitchTarget = Math.max(-0.75, Math.min(0.75, -r.pitch * 0.6));
-      parts.head.rotation.x += (pitchTarget - parts.head.rotation.x) * Math.min(1, dt * 10);
+      r.stance += (r.crouch - r.stance) * combatDamp(15, dt);
+      r.slidePose += (r.slide - r.slidePose) * combatDamp(15, dt);
+      const swing = Math.sin(r.phase) * (moving ? 0.75 : 0) * (1 - r.slidePose);
+      const hk = combatDamp(12, dt);
+      parts.legL.rotation.x += (swing + r.stance * 0.16 - r.slidePose * 0.72 - parts.legL.rotation.x) * hk;
+      parts.legR.rotation.x += (-swing + r.stance * 0.16 + r.slidePose * 0.42 - parts.legR.rotation.x) * hk;
+      parts.armL.rotation.x += (-swing * 0.8 - parts.armL.rotation.x) * hk;
+      parts.armR.rotation.x += (swing * 0.8 - parts.armR.rotation.x) * hk;
+      // Mirror 50's visual stance only; r.y and the fixed gameplay hitboxes stay
+      // unchanged for crouching/sliding peers.
+      const drop = r.stance * 0.12 + r.slidePose * 0.12;
+      parts.head.position.y = 1.34 - drop;
+      parts.armL.position.y = parts.armR.position.y = 1.3 - drop;
+      if (parts.torso) {
+        parts.torso.position.y = 0.72 - drop * 0.65;
+        parts.torso.rotation.x += (-r.stance * 0.16 + r.slidePose * 0.22 - parts.torso.rotation.x) * hk;
+      }
+      const pitchTarget = Math.max(-0.75, Math.min(0.75, r.pitch * 0.6));
+      parts.head.rotation.x += (pitchTarget - parts.head.rotation.x) * combatDamp(14, dt);
     }
-    if (r.gun) r.gun.visible = !dead;
+    updateAvatarWeaponPose(r.group, netRemotePoseState(r, now), dt);
     if (r.group.userData.tag) {
       const dxp = r.x - player.pos.x, dzp = r.z - player.pos.z;
       r.group.userData.tag.visible = !dead && (dxp * dxp + dzp * dzp) < 36 * 36;
@@ -726,10 +906,6 @@ window.addEventListener('pagehide', () => {
 window.__netEdit = (x, y, z, b) => netSend({ t: 'edit', x, y, z, b });
 window.__netIdentity = () => {
   if (!net.online) return;
-  netSend({
-    t: 'join', id: net.id, name: playerName, character: charKey,
-    x: player.pos.x, y: player.pos.y, z: player.pos.z, yaw: player.yaw,
-    pitch: player.pitch, weapon: currentWeapon().id, hp: health, aim: gun.aiming ? 1 : 0
-  });
+  netSend({ ...combatNetState('join'), id: net.id });
 };
 if (window.__netRoom === undefined) window.__netRoom = startOnline;
