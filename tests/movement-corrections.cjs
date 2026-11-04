@@ -46,8 +46,8 @@ function jumpAndWaterProbe() {
             b.setBlock(x, surface - 4, z, k.api('STONE'));
             for (let y = surface - 3; y < surface; y++) b.setBlock(x, y, z, k.api('WATER'));
           }
-          for (let z = bankZ - 3; z <= bankZ; z++) b.setBlock(x, surface, z, k.api('STONE'));
-          if (roof) for (let z = bankZ - 3; z <= bankZ + 6; z++) b.setBlock(x, surface + 2, z, k.api('STONE'));
+          for (let z = bankZ - 7; z <= bankZ; z++) b.setBlock(x, surface, z, k.api('STONE'));
+          if (roof) for (let z = bankZ - 7; z <= bankZ + 6; z++) b.setBlock(x, surface + 2, z, k.api('STONE'));
         }
         b.player.pos.set(site.x, surface - 1.2, bankZ + 4.5);
         b.player.vel.set(0, 0, 0); b.player.onGround = false; b.player.fly = false;

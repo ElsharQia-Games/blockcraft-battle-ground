@@ -5,16 +5,18 @@
 /* ---------------- player physics ---------------- */
 const PW = 0.3;      // half width
 const PH = 1.8;      // height
-const GRAVITY = 30;
+const BASE_GRAVITY = 30;
 const JUMP_V = 10.4; // ~1.80-2.00 m quick tap; ~2.90 m with the bounded hold below
 const PLAYER_JUMP_HOLD_TIME = 0.20;
 const PLAYER_JUMP_HOLD_DELAY = 0.02; // keep a short tap near its normal trajectory
 const PLAYER_JUMP_HOLD_GRAVITY = 0.32;
 const PLAYER_UPWARD_CAP = Math.min(17.5, JUMP_V * 1.15);
 const PLAYER_WATER_JUMP_DEPTH = 0.3;
-const WALK = 4.6;
-const SPRINT = 7.3;
-const SNEAK = 3.1;
+// Arena-shooter pacing: quick to top speed, fast sprint, strong slides and
+// real air strafing. Jump apex is unchanged so ramps and builds still line up.
+const WALK = 5.4;
+const SPRINT = 8.7;
+const SNEAK = 3.4;
 const FLY = 14;
 const REACH = 6.5;
 const FLOATING_BLOCK_DISTANCE = 3.5;
@@ -23,16 +25,17 @@ const JUMP_BUFFER = 0.12;
 const COYOTE_TIME = 0.09;
 const PLAYER_STEP = 1 / 120;
 const PLAYER_WATER_SPEED = WALK * 0.92;
-const PLAYER_AIR_ACCEL = 3.2;
-const PLAYER_FALL_GRAVITY = 1.28;
+const PLAYER_AIR_ACCEL = 6.5;
+const PLAYER_FALL_GRAVITY = 1.45;
 const PLAYER_CROUCH_HEIGHT = 1.2;
 const PLAYER_STANCE_DROP = 0.5;
 const PLAYER_JUMP_CLEARANCE = 0.06;
-const PLAYER_SLIDE_TIME = 0.8;
-const PLAYER_SLIDE_SPEED = 11.8;
-const PLAYER_SLIDE_END_SPEED = 11;
-const PLAYER_SLIDE_COOLDOWN = 1.35;
-const PLAYER_MOMENTUM_CAP = 12;
+const PLAYER_SLIDE_TIME = 0.85;
+const PLAYER_SLIDE_SPEED = 13.6;
+const PLAYER_SLIDE_END_SPEED = 10.4;
+const PLAYER_SLIDE_COOLDOWN = 0.9;
+const PLAYER_MOMENTUM_CAP = 14;
+const PLAYER_SLIDE_HOP = 1.08; // jumping out of a slide keeps and slightly boosts momentum
 // Keep even a full-tank ascent (and the standing head) inside the relay's
 // 120-block vertical envelope rather than triggering server corrections.
 const PLAYER_FLIGHT_CEILING = HEIGHT + 38;
@@ -583,8 +586,18 @@ function playerGravity(dt, gravity, terminal) {
   return start * fallTime - 0.5 * gravity * fallTime * fallTime - terminal * (dt - fallTime);
 }
 
+// Match modes may scale gravity (Low Gravity). Jumps get higher and floatier.
+function playerModeGravity() {
+  try {
+    const def = BC.api && BC.api.modes && BC.api.modes.activeDef;
+    const g = def && Number(def.gravity);
+    return g > 0.1 && g <= 2 ? g : 1;
+  } catch (e) { return 1; }
+}
+
 function playerJumpGravity(dt) {
   const m = playerMotion;
+  const GRAVITY = BASE_GRAVITY * playerModeGravity();
   // Only the consumed ground jump owns this window. Releasing Space, hitting
   // a roof or switching to flight/swimming cannot renew it in mid-air.
   if (!keys['Space'] || player.fly || player.swimming || player.vel.y <= 0) m.jumpHold = 0;
@@ -603,6 +616,7 @@ function playerJumpGravity(dt) {
 function consumePlayerJump() {
   if (!playerCanStand(PLAYER_JUMP_CLEARANCE)) return false;
   const carry = player.sliding || playerMotion.slideTime > 0 || playerMotion.airCarry > WALK;
+  if (player.sliding || playerMotion.slideTime > 0) { player.vel.x *= PLAYER_SLIDE_HOP; player.vel.z *= PLAYER_SLIDE_HOP; }
   playerCapHorizontal(PLAYER_MOMENTUM_CAP);
   playerMotion.airCarry = carry ? Math.hypot(player.vel.x, player.vel.z) : 0;
   playerMotion.waterJump = playerWet;
@@ -824,7 +838,7 @@ function updatePlayer(dt) {
     }
     const reversing = v.x * wx + v.z * wz < -0.1;
     const rate = player.sliding ? 14 : player.fly ? (player.dashing ? 16 : 11) : inWater ? 18
-      : player.onGround ? (!inputLength || reversing || crouch ? 30 : 22)
+      : player.onGround ? (!inputLength || reversing || crouch ? 40 : 34)
         : (inputLength ? PLAYER_AIR_ACCEL : m.airCarry > WALK ? 0.35 : 1.5);
     const k = playerAlpha(rate, h);
     // Integrate exponential damping analytically, including distance travelled.
