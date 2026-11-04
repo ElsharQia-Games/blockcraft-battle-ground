@@ -11,7 +11,7 @@ const PLAYER_JUMP_HOLD_TIME = 0.20;
 const PLAYER_JUMP_HOLD_DELAY = 0.02; // keep a short tap near its normal trajectory
 const PLAYER_JUMP_HOLD_GRAVITY = 0.32;
 const PLAYER_UPWARD_CAP = Math.min(17.5, JUMP_V * 1.15);
-const PLAYER_WATER_EXIT_V = 10.4;
+const PLAYER_WATER_JUMP_DEPTH = 0.3;
 const WALK = 4.6;
 const SPRINT = 7.3;
 const SNEAK = 3.1;
@@ -22,7 +22,7 @@ const PLAYER_EPS = 0.00001;
 const JUMP_BUFFER = 0.12;
 const COYOTE_TIME = 0.09;
 const PLAYER_STEP = 1 / 120;
-const PLAYER_WATER_SPEED = WALK * 0.68;
+const PLAYER_WATER_SPEED = WALK * 0.92;
 const PLAYER_AIR_ACCEL = 3.2;
 const PLAYER_FALL_GRAVITY = 1.28;
 const PLAYER_CROUCH_HEIGHT = 1.2;
@@ -227,6 +227,7 @@ const isSolidPoint = (x, y, z) => {
   return b !== AIR && b !== WATER;
 };
 const playerCameraCollisionBox = { x: 0, y: 0, z: 0, w: 0.18, h: 0.36, ignoreDragonIndex: -1 };
+const playerCameraAimTarget = new THREE.Vector3();
 
 function playerIgnoredDragonIndex() {
   const riding = BC.api && BC.api.riding;
@@ -372,7 +373,8 @@ function updateCamera(dt = 1 / 60) {
 
   // Normal third person is over the right shoulder. Sweep the entire offset,
   // including its lateral/vertical framing, rather than adding it after collision.
-  // Follow the actual body, never its gait bob. The view direction is always raw.
+   // Follow the actual body, never its gait bob. Mouse angles stay raw; only
+   // steep downward viewing gets a parallax solve AFTER this shoulder sweep.
   const ox = -fx * 2.7 + Math.cos(player.yaw) * 0.68;
   const oy = -fy * 2.7 + 0.22;
   const oz = -fz * 2.7 - Math.sin(player.yaw) * 0.68;
@@ -414,6 +416,28 @@ function updateCamera(dt = 1 / 60) {
   player.cameraDistance = m.cameraDistance;
   camera.position.set(player.pos.x + dx * m.cameraDistance, eyeY + dy * m.cameraDistance, player.pos.z + dz * m.cameraDistance);
   camera.rotation.set(player.pitch, player.yaw, 0);
+  const groundMarker = BC.api && BC.api.groundMarker;
+  if (thirdPerson && !scoped && player.pitch < -Math.PI / 4 && m.cameraDistance > 0.01 && groundMarker) {
+    const ground = groundMarker.surfaceAt(player.pos.x, player.pos.y, player.pos.z, false);
+    if (ground && ground.y < eyeY - 0.05) {
+      // Keep the camera physically on the shoulder. Converge its centre ray
+      // toward an eye-centred ground target instead of moving the camera or
+      // painting a false crosshair. At ~83 degrees down the target is exactly
+      // beneath the feet, despite the lateral shoulder offset. Shooting and
+      // building already consume this same camera ray, so they stay aligned.
+      const t = Math.max(0, Math.min(1, (-player.pitch - Math.PI / 4) / (Math.PI * 0.46 - Math.PI / 4)));
+      const weight = t * t * (3 - 2 * t);
+      const floorY = ground.y;
+      const cameraReach = (camera.position.y - floorY) / -fy;
+      const eyeReach = (eyeY - floorY) / -fy;
+      const aimX = player.pos.x + fx * eyeReach * (1 - weight);
+      const aimZ = player.pos.z + fz * eyeReach * (1 - weight);
+      playerCameraAimTarget.set(camera.position.x + fx * cameraReach, floorY, camera.position.z + fz * cameraReach);
+      playerCameraAimTarget.x += (aimX - playerCameraAimTarget.x) * weight;
+      playerCameraAimTarget.z += (aimZ - playerCameraAimTarget.z) * weight;
+      camera.lookAt(playerCameraAimTarget);
+    }
+  }
   camera.updateMatrixWorld(true);
   if (localAvatar) localAvatar.visible = playerAvatarCameraVisible(scoped);
 }
@@ -751,16 +775,12 @@ function updatePlayer(dt) {
     if (player.fly) {
       m.jumpHold = 0;
       m.waterJump = m.waterExitLock = false;
-    } else if (inWater && !player.onGround && !m.waterJump && !m.waterExitLock && space && inputLength > 0 &&
-        phys && typeof phys.playerWaterExitHeight === 'function' &&
-        Number.isFinite(phys.playerWaterExitHeight(wx, wz, surface))) {
-      // This is one finite surface pop toward a verified 0/1-block bank, not
-      // repeated Space jumps. The body still travels through ordinary sweeps.
-      m.waterExitLock = m.waterJump = m.crouchJumpLock = true;
-      m.jumpHold = m.jumpBuffer = m.coyote = m.slideTime = 0;
-      player.bodyHeight = PH;
-      player.crouching = player.sliding = false;
-      v.y = PLAYER_WATER_EXIT_V;
+    } else if (inWater && !player.onGround && !m.waterJump && !m.waterExitLock && space &&
+        Number.isFinite(surface) && waterDepth <= PLAYER_WATER_JUMP_DEPTH && v.y >= -0.4) {
+      // Space at the surface uses the SAME jump as land, including its bounded
+      // hold window. It is not locked to a nearby bank. Holding swim-up from
+      // depth may launch once on reaching the surface; release before repeating.
+      if (consumePlayerJump()) m.waterExitLock = true;
     }
     player.swimming = inWater && !player.fly && !wading && !m.waterJump;
 
@@ -803,7 +823,7 @@ function updatePlayer(dt) {
       tx = jet.dashX * jet.dashSpeed; tz = jet.dashZ * jet.dashSpeed;
     }
     const reversing = v.x * wx + v.z * wz < -0.1;
-    const rate = player.sliding ? 14 : player.fly ? (player.dashing ? 16 : 11) : inWater ? 6
+    const rate = player.sliding ? 14 : player.fly ? (player.dashing ? 16 : 11) : inWater ? 18
       : player.onGround ? (!inputLength || reversing || crouch ? 30 : 22)
         : (inputLength ? PLAYER_AIR_ACCEL : m.airCarry > WALK ? 0.35 : 1.5);
     const k = playerAlpha(rate, h);
@@ -825,7 +845,7 @@ function updatePlayer(dt) {
       my = targetY * h + (v.y - targetY) * ky / 11;
       v.y += (targetY - v.y) * ky;
     } else if (inWater && m.waterJump) {
-      // A supported wading jump or verified surface exit is not a swim stroke.
+      // A supported wading jump or normal surface jump is not a swim stroke.
       // Keep its finite rising impulse instead of capping it back to 4 m/s in
       // the next slice; descending/re-entering water restores normal buoyancy.
       my = playerJumpGravity(h);
