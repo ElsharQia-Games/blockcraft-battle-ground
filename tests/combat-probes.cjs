@@ -155,7 +155,7 @@ function scopeProbe() {
       const offset = b.camera.position.clone().sub(eye());
       const right = offset.dot(new b.THREE.Vector3(Math.cos(yaw), 0, -Math.sin(yaw)));
       const back = -offset.dot(b.camera.getWorldDirection(new b.THREE.Vector3()));
-      check(right > 0.45 && right < 0.85 && back > 2.3 && back < 3.25, 'Normal TP is not the revised right-shoulder view', { yaw, right, back });
+      check(right > 0.9 && right < 1.35 && back > 2.8 && back < 3.8, 'Normal TP is not the revised right-shoulder view', { yaw, right, back });
       shoulder.push({ yaw, right, back });
     }
     const zoom = [];

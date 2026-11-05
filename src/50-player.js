@@ -378,9 +378,11 @@ function updateCamera(dt = 1 / 60) {
   // including its lateral/vertical framing, rather than adding it after collision.
    // Follow the actual body, never its gait bob. Mouse angles stay raw; only
    // steep downward viewing gets a parallax solve AFTER this shoulder sweep.
-  const ox = -fx * 2.7 + Math.cos(player.yaw) * 0.68;
-  const oy = -fy * 2.7 + 0.22;
-  const oz = -fz * 2.7 - Math.sin(player.yaw) * 0.68;
+  // Far enough right and high enough that the held weapon and right arm stay
+  // in view instead of hiding behind the torso.
+  const ox = -fx * 3.4 + Math.cos(player.yaw) * 1.15;
+  const oy = -fy * 3.4 + 0.35;
+  const oz = -fz * 3.4 - Math.sin(player.yaw) * 1.15;
   const length = Math.hypot(ox, oy, oz);
   const dx = ox / length, dy = oy / length, dz = oz / length;
   let clear = 0;
