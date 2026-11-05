@@ -80,7 +80,7 @@ function scoreboardPlayers(now) {
 
 function scoreboardRoomText() {
   if (net.mode === 'mqtt') {
-    return 'ROOM ' + scoreboardText(net.room, '—') + ' · MQTT' + (net.online ? '' : ' · CONNECTING');
+    return 'ROOM ' + scoreboardText(net.room, '-') + ' · MQTT' + (net.online ? '' : ' · CONNECTING');
   }
   if (net.mode === 'ws') return 'LAN' + (net.online ? '' : ' · CONNECTING');
   return 'SOLO';

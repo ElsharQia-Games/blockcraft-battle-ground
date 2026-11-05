@@ -261,11 +261,11 @@ function lockPointer() {
       }, () => {
         if (generation !== inputCaptureGeneration) return;
         pauseGameplayInput();
-        toast('Pointer lock unavailable — click the page again');
+        toast('Pointer lock unavailable. Click the page again');
       });
     } catch (e) {
       pauseGameplayInput();
-      toast('Pointer lock unavailable — click the page again');
+      toast('Pointer lock unavailable. Click the page again');
       return false;
     }
   }
@@ -369,7 +369,7 @@ document.addEventListener('pointerlockchange', () => {
 document.addEventListener('pointerlockerror', () => {
   if (inputPointerPromise || document.pointerLockElement === renderer.domElement) return;
   pauseGameplayInput();
-  toast('Pointer lock unavailable — click the page again');
+  toast('Pointer lock unavailable. Click the page again');
 });
 document.addEventListener('fullscreenchange', () => {
   resetInputMouseStream('fullscreen-change');

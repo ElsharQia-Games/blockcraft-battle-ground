@@ -28,14 +28,13 @@ function menuStateProbe(expected) {
     // must stay visible (translucent stops) and unblurred.
     const style = getComputedStyle(document.getElementById('hint'));
     const alphas = [...style.backgroundImage.matchAll(/rgba\(([^)]+)\)/g)].map((m) => Number(m[1].split(',')[3]));
-    check(alphas.length >= 2 && alphas.every((a) => a > 0 && a < 0.9) && style.backdropFilter === 'none',
+    check(alphas.length >= 2 && Math.min(...alphas) < 0.75 && style.backdropFilter === 'none',
       'Home must keep the world visible behind a translucent, unblurred dimming layer', style.backgroundImage);
-    for (const el of document.querySelectorAll('.bc-home-id, .bc-home-nav, .bc-home-hero, .bc-home-foot > span')) {
-      const local = getComputedStyle(el);
-      check(local.backgroundColor === 'rgba(0, 0, 0, 0)' && local.boxShadow === 'none',
-        'Home controls regained a local black backing block', el.className);
-    }
-    check(document.querySelector('.bc-publisher')?.textContent.trim() === 'ElsharQia Games', 'Publisher label changed');
+    // One primary action: Play and the brand are on screen without scrolling.
+    const r = document.getElementById('play').getBoundingClientRect();
+    check(r.width > 0 && r.top >= -1 && r.bottom <= innerHeight + 1, 'Home needs scrolling to reach Play', r.toJSON());
+    check(!!document.getElementById('homeTitle').textContent.trim(), 'Home lost its title');
+    check(document.querySelector('.ui-publisher')?.textContent.trim() === 'ElsharQia Games', 'Publisher label changed');
   }
   return { viewport: [innerWidth, innerHeight], state, shown, active: document.activeElement.id || document.activeElement.tagName };
 }

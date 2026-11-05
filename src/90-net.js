@@ -551,7 +551,7 @@ function netQueueOutbound(msg) {
       else {
         // A finite queue cannot promise infinite delivery. End the unhealthy
         // session explicitly rather than silently deleting a hit/death/ping.
-        netDisconnect('Network queue full — reconnect to continue', true);
+        netDisconnect('Network queue full. Reconnect to continue', true);
         return false;
       }
     }
@@ -598,7 +598,7 @@ function netQueueLocalEdit(msg) {
   if (!netValidEditCell(msg)) return false;
   const key = msg.x + ',' + msg.y + ',' + msg.z;
   if (!net.editOut.has(key) && netQueuedEditCells() >= NET_MAX_EDITS) {
-    netDisconnect('World edit backlog full — reconnect to continue', true); return false;
+    netDisconnect('World edit backlog full. Reconnect to continue', true); return false;
   }
   net.editOut.delete(key);
   net.editOut.set(key, msg);
@@ -613,7 +613,7 @@ function netFlushLocalEdits(now) {
   for (const [id, batch] of net.editInFlight) {
     if (!netEditMatches(batch.packet)) { net.editInFlight.delete(id); continue; }
     if (now < batch.retryAt) continue;
-    if (batch.attempts >= 4) { netDisconnect('World edit acknowledgement timed out — reconnect to resync', true); return; }
+    if (batch.attempts >= 4) { netDisconnect('World edit acknowledgement timed out. Reconnect to resync', true); return; }
     if (net.editTokens < batch.packet.edits.length) continue;
     batch.packet.life = net.localLife || undefined;
     batch.attempts++;
@@ -653,7 +653,7 @@ function netEditResponse(msg) {
     return;
   }
   if (msg.retryable !== true) {
-    netDisconnect('World edit rejected (' + String(msg.reason || 'validation').slice(0, 32) + ') — reconnect to resync', true);
+    netDisconnect('World edit rejected (' + String(msg.reason || 'validation').slice(0, 32) + '). Reconnect to resync', true);
     return;
   }
   batch.retryAt = performance.now() + netPoseNumber(msg.retryMs, 250, 50, 2000);
@@ -861,7 +861,7 @@ function copyRoom() {
   const failed = () => {
     const hint = document.getElementById('roomHint');
     if (hint) hint.textContent = 'Copy was blocked. Select the invite code and copy it manually.';
-    toast('Copy blocked — room code: ' + code);
+    toast('Copy blocked. Room code: ' + code);
     return false;
   };
   const fallback = () => {
@@ -1490,7 +1490,7 @@ function handleNet(msg, from, nested) {
         addRemote(p);
       }
       for (const id of [...net.players.keys()]) if (!present.has(id)) removeRemote(id);
-      if (!net.warned) toast('Connected — ' + netPlayerCount() + ' player(s) online');
+      if (!net.warned) toast('Connected. ' + netPlayerCount() + ' player(s) online');
       net.warned = true;
       updateRoomBadge();
       netStartPing();
@@ -1501,7 +1501,7 @@ function handleNet(msg, from, nested) {
     case 'join':
       if (msg.player) netRememberState(msg.player);
       addRemote(msg.player || msg);
-      if (!net.warned) toast('Connected — ' + netPlayerCount() + ' player(s) online');
+      if (!net.warned) toast('Connected. ' + netPlayerCount() + ' player(s) online');
       net.warned = true;
       netEmitStatus();
       break;
@@ -1894,7 +1894,7 @@ function netLoseLanConnection(ws) {
   net.mode = 'ws';
   net.desync = false;
   netEmitStatus();
-  if (wasOnline) toast('LAN multiplayer disconnected — reconnecting…');
+  if (wasOnline) toast('LAN multiplayer disconnected. Reconnecting…');
   netScheduleLanReconnect();
 }
 
@@ -2759,7 +2759,7 @@ function mqttLoseConnection(ws) {
   netEmitStatus();
   const hint = document.getElementById('roomHint');
   if (hint) hint.textContent = 'Connection lost. Reconnecting to room ' + net.room + '…';
-  if (wasOnline) toast('Online link lost — reconnecting…');
+  if (wasOnline) toast('Online link lost. Reconnecting…');
   mqttScheduleReconnect();
 }
 
@@ -2903,7 +2903,7 @@ function mqttOnSuback(body) {
   netStartPing();
   netSendPing();
   netEmitStatus();
-  if (!net.warned) toast('Online — room ' + mqtt.room + ' · share the code');
+  if (!net.warned) toast('Online. Room ' + mqtt.room + ' · share the code');
   else toast('Reconnected to room ' + mqtt.room);
   net.warned = true;
   playTone(660, 0.09, 'sine', 0.08);

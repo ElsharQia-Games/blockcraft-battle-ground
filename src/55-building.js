@@ -297,29 +297,29 @@ function preflightBuildPiece(kind, anchor, rotation, material) {
   if (occupied) return fail('occupied', 'Terrain or another block is in the way');
   // The geometric cost counts only new voxels, including when materials are unlimited.
   plan.cost = plan.changes.length;
-  if (!plan.cost) return fail('complete', 'Already built — move or aim to extend');
+  if (!plan.cost) return fail('complete', 'Already built. Move or aim to extend');
 
   const now = performance.now();
   const eye = buildingEye();
   const bodyHeight = typeof playerBodyHeight === 'function' ? playerBodyHeight() : PH;
   for (const c of plan.changes) {
-    if (buildIntersectsBody(c, player.pos, bodyHeight)) return fail('self', 'Step back — you are inside the blueprint');
+    if (buildIntersectsBody(c, player.pos, bodyHeight)) return fail('self', 'Step back. You are inside the blueprint');
     if (buildOverlapsRemote(c, now)) return fail('player', 'Another player is in the way');
     if (buildVoxelHitsSolidDragon(c.x, c.y, c.z)) return fail('dragon', 'A solid dragon is in the way');
   }
   for (const c of cells) {
     if (Math.hypot(c.x + 0.5 - eye.x, c.y + 0.5 - eye.y, c.z + 0.5 - eye.z) > REACH + 1e-6) {
-      return fail('reach', 'Too far — move closer');
+      return fail('reach', 'Too far. Move closer');
     }
   }
   for (const c of plan.changes) {
     if (!buildingCellVisible(eye, c, reusable)) {
-      return fail('occluded', 'View blocked — build on the visible side');
+      return fail('occluded', 'View blocked. Build on the visible side');
     }
   }
 
   // Air building is intentional; attachment to terrain is not a placement requirement.
-  if (available < plan.cost) return fail('materials', 'Not enough ' + blockName(material) + ' — choose a material');
+  if (available < plan.cost) return fail('materials', 'Not enough ' + blockName(material) + '. Choose a material');
   plan.ok = true;
   plan.code = 'ready';
   plan.reason = 'Hold LMB to build';
@@ -345,7 +345,7 @@ function commitBuildPiece(kind, anchor, rotation, material) {
   const plan = preflightBuildPiece(kind, anchor, rotation, material);
   if (!plan.ok) return plan;
   if (!takeBuildItems(material, plan.cost)) {
-    return Object.assign(plan, { ok: false, code: 'materials', reason: 'Materials changed — try again' });
+    return Object.assign(plan, { ok: false, code: 'materials', reason: 'Materials changed. Try again' });
   }
   try {
     for (const c of plan.changes) setBlock(c.x, c.y, c.z, material);
@@ -353,7 +353,7 @@ function commitBuildPiece(kind, anchor, rotation, material) {
     for (const c of plan.changes) setBlock(c.x, c.y, c.z, c.before);
     if (!UNLIMITED_BUILDING) addItem(material, plan.cost);
     return Object.assign(plan, { ok: false, code: 'write', reason: UNLIMITED_BUILDING
-      ? 'Could not place — try again' : 'Could not place — materials returned' });
+      ? 'Could not place. Try again' : 'Could not place. Materials returned' });
   }
   for (const key of collectBuildChunks(plan.changes)) {
     const [cx, cz] = key.split(',').map(Number);

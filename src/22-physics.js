@@ -659,7 +659,7 @@ function bmRepairPlayerOverlap(force = false) {
   state.height = source.h;
   BC.emit('playerRepairBlocked', bmPlayerRepairState());
   if (!wasBlocked && typeof toast === 'function') toast(state.dynamic
-    ? 'Blocked by a dragon — waiting for nearby space' : 'Blocked by construction — waiting for nearby space');
+    ? 'Blocked by a dragon. Waiting for nearby space' : 'Blocked by construction. Waiting for nearby space');
   return false;
 }
 

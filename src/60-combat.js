@@ -2478,7 +2478,7 @@ function setCombatMode(on) {
   if (highlight) highlight.visible = false;
   combatEmit('sfx', { kind: 'ui', action: 'combatMode', position: combatSourcePosition(), volume: 0.2 });
   playTone(combatMode ? 520 : 360, 0.06, 'square', 0.05);
-  if (typeof toast === 'function') toast(combatMode ? 'Combat mode — left click shoots' : 'Build mode — mine and place blocks');
+  if (typeof toast === 'function') toast(combatMode ? 'Combat mode. Left click shoots' : 'Build mode. Mine and place blocks');
 }
 
 function toggleMute() {

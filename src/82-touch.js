@@ -189,30 +189,31 @@ function touchBuildUI() {
     #touchControls .tc-look { right: 0; width: 58%; }
     #touchControls .tc-stick { position: absolute; left: 0; top: 0; width: ${TOUCH_STICK_RADIUS * 2}px;
       height: ${TOUCH_STICK_RADIUS * 2}px; margin: -${TOUCH_STICK_RADIUS}px 0 0 -${TOUCH_STICK_RADIUS}px;
-      border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(10,14,22,.28);
+      border-radius: 50%; border: 2px solid rgba(242, 241, 238, .3); background: rgba(16, 17, 19, .3);
       opacity: 0; transition: opacity .12s; pointer-events: none; }
     #touchControls .tc-stick.on { opacity: 1; }
     #touchControls .tc-stick i { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px;
-      border-radius: 50%; background: rgba(255,255,255,.75); box-shadow: 0 2px 10px rgba(0,0,0,.35); }
+      border-radius: 50%; background: rgba(242, 241, 238, .85); box-shadow: 0 3px 0 rgba(8, 9, 10, .6); }
     #touchControls .tc-cluster { position: absolute; pointer-events: none; }
     #touchControls .tc-right { right: max(14px, env(safe-area-inset-right)); bottom: max(14px, env(safe-area-inset-bottom));
       width: 250px; height: 230px; }
     #touchControls .tc-top { right: max(14px, env(safe-area-inset-right)); top: max(10px, env(safe-area-inset-top));
       display: flex; gap: 8px; }
     #touchControls .tc-btn { pointer-events: auto; touch-action: none; position: absolute; border-radius: 50%;
-      border: 2px solid rgba(255,255,255,.4); background: rgba(12,16,26,.45); color: #fff;
+      border: 0; background: rgba(23, 24, 27, .62); box-shadow: 0 3px 0 rgba(8, 9, 10, .7); color: #f2f1ee;
       font: 700 13px/1 system-ui, sans-serif; letter-spacing: .02em; padding: 0; }
     /* No backdrop-filter here: a blur behind every button is re-composited
        each frame and is expensive on phone GPUs. */
-    #touchControls .tc-btn.held, #touchControls .tc-btn.on { background: rgba(255,255,255,.85); color: #0b0f18; }
-    #touchControls .tc-top .tc-btn { position: static; width: 46px; height: 38px; border-radius: 10px; font-size: 12px; }
-    #touchControls .tc-fire { width: 86px; height: 86px; right: 0; bottom: 64px; background: rgba(206,32,56,.6); font-size: 15px; }
+    #touchControls .tc-btn.held { transform: translateY(3px); box-shadow: none; }
+    #touchControls .tc-btn.on { background: #f2f1ee; color: #101113; }
+    #touchControls .tc-top .tc-btn { position: static; width: 48px; height: 36px; border-radius: 3px; font-size: 12px; }
+    #touchControls .tc-fire { width: 86px; height: 86px; right: 0; bottom: 64px; background: var(--ui-accent, #e8403f); box-shadow: 0 4px 0 var(--ui-accent-edge, #8f1f22); font-size: 15px; }
     #touchControls .tc-aim { width: 62px; height: 62px; right: 100px; bottom: 150px; }
     #touchControls .tc-jump { width: 70px; height: 70px; right: 96px; bottom: 0; }
     #touchControls .tc-crouch { width: 58px; height: 58px; right: 178px; bottom: 8px; }
     #touchControls .tc-reload { width: 48px; height: 48px; right: 14px; bottom: 164px; }
     #touchControls .tc-swap { width: 56px; height: 56px; right: 172px; bottom: 82px; }
-    #touchControls .tc-build { width: 56px; height: 56px; right: 0; bottom: 0; border-radius: 14px; font-size: 12px; }
+    #touchControls .tc-build { width: 56px; height: 52px; right: 0; bottom: 0; border-radius: 3px; font-size: 12px; }
     #touchControls .tc-rotate { width: 44px; height: 44px; right: 112px; bottom: 82px; display: none; }
     body.touch-building #touchControls .tc-rotate { display: block; }
     #touchRotate { display: none; }
@@ -222,14 +223,10 @@ function touchBuildUI() {
       body.touch-ui #touchRotate span { display: block; font-weight: 400; opacity: .7; font-size: 14px; }
     }
     body.touch-ui #crosshair { transform: translate(-50%, -50%) scale(1.15); }
-    /* Phone HUD: compact panels kept out of both thumb zones. */
-    body.touch-playing #stats, body.touch-playing #hotbar, body.touch-playing .bc-home-foot { display: none !important; }
+    /* Phone placement of the HUD modules lives in 89-ui-system.js; these are
+       the remaining legacy panels. */
+    body.touch-playing #hotbar { display: none !important; }
     body.touch-playing #minimap { transform: scale(.62); transform-origin: left top; }
-    body.touch-playing #healthWrap { transform: scale(.7); transform-origin: left top;
-      left: max(12px, env(safe-area-inset-left)) !important; top: 132px !important; bottom: auto !important; }
-    body.touch-playing #weaponHud { transform: scale(.68); transform-origin: center top; position: fixed !important;
-      left: 50% !important; right: auto !important; top: 64px !important; bottom: auto !important; translate: -50% 0; }
-    body.touch-playing #pingChip { transform: scale(.75); transform-origin: right top; top: 54px !important; }
     body.touch-playing #buildHud { top: 120px !important; bottom: auto !important; transform: scale(.8); }
     body.touch-playing #killfeed { top: 120px !important; transform: scale(.8); transform-origin: right top; }
     @media (max-height: 420px) {

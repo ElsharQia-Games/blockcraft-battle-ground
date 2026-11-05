@@ -24,10 +24,10 @@
 
 /* ---------------- mode table ---------------- */
 /* Optional per-mode rules (all read by the room authority as well):
-   gravity  — player gravity multiplier (client physics)
-   damage   — authority damage multiplier
-   regen    — false disables health regeneration
-   ladder   — Gun Game: each kill advances you to the next weapon */
+   gravity  : player gravity multiplier (client physics)
+   damage   : authority damage multiplier
+   regen    : false disables health regeneration
+   ladder   : Gun Game: each kill advances you to the next weapon */
 const MODES_GUN_LADDER = Object.freeze(['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'revolver', 'sniper']);
 const MODES = Object.freeze([
   Object.freeze({
