@@ -1,0 +1,60 @@
+# Publishes the game to GitHub Pages and writes net-config.js from repository
+# secrets, so the TURN credentials never live in the repo or its history.
+# (They are still readable on the live site: the browser needs them.)
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble the site
+        run: |
+          mkdir -p _site
+          cp index.html net-config.js LICENSE README.md screenshot.png _site/
+          cp -r src assets _site/
+
+      - name: Write net-config.js from secrets
+        env:
+          TURN_USERNAME: ${{ secrets.METERED_TURN_USERNAME }}
+          TURN_CREDENTIAL: ${{ secrets.METERED_TURN_CREDENTIAL }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const user = process.env.TURN_USERNAME || "", pass = process.env.TURN_CREDENTIAL || "";
+            const turn = user && pass ? [
+              { urls: "stun:stun.relay.metered.ca:80" },
+              { urls: ["turn:global.relay.metered.ca:80", "turn:global.relay.metered.ca:80?transport=tcp",
+                       "turn:global.relay.metered.ca:443", "turns:global.relay.metered.ca:443?transport=tcp"],
+                username: user, credential: pass }
+            ] : [];
+            const config = { metered: null, turn };
+            fs.writeFileSync("_site/net-config.js",
+              "/* Generated at deploy time from repository secrets. */\nwindow.BC_NET_CONFIG = " + JSON.stringify(config) + ";\n");
+            console.log(turn.length ? "TURN relay configured" : "No TURN secrets set: direct + broker only");
+          '
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
