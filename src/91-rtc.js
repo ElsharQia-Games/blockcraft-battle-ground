@@ -7,9 +7,10 @@
                    and TLS on 443, which passes strict NATs and firewalls)
      3. broker   — the public MQTT broker that rooms already use to meet
    Each player links to the room host (a star: the host is the authority).
-   The broker always carries discovery and signalling (offers/answers/ICE on
-   blockcraft/<room>/rtc/<id>) and takes over automatically whenever no link is
-   open, so a room never breaks.
+   The broker always carries discovery and signalling (one offer and one
+   answer per link on blockcraft/<room>/rtc/<id>, candidates bundled in the
+   SDP, offers re-sent until answered) and takes over automatically whenever
+   no link is open, so a room never breaks.
 
    TURN servers are not free any more, so they come from net-config.js:
    static servers, or a Metered app whose API mints short-lived credentials
@@ -25,11 +26,13 @@
 'use strict';
 
 const RTC_STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
-const RTC_OPEN_TIMEOUT_MS = 12000;     // TURN over TCP can take a few seconds
+const RTC_OPEN_TIMEOUT_MS = 15000;     // gathering + resends + TURN over TCP
 const RTC_RETRY_MS = [2000, 5000, 10000, 20000];
 const RTC_RESTART_AFTER_MS = 2500;     // 'disconnected' this long -> ICE restart
 const RTC_MAX_BUFFER = 256 * 1024;
-const RTC_MAX_SIGNAL = 24000;
+const RTC_MAX_SIGNAL = 48000;
+const RTC_GATHER_MS = 2500;            // wait this long for candidates before signalling
+const RTC_RESEND_MS = 3000;            // re-send an unanswered offer this often
 const RTC_TURN_TTL_MS = 20 * 60 * 1000;
 
 const rtc = {
@@ -94,6 +97,7 @@ function rtcClose(id, reason) {
   if (!peer) return;
   rtc.peers.delete(id);
   clearTimeout(peer.restartTimer);
+  clearTimeout(peer.resendTimer);
   try { if (peer.dc) peer.dc.close(); } catch (e) { /* closed */ }
   try { peer.pc.close(); } catch (e) { /* closed */ }
   peer.open = false;
@@ -137,7 +141,8 @@ async function rtcNewPeer(id, offerer) {
   const pc = new RTCPeerConnection({ iceServers: await rtcIceServers(), iceTransportPolicy: forceRelay ? 'relay' : 'all' });
   const peer = { id, pc, dc: null, open: false, startedAt: performance.now(), pending: [], remoteSet: false,
     offerer, route: '', restartTimer: 0, restarts: 0 };
-  pc.onicecandidate = (e) => { if (e.candidate) rtcSignal(id, { type: 'ice', candidate: e.candidate.toJSON() }); };
+  // Candidates travel inside the offer/answer SDP (see rtcGathered): the
+  // public broker drops bursts of small messages, which lost whole links.
   pc.onconnectionstatechange = () => {
     const state = pc.connectionState;
     if (state === 'connected') { clearTimeout(peer.restartTimer); peer.restarts = 0; rtcReadRoute(peer); }
@@ -154,6 +159,30 @@ async function rtcNewPeer(id, offerer) {
   return peer;
 }
 
+// Resolve once ICE gathering completes, or after RTC_GATHER_MS with whatever
+// was gathered (TURN over TCP can be slow); the SDP then carries the candidates.
+function rtcGathered(pc) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => { pc.removeEventListener('icegatheringstatechange', check); clearTimeout(timer); resolve(); };
+    const check = () => { if (pc.iceGatheringState === 'complete') done(); };
+    const timer = setTimeout(done, RTC_GATHER_MS);
+    pc.addEventListener('icegatheringstatechange', check);
+  });
+}
+
+// Player side: keep re-sending the offer until the host answers, since a
+// single broker message can be lost.
+function rtcSendOffer(peer, restart) {
+  const send = () => {
+    if (!rtc.peers.has(peer.id) || peer.pc.signalingState !== 'have-local-offer') return;
+    rtcSignal(peer.id, { type: 'offer', restart: !!restart, sdp: peer.pc.localDescription.sdp });
+    peer.resendTimer = setTimeout(send, RTC_RESEND_MS);
+  };
+  clearTimeout(peer.resendTimer);
+  send();
+}
+
 async function rtcRestart(peer) {
   if (!rtc.peers.has(peer.id) || peer.pc.connectionState === 'connected') return;
   if (!peer.offerer) return; // the host waits for the player's restart offer
@@ -162,7 +191,8 @@ async function rtcRestart(peer) {
     peer.pc.setConfiguration({ iceServers: await rtcIceServers() });
     const offer = await peer.pc.createOffer({ iceRestart: true });
     await peer.pc.setLocalDescription(offer);
-    rtcSignal(peer.id, { type: 'offer', restart: true, sdp: peer.pc.localDescription.sdp });
+    await rtcGathered(peer.pc);
+    rtcSendOffer(peer, true);
   } catch (e) { rtcClose(peer.id, 'failed'); }
 }
 
@@ -183,7 +213,8 @@ async function rtcOffer(hostId) {
     rtcWireChannel(peer, peer.pc.createDataChannel('bc', { ordered: true }));
     const offer = await peer.pc.createOffer();
     await peer.pc.setLocalDescription(offer);
-    rtcSignal(hostId, { type: 'offer', sdp: peer.pc.localDescription.sdp });
+    await rtcGathered(peer.pc);
+    rtcSendOffer(peer, false);
   } catch (e) { rtcClose(hostId); }
 }
 
@@ -199,6 +230,10 @@ async function rtcOnSignal(from, payload) {
       // Only the host accepts links, only from players actually in the room.
       if (!amHost || !mqtt.presence.has(from)) return;
       let peer = rtc.peers.get(from);
+      if (peer && peer.offerSdp === msg.sdp && peer.answerSdp) {
+        rtcSignal(from, { type: 'answer', sdp: peer.answerSdp }); // our answer was lost: repeat it
+        return;
+      }
       if (!(msg.restart && peer)) {
         if (!peer && rtc.peers.size >= NET_MAX_PEERS) return;
         rtcClose(from);
@@ -206,12 +241,16 @@ async function rtcOnSignal(from, payload) {
         peer.pc.ondatachannel = (e) => { if (e.channel.label === 'bc') rtcWireChannel(peer, e.channel); };
       }
       await rtcSetRemote(peer, { type: 'offer', sdp: msg.sdp });
+      peer.offerSdp = msg.sdp;
       const answer = await peer.pc.createAnswer();
       await peer.pc.setLocalDescription(answer);
-      rtcSignal(from, { type: 'answer', sdp: peer.pc.localDescription.sdp });
+      await rtcGathered(peer.pc);
+      peer.answerSdp = peer.pc.localDescription.sdp;
+      rtcSignal(from, { type: 'answer', sdp: peer.answerSdp });
     } else if (msg.type === 'answer' && typeof msg.sdp === 'string') {
       const peer = rtc.peers.get(from);
       if (peer && peer.offerer && from === net.hostId && peer.pc.signalingState === 'have-local-offer') {
+        clearTimeout(peer.resendTimer);
         await rtcSetRemote(peer, { type: 'answer', sdp: msg.sdp });
       }
     } else if (msg.type === 'ice' && msg.candidate && typeof msg.candidate === 'object') {
