@@ -41,6 +41,7 @@ const rtc = {
   supported: typeof RTCPeerConnection === 'function',
   peers: new Map(),      // peer id -> { id, pc, dc, open, startedAt, pending, remoteSet, offerer, route }
   attempts: new Map(),   // host id -> { count, at } (clients)
+  answering: new Map(),  // player id -> offer SDP the host is setting up (host)
   room: '', host: '',
   turn: { servers: [], at: -Infinity, loading: null }
 };
@@ -238,18 +239,23 @@ async function rtcOnSignal(from, payload) {
       // Only the host accepts links, only from players actually in the room.
       if (!amHost || !mqtt.presence.has(from)) return;
       let peer = rtc.peers.get(from);
-      if (peer && peer.offerSdp === msg.sdp && peer.answerSdp) {
-        rtcSignal(from, { type: 'answer', sdp: peer.answerSdp }); // our answer was lost: repeat it
+      if ((peer && peer.offerSdp === msg.sdp) || rtc.answering.get(from) === msg.sdp) {
+        // A re-sent offer: repeat our answer if it was lost, or keep preparing
+        // it. Never restart a link that is already being answered.
+        if (peer && peer.answerSdp) rtcSignal(from, { type: 'answer', sdp: peer.answerSdp });
         return;
       }
-      if (!(msg.restart && peer)) {
-        if (!peer && rtc.peers.size >= NET_MAX_PEERS) return;
-        rtcClose(from);
-        peer = await rtcNewPeer(from, false);
-        peer.pc.ondatachannel = (e) => { if (e.channel.label === 'bc') rtcWireChannel(peer, e.channel); };
-      }
-      await rtcSetRemote(peer, { type: 'offer', sdp: msg.sdp });
-      peer.offerSdp = msg.sdp;
+      rtc.answering.set(from, msg.sdp); // claimed before any await
+      try {
+        if (!(msg.restart && peer)) {
+          if (!peer && rtc.peers.size >= NET_MAX_PEERS) return;
+          rtcClose(from);
+          peer = await rtcNewPeer(from, false);
+          peer.pc.ondatachannel = (e) => { if (e.channel.label === 'bc') rtcWireChannel(peer, e.channel); };
+        }
+        peer.offerSdp = msg.sdp;
+        await rtcSetRemote(peer, { type: 'offer', sdp: msg.sdp });
+      } finally { rtc.answering.delete(from); }
       const answer = await peer.pc.createAnswer();
       await peer.pc.setLocalDescription(answer);
       await rtcGathered(peer.pc);
