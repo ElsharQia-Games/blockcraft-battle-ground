@@ -618,8 +618,8 @@
     dragonBreath:{ playCut: 4200, vol: 0.80, variants: 2 },
     killcam:     { playCut: 1500, vol: 0.55, variants: 2 },
     confirm:     { playCut: 9000, vol: 0.42, variants: 1 },
-    step:        { playCut: 5200, vol: 0.20, variants: 1 },
-    land:        { playCut: 4200, vol: 0.40, variants: 1 },
+    step:        { playCut: 3800, vol: 0.08, variants: 1 },
+    land:        { playCut: 1600, vol: 0.15, variants: 1 },
     ui:          { playCut: 6000, vol: 0.35, variants: 2 }
   };
 
@@ -1599,7 +1599,8 @@
       var t = now();
       if (player.onGround && !stepWasGround && stepLastVy < -7 && t - stepLastLand > 250) {
         stepLastLand = t;
-        play({ kind: 'land', volume: Math.min(0.7, 0.25 + (-stepLastVy - 7) * 0.03) });
+        // A soft body thud, never an impact boom: quiet, darker, scaled gently by fall speed.
+        play({ kind: 'land', volume: Math.min(0.22, 0.07 + (-stepLastVy - 7) * 0.012) });
         stepDistance = 0;
       }
       stepWasGround = player.onGround;
@@ -1611,7 +1612,7 @@
       var stride = player.crouching ? 1.6 : speed > 7 ? 2.6 : 2.15;
       if (stepDistance >= stride) {
         stepDistance -= stride;
-        play({ kind: 'step', surface: stepSurface(), volume: player.crouching ? 0.08 : speed > 7 ? 0.24 : 0.17 });
+        play({ kind: 'step', surface: stepSurface(), volume: player.crouching ? 0.03 : speed > 7 ? 0.1 : 0.07 });
       }
     } catch (e) { /* footsteps are cosmetic */ }
   }, 60);
