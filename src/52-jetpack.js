@@ -213,7 +213,7 @@ function jetSetActive(on) {
       }
     }
     try { if (typeof jumpQueued !== 'undefined') jumpQueued = false; } catch (e) { /* early boot */ }
-    jetSfx('jetpackOn', 0.6);
+    // No ignition burst on activation: the thruster loop fades in on its own.
     jetUpdateHud(true);
     return true;
   }

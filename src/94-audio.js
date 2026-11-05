@@ -1397,9 +1397,11 @@
 
       var team = resolveTeam(info);
       var rate = 1;
-      // Small per-play variation so repeats never sound identical.
-      rate *= kind === 'shot' ? 0.985 + Math.random() * 0.03 : 0.95 + Math.random() * 0.1;
-      if (kind !== 'shot') vol *= 0.9 + Math.random() * 0.2;
+      if (kind === 'shot') {
+        if (team === 'red') rate = 0.94;
+        else if (team === 'blue') rate = 1.06;
+      }
+      rate *= kind === 'shot' ? 0.985 + Math.random() * 0.03 : 0.96 + Math.random() * 0.08;
       if (info.rate != null && isFinite(Number(info.rate))) rate *= clamp(info.rate, 0.5, 2);
       rate = clamp(rate, 0.5, 2);
 
