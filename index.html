@@ -561,16 +561,16 @@
         <canvas id="homePortrait" class="ui-portrait" width="32" height="32" aria-hidden="true"></canvas>
         <span class="ui-row-text"><span id="homePlayerName">Wanderer</span><span id="homeCharacter">Character loading…</span></span>
       </button>
-      <button id="menuPlaySetup" class="ui-row" type="button" data-menu-open="play" data-menu-screen="play">Modes and map</button>
-      <button id="menuSettings" class="ui-row" type="button" data-menu-open="settings" data-menu-screen="settings">Settings</button>
-      <button id="menuOnline" class="ui-row" type="button" data-menu-open="online" data-menu-screen="online">Help</button>
+      <button id="menuPlaySetup" class="ui-row" data-icon="modes" type="button" data-menu-open="play" data-menu-screen="play">Modes and map</button>
+      <button id="menuSettings" class="ui-row" data-icon="settings" type="button" data-menu-open="settings" data-menu-screen="settings">Settings</button>
+      <button id="menuOnline" class="ui-row" data-icon="help" type="button" data-menu-open="online" data-menu-screen="online">Help</button>
     </nav>
     <p class="ui-publisher">ElsharQia Games</p>
   </div>
 
   <aside class="ui-squad" aria-labelledby="homeRoomsTitle">
     <div class="ui-squad-head">
-      <h2 id="homeRoomsTitle">Squad</h2>
+      <h2 id="homeRoomsTitle" data-icon="friends">Squad</h2>
       <p class="ui-status"><span id="homeConnectionLabel">Solo</span> <span id="homeConnectionDetail">Local world</span></p>
     </div>
     <div id="homeRoomConnect" class="ui-room-connect">
@@ -630,11 +630,11 @@
       <h2 id="onlineTitle" tabindex="-1">Help</h2>
     </header>
     <div class="ui-sheet-body ui-help">
-      <section><h3>Play with friends</h3><p>On Home, press <b>Create room</b> and send the code. Friends paste it into <b>Join with a code</b>. In a match, <kbd>P</kbd> copies the code again.</p></section>
-      <section><h3>Teams</h3><p>In team modes the Squad panel lists both teams. Anyone can switch their own side; the host can move anybody.</p></section>
-      <section><h3>LAN play</h3><p>Run the included server (<code>npm start</code>) and open its address on every computer. LAN connects automatically.</p></section>
-      <section><h3>Phones</h3><p>Turn the phone sideways. Left thumb moves, right thumb looks; Fire, Aim, Jump and Build sit under your right thumb.</p></section>
-      <section><h3>If a connection stalls</h3><p>Cancel on Home and try again. Some networks block the public relays; LAN play always works on the same network.</p></section>
+      <section><h3 data-icon="friends">Play with friends</h3><p>On Home, press <b>Create room</b> and send the code. Friends paste it into <b>Join with a code</b>. In a match, <kbd>P</kbd> copies the code again.</p></section>
+      <section><h3 data-icon="teams">Teams</h3><p>In team modes the Squad panel lists both teams. Anyone can switch their own side; the host can move anybody.</p></section>
+      <section><h3 data-icon="lan">LAN play</h3><p>Run the included server (<code>npm start</code>) and open its address on every computer. LAN connects automatically.</p></section>
+      <section><h3 data-icon="phone">Phones</h3><p>Turn the phone sideways. Left thumb moves, right thumb looks; Fire, Aim, Jump and Build sit under your right thumb.</p></section>
+      <section><h3 data-icon="signal">If a connection stalls</h3><p>Cancel on Home and try again. Some networks block the public relays; LAN play always works on the same network.</p></section>
       <aside class="ui-panel ui-session" aria-label="Your connection"><span class="ui-label">Your connection</span><h3 id="onlineSessionName">Solo</h3><p id="onlineSessionStatus">Playing in the local world.</p><p id="onlineHelp" class="ui-hint">The host controls mode and map. Aim, crosshair and audio stay personal. Room codes are not passwords.</p><p id="onlineHomeNote" class="ui-hint">Back returns to Home without starting the match.</p></aside>
     </div>
     <footer class="ui-sheet-foot"><p id="onlineFlowHint" class="ui-hint">Create, join and invite from Home.</p><button class="ui-btn" type="button" data-menu-back>Done</button></footer>
@@ -659,23 +659,23 @@
       <section id="settingsAudio" class="bc-settings-panel" role="tabpanel" aria-labelledby="settingsTabAudio" hidden inert></section>
       <section id="settingsControls" class="bc-settings-panel" role="tabpanel" aria-labelledby="settingsTabControls" hidden inert>
         <div class="ui-controls" aria-label="Keyboard and mouse controls">
-          <section><h3>Move</h3><dl>
+          <section><h3 data-icon="move">Move</h3><dl>
             <dt><kbd>W A S D</kbd></dt><dd>Move</dd><dt><kbd>Space</kbd></dt><dd>Jump; hold for higher</dd>
             <dt><kbd>Shift</kbd></dt><dd>Sprint</dd><dt><kbd>Ctrl</kbd> / <kbd>C</kbd></dt><dd>Crouch; slide while sprinting</dd><dt><kbd>K</kbd></dt><dd>Change character</dd>
           </dl></section>
-          <section><h3>Fight</h3><dl>
+          <section><h3 data-icon="fight">Fight</h3><dl>
             <dt>Left click</dt><dd>Shoot</dd><dt>Right click</dt><dd>Aim down sights</dd><dt><kbd>R</kbd></dt><dd>Reload</dd><dt><kbd>1-7</kbd> / wheel</dt><dd>Weapons</dd>
           </dl></section>
-          <section><h3>Build</h3><dl>
+          <section><h3 data-icon="build">Build</h3><dl>
             <dt><kbd>Q</kbd></dt><dd>Build mode on / off</dd><dt><kbd>1 2 3</kbd> / wheel</dt><dd>Wall, floor, ramp</dd>
             <dt>Left click</dt><dd>Place (hold to keep building)</dd><dt><kbd>R</kbd></dt><dd>Rotate</dd><dt><kbd>Shift</kbd> + wheel</dt><dd>Material</dd>
             <dt><kbd>B</kbd></dt><dd>Block mode: mine and place single blocks</dd>
           </dl></section>
-          <section><h3>Jetpack &amp; dragons</h3><dl>
+          <section><h3 data-icon="jet">Jetpack &amp; dragons</h3><dl>
             <dt><kbd>F</kbd></dt><dd>Jetpack on / off</dd><dt><kbd>Space</kbd> / <kbd>Ctrl</kbd></dt><dd>Rise / descend</dd><dt><kbd>C</kbd></dt><dd>Air dash</dd>
             <dt><kbd>E</kbd></dt><dd>Mount / dismount a small dragon</dd>
           </dl></section>
-          <section><h3>View &amp; match</h3><dl>
+          <section><h3 data-icon="view">View &amp; match</h3><dl>
             <dt><kbd>V</kbd></dt><dd>First / third person</dd><dt><kbd>Tab</kbd></dt><dd>Scoreboard (hold)</dd><dt><kbd>M</kbd></dt><dd>Mute</dd><dt><kbd>P</kbd></dt><dd>Copy room code</dd><dt><kbd>Esc</kbd></dt><dd>Pause / back</dd>
           </dl></section>
         </div>
