@@ -151,5 +151,6 @@ BC.on('lateFrame', (dt, now) => gfxTagCasters(now || performance.now()), 200);
 BC.api.graphics = {
   get quality() { return gfx.quality; },
   get shadows() { return gfx.shadows; },
+  get envMap() { return gfx.envMap; },
   setQuality: gfxSetQuality
 };

@@ -524,10 +524,27 @@ const combatReducedMotion = typeof window.matchMedia === 'function' ? window.mat
 const combatClamp01 = (v) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
 const combatDamp = (rate, dt) => 1 - Math.exp(-rate * Math.max(0, Number.isFinite(dt) ? dt : 0));
 
+/* Every weapon part's colour picks a physical finish, so the same model reads
+   as steel, polymer, wood or brass instead of one flat material:
+   - warm browns: oiled wood (non-metal, satin)
+   - yellow/gold: brass (full metal, polished)
+   - near-black: polymer / anodised furniture (matte, barely metallic)
+   - greys/greens: gunmetal steel (metallic, satin), lighter = more worn
+   All metals reflect the sky environment map from 41-graphics.js. */
+function combatFinish(color) {
+  const c = new THREE.Color(color), hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  if (hsl.s > 0.35 && hsl.h > 0.11 && hsl.h < 0.17 && hsl.l > 0.35) return { metalness: 1, roughness: 0.28, envMapIntensity: 1.1 };
+  if (hsl.s > 0.2 && (hsl.h < 0.11 || hsl.h > 0.95) && hsl.l < 0.55) return { metalness: 0, roughness: 0.62, envMapIntensity: 0.35 };
+  if (hsl.l < 0.17) return { metalness: 0.15, roughness: 0.72, envMapIntensity: 0.4 };
+  return { metalness: 0.82, roughness: 0.3 + Math.min(0.2, hsl.l * 0.25), envMapIntensity: 0.9 };
+}
+
 function combatMetal(color) {
   let mat = combatMetalMats.get(color);
   if (!mat) {
-    mat = new THREE.MeshStandardMaterial({ color, metalness: 0.55, roughness: 0.42 });
+    const env = BC.api && BC.api.graphics ? BC.api.graphics.envMap : null;
+    mat = new THREE.MeshStandardMaterial(Object.assign({ color, envMap: env || null }, combatFinish(color)));
     combatMetalMats.set(color, mat);
   }
   return mat;
@@ -1218,13 +1235,15 @@ function combatBindGrip(model) {
    - The SMG rides compact at the chest; the heavy LMG hangs at the hip
      until aimed. */
 const COMBAT_HOLD_STANCES = {
-  pistol:   { hip: 1.40, ads: 1.52, roll: -0.40, adsRoll: -0.30, kick: 1.3 },
-  revolver: { hip: 1.38, ads: 1.54, roll: -0.42, adsRoll: -0.30, kick: 1.6 },
-  smg:      { hip: 1.18, ads: 1.32, roll: -0.78, adsRoll: -0.86, kick: 0.8 },
-  rifle:    { hip: 1.20, ads: 1.36, roll: -0.90, adsRoll: -0.98, kick: 1.0 },
-  shotgun:  { hip: 1.12, ads: 1.32, roll: -0.86, adsRoll: -0.96, kick: 1.4 },
-  sniper:   { hip: 1.16, ads: 1.40, roll: -0.94, adsRoll: -1.02, kick: 1.2 },
-  lmg:      { hip: 0.98, ads: 1.26, roll: -0.72, adsRoll: -0.90, kick: 0.9 }
+  // Rolls keep the weapon in front of the RIGHT shoulder rather than on the
+  // body's centre line, so the over-the-shoulder camera can see it.
+  pistol:   { hip: 1.40, ads: 1.52, roll: -0.14, adsRoll: -0.10, kick: 1.3 },
+  revolver: { hip: 1.38, ads: 1.54, roll: -0.16, adsRoll: -0.10, kick: 1.6 },
+  smg:      { hip: 1.18, ads: 1.32, roll: -0.40, adsRoll: -0.46, kick: 0.8 },
+  rifle:    { hip: 1.20, ads: 1.36, roll: -0.50, adsRoll: -0.56, kick: 1.0 },
+  shotgun:  { hip: 1.12, ads: 1.32, roll: -0.46, adsRoll: -0.54, kick: 1.4 },
+  sniper:   { hip: 1.16, ads: 1.40, roll: -0.52, adsRoll: -0.60, kick: 1.2 },
+  lmg:      { hip: 0.98, ads: 1.26, roll: -0.36, adsRoll: -0.50, kick: 0.9 }
 };
 
 const combatPoseEuler = new THREE.Euler(0, 0, 0, 'YXZ');
