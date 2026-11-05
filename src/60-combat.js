@@ -1450,12 +1450,21 @@ const particleColor = new THREE.Color();
 const particleObj = new THREE.Object3D();
 const particles = [];
 let combatImpactSfxAt = -9999;
+// Which sound material a shot hit, from the block under the ray.
+function combatImpactSurface(block) {
+  try {
+    if (!block || !BC.api.blockSurface) return 'stone';
+    return BC.api.blockSurface(getBlock(block.x, block.y, block.z), false);
+  } catch (e) { return 'stone'; }
+}
+
 function addImpact(point, color, info) {
   // One positional event per impact cluster, not one per pellet/particle.
   const sfxAt = performance.now();
   if (!(info && info.silent) && sfxAt - combatImpactSfxAt > 28) {
     combatImpactSfxAt = sfxAt;
-    combatEmit('sfx', { kind: 'impact', weapon: info && info.weapon, position: point.clone(), volume: 0.34 });
+    combatEmit('sfx', { kind: 'impact', weapon: info && info.weapon, surface: info && info.surface,
+      position: point.clone(), volume: 0.34 });
   }
   const n = 6;
   particleColor.set(color);
@@ -2005,6 +2014,7 @@ function fireOnce() {
       if (i === 0) {
         shotEnd = obstruction.point.clone();
         addTracer(obstruction.from, obstruction.point);
+        impactInfo.surface = obstruction.kind === 'dragon' ? 'soft' : combatImpactSurface(obstruction.block);
         addImpact(obstruction.point, obstruction.kind === 'dragon' ? '#e8af57' : '#cbb593', impactInfo);
         impactInfo.silent = true;
       }
@@ -2045,6 +2055,7 @@ function fireOnce() {
       addImpact(end, '#e8af57', impactInfo);
       impactInfo.silent = true;
     } else if (solid.block) {
+      impactInfo.surface = combatImpactSurface(solid.block);
       addImpact(end, '#cbb593', impactInfo);
       impactInfo.silent = true;
       if (typeof damageVoxelFromShot === 'function') damageVoxelFromShot(solid.block, w.id, w.damage);

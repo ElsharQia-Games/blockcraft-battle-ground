@@ -124,6 +124,12 @@ function applyVoxelDamage(msg) {
   const remaining = Math.max(0, (record ? record.remaining : max) - amount);
 
   if (remaining === 0) {
+    // The block breaks with its material's sound (glass shatters, wood splinters).
+    try {
+      const surface = BC.api.blockSurface ? BC.api.blockSurface(msg.block, false) : 'stone';
+      BC.emit('sfx', { kind: 'break', surface: surface === 'soft' || surface === 'metal' ? 'stone' : surface,
+        position: { x: x + 0.5, y: y + 0.5, z: z + 0.5 }, volume: 0.42 });
+    } catch (e) { /* sound is optional */ }
     // Storage changes synchronously. setBlock's reset hook returns any crack mesh
     // to its pool; only the expensive terrain remesh waits for the next frame.
     setBlock(x, y, z, AIR);

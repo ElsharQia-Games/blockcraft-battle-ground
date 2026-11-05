@@ -601,6 +601,7 @@
   var SHOT_IDS = { pistol: 1, rifle: 1, shotgun: 1, smg: 1, sniper: 1, revolver: 1, lmg: 1 };
   var WEAPON_IDS = Object.keys(SHOT_IDS);
   var ACTION_IDS = { pump: 1, bolt: 1, cylinder: 1 };
+  var SURFACES = { grass: 1, stone: 1, wood: 1, snow: 1, soft: 1, metal: 1, glass: 1 };
 
   var KIND_SPEC = {
     impact:      { playCut: 2200, vol: 0.50, variants: 3 },
@@ -617,7 +618,10 @@
     dragonRoar:  { playCut: 2200, vol: 0.85, variants: 2 },
     dragonBreath:{ playCut: 4200, vol: 0.80, variants: 2 },
     killcam:     { playCut: 1500, vol: 0.55, variants: 2 },
-    confirm:     { playCut: 9000, vol: 0.42, variants: 1 },
+    confirm:     { playCut: 9000, vol: 0.38, variants: 1 },
+    headshot:    { playCut: 9000, vol: 0.32, variants: 1 },
+    break:       { playCut: 6000, vol: 0.42, variants: 1 },
+    dryfire:     { playCut: 6000, vol: 0.30, variants: 1 },
     step:        { playCut: 3800, vol: 0.08, variants: 1 },
     land:        { playCut: 1600, vol: 0.15, variants: 1 },
     ui:          { playCut: 6000, vol: 0.35, variants: 2 }
@@ -637,7 +641,8 @@
     dragonbreath: 'dragonBreath', breath: 'dragonBreath', firebreath: 'dragonBreath',
     killcam: 'killcam', heartbeat: 'killcam',
     ui: 'ui', blip: 'ui', click: 'ui', beep: 'ui',
-    confirm: 'confirm', killconfirm: 'confirm', step: 'step', footstep: 'step', land: 'land', landing: 'land'
+    confirm: 'confirm', killconfirm: 'confirm', step: 'step', footstep: 'step', land: 'land', landing: 'land',
+    headshot: 'headshot', break: 'break', blockbreak: 'break', dryfire: 'dryfire', empty: 'dryfire'
   };
 
   function weaponReport(id) {
@@ -1083,7 +1088,8 @@
   }
 
   function bufferFor(kind, weapon) {
-    var recorded = recordedBank[kind === 'reload' ? 'reload:' + (weapon || 'rifle') : kind === 'step' ? 'step:' + weapon : kind];
+    var recorded = recordedBank[kind === 'reload' ? 'reload:' + (weapon || 'rifle')
+      : kind === 'step' || kind === 'impact' || kind === 'break' ? kind + ':' + weapon : kind];
     if (kind !== 'shot' && recorded && recorded.length) return recorded[(Math.random() * recorded.length) | 0];
     if (kind === 'shot' && recordedBuffers[weapon]) {
       var samples = recordedBuffers[weapon];
@@ -1203,11 +1209,12 @@
     }
     sampleState = 'loading';
     samplePending = WEAPON_IDS.length;
-    var sfx = window.BCSfxBank && window.BCSfxBank.version === 1 && window.BCSfxBank.licence === 'CC0-1.0'
+    var sfx = window.BCSfxBank && window.BCSfxBank.version >= 1 && window.BCSfxBank.licence === 'CC0-1.0'
       ? window.BCSfxBank.entries : null;
     for (var n = 0; n < WEAPON_IDS.length; n++) {
-      var id = WEAPON_IDS[n], fresh = sfx && sfx['shot:' + id] && sfx['shot:' + id][0];
-      decodeWeapon(id, fresh || asset.entries[id]);
+      var id = WEAPON_IDS[n], takes = sfx && sfx['shot:' + id];
+      if (takes && takes.length) decodeWeaponTakes(id, takes);
+      else decodeWeapon(id, asset.entries[id]);
     }
     if (sfx) decodeBank(sfx);
   }
@@ -1224,7 +1231,7 @@
 
   function decodeClip(entry, done) {
     var settled = false;
-    function finish(buf) { if (!settled) { settled = true; done(buf && buf.duration > 0.01 && buf.duration < 2 ? buf : null); } }
+    function finish(buf) { if (!settled) { settled = true; done(buf && buf.duration > 0.01 && buf.duration < 6 ? buf : null); } }
     try {
       if (!entry || typeof entry.base64 !== 'string' || entry.base64.length > 40000) { finish(null); return; }
       var binary = window.atob(entry.base64), bytes = new Uint8Array(binary.length);
@@ -1232,6 +1239,22 @@
       var pending = ctx.decodeAudioData(bytes.buffer, finish, function () { finish(null); });
       if (pending && typeof pending.then === 'function') pending.then(finish, function () { finish(null); });
     } catch (e) { finish(null); }
+  }
+
+  // Recorded gunshots play as recorded: full tail, no synthetic layers. Every
+  // take is kept so consecutive shots alternate between real recordings.
+  function decodeWeaponTakes(weapon, takes) {
+    var left = takes.length, list = [];
+    takes.forEach(function (entry) {
+      decodeClip(entry, function (buf) {
+        if (buf) list.push(buf);
+        if (--left) return;
+        if (list.length) { recordedBuffers[weapon] = list; buffers.delete('shot|' + weapon); sampleReady++; }
+        else sampleFailed++;
+        samplePending--;
+        if (!samplePending) sampleState = sampleReady === WEAPON_IDS.length ? 'ready' : sampleReady ? 'partial' : 'failed';
+      });
+    });
   }
 
   function decodeBank(entries) {
@@ -1243,7 +1266,15 @@
         waiting++;
         decodeClip(entry, function (buf) {
           if (buf) (recordedBank[key] = recordedBank[key] || []).push(buf);
-          if (--waiting === 0) assembleReloads();
+          if (--waiting === 0) {
+            assembleReloads();
+            // The loop may have started procedurally before the bank decoded.
+            if (jetpackLoop && recordedBank.jetpackLoop) {
+              try { jetpackLoop.src.stop(); } catch (e) { /* already stopped */ }
+              jetpackLoop = null;
+              startJetpackLoop();
+            }
+          }
         });
       });
     });
@@ -1272,7 +1303,8 @@
         for (var k = 0; k < RELOAD_CLIPS.length && !clipKey; k++) if (RELOAD_CLIPS[k][0].test(name)) clipKey = RELOAD_CLIPS[k][1];
         if (id === 'revolver' && clipKey === 'magOut') clipKey = 'cylinder';
         if (id === 'pistol' && clipKey === 'rack') clipKey = 'slide';
-        var clips = clipKey && recordedBank[clipKey];
+        var own = recordedBank['rl:' + id + ':' + s2];
+        var clips = own && own.length ? own : clipKey && recordedBank[clipKey];
         if (!clips || !clips.length) continue;
         // Mechanism stages are cued slightly before the stage mark so the
         // transient lands on the visible motion.
@@ -1331,7 +1363,9 @@
       var weaponValue = info.weapon && typeof info.weapon === 'object' ? info.weapon.id : info.weapon;
       var weapon = SHOT_IDS[lower] === 1 ? lower : String(weaponValue || 'rifle').toLowerCase();
       if (SHOT_IDS[weapon] !== 1) weapon = 'rifle';
-      if (kind === 'step') weapon = info.surface === 'hard' ? 'hard' : 'soft';
+      if (kind === 'step' || kind === 'impact' || kind === 'break') {
+        weapon = SURFACES[info.surface] === 1 ? info.surface : kind === 'step' ? 'grass' : 'stone';
+      }
       var spec = kind === 'shot' ? (SHOT_SPEC[weapon] || SHOT_SPEC.rifle) : (KIND_SPEC[kind] || KIND_SPEC.ui);
       var buf = bufferFor(kind, weapon);
       if (!buf) return false;
@@ -1340,6 +1374,10 @@
       readPosition(info.position);
       var hasPos = spHasPos;
       if (!computeSpatial(!!info.occluded)) return false;
+      if (kind === 'shot' && hasPos && spDist > 45) {
+        var far = recordedBank['shotFar:' + weapon];
+        if (far && far.length) buf = far[(Math.random() * far.length) | 0];
+      }
 
       var vol = spec.vol;
       if (kind === 'shot') {
@@ -1359,11 +1397,9 @@
 
       var team = resolveTeam(info);
       var rate = 1;
-      if (kind === 'shot') {
-        if (team === 'red') rate = 0.94;
-        else if (team === 'blue') rate = 1.06;
-      }
-      rate *= kind === 'shot' ? 0.985 + Math.random() * 0.03 : 0.96 + Math.random() * 0.08;
+      // Small per-play variation so repeats never sound identical.
+      rate *= kind === 'shot' ? 0.985 + Math.random() * 0.03 : 0.95 + Math.random() * 0.1;
+      if (kind !== 'shot') vol *= 0.9 + Math.random() * 0.2;
       if (info.rate != null && isFinite(Number(info.rate))) rate *= clamp(info.rate, 0.5, 2);
       rate = clamp(rate, 0.5, 2);
 
@@ -1463,6 +1499,7 @@
     try {
       var kind = normalizeKind(info.kind, info);
       if (!kind) return;
+      if (info.action === 'hitConfirm' && info.head) play({ kind: 'headshot', volume: 0.32 });
       if (kind === 'respawn') lastRespawnSfx = now();
       // sfx is authoritative for local AND remote audio. A shot+shot-hook or
       // packet+firePose inference must not double it; no global time gate may
@@ -1583,13 +1620,20 @@
      soft (grass, dirt, sand, snow, leaves) and hard surfaces, and a fall
      faster than 7 m/s lands with a thud. */
   var stepDistance = 0, stepWasGround = true, stepLastVy = 0, stepLastLand = 0;
-  var SOFT_BLOCKS = null;
+  // Block type -> sound surface. Footsteps fold loose ground into grass.
+  function blockSurface(b, step) {
+    if (b === SNOW) return 'snow';
+    if (b === PLANKS || b === LOG || b === CACTUS) return 'wood';
+    if (b === GLASS) return step ? 'stone' : 'glass';
+    if (b === GOLD_BLOCK || b === DIAMOND_BLOCK) return step ? 'stone' : 'metal';
+    if (b === GRASS || b === DIRT || b === SAND || b === GRAVEL || b === MUD || b === LEAVES) return step ? 'grass' : 'soft';
+    return 'stone';
+  }
+  BCR.api.blockSurface = blockSurface;
   function stepSurface() {
     try {
-      if (!SOFT_BLOCKS) SOFT_BLOCKS = [GRASS, DIRT, SAND, SNOW, LEAVES, GRAVEL, MUD];
-      var b = getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.2), Math.floor(player.pos.z));
-      return SOFT_BLOCKS.indexOf(b) >= 0 ? 'soft' : 'hard';
-    } catch (e) { return 'soft'; }
+      return blockSurface(getBlock(Math.floor(player.pos.x), Math.floor(player.pos.y - 0.2), Math.floor(player.pos.z)), true);
+    } catch (e) { return 'grass'; }
   }
   BCR.on('postPlayer', function (dt) {
     try {
