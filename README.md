@@ -34,8 +34,10 @@ Score, View and Jet are at the top. Phones default to **Fast** graphics (no shad
 
 Internet rooms find each other through public MQTT relays (`broker.emqx.io`, then
 `broker.hivemq.com`), so there is no server to run, but rooms are not private. Once in a room,
-each player opens a WebRTC link to the host and game traffic skips the relay. The HUD shows the
-route next to ping: `direct`, `TURN` or `relay` (the broker fallback).
+each player opens a WebRTC link to the host through a TURN relay (the default when one is
+configured, as on the hosted site) and game traffic skips the broker. Add `?direct=1` to try a
+peer-to-peer link instead. The HUD shows the route next to ping: `TURN`, `direct` or `relay`
+(the broker fallback).
 
 **Strict networks.** Corporate or school firewalls, symmetric NAT and some mobile carriers block
 direct links. A TURN relay gets those players a fast link too. Free public TURN no longer

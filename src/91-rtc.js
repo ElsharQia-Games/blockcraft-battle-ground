@@ -1,10 +1,12 @@
 /* Blockcraft Battle Ground — direct links for internet rooms.
    91-rtc.js (after 90-net.js, whose MQTT publish/dispatch it plugs into)
 
-   Transport ladder, best first:
-     1. direct   — WebRTC data channel peer-to-peer (STUN finds the path)
-     2. TURN     — the same data channel through a TURN relay (UDP, then TCP
-                   and TLS on 443, which passes strict NATs and firewalls)
+   Transport ladder:
+     1. TURN     — the default when a relay is configured: a WebRTC data
+                   channel through the TURN relay (UDP, then TCP and TLS on
+                   443), which connects reliably on every network
+     2. direct   — peer-to-peer instead, opt-in with ?direct=1 (or the default
+                   when no relay is configured)
      3. broker   — the public MQTT broker that rooms already use to meet
    Each player links to the room host (a star: the host is the authority).
    The broker always carries discovery and signalling (one offer and one
@@ -135,9 +137,15 @@ async function rtcReadRoute(peer) {
 }
 
 async function rtcNewPeer(id, offerer) {
-  // ?relay=1 forces the TURN path, to test it from any network.
-  let forceRelay = false;
-  try { forceRelay = new URLSearchParams(location.search).get('relay') === '1'; } catch (e) { /* optional */ }
+  // TURN is the default whenever a relay is configured: it connects reliably
+  // on every network. ?direct=1 opts into peer-to-peer; ?relay=1 forces TURN.
+  const servers = await rtcTurnServers();
+  let forceRelay = servers.some((sv) => [].concat(sv.urls).some((u) => /^turns?:/.test(u)));
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get('direct') === '1') forceRelay = false;
+    if (q.get('relay') === '1') forceRelay = true;
+  } catch (e) { /* optional */ }
   const pc = new RTCPeerConnection({ iceServers: await rtcIceServers(), iceTransportPolicy: forceRelay ? 'relay' : 'all' });
   const peer = { id, pc, dc: null, open: false, startedAt: performance.now(), pending: [], remoteSet: false,
     offerer, route: '', restartTimer: 0, restarts: 0 };
