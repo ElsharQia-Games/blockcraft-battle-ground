@@ -2,70 +2,45 @@
 
 By **ElsharQia Games**.
 
-A procedurally generated voxel world with online gunfights, selectable match modes,
-quick combat construction, fuel-powered jetpacks and small rideable dragons.
-
-Everything is generated in the browser from one seed — terrain, biomes, trees, waterfalls,
-mudbrick Fayoum villages, chickens, villagers, dragons and 16 selectable characters. Bring
-seven weapons, build unlimited cover with a few clicks, and explore with your friends. No build step
-or downloaded character art: just HTML, CSS and JavaScript on top of [three.js](https://threejs.org),
-with embedded CC0 firearm recordings for weapon audio.
+A voxel arena shooter that runs in the browser on PC and phones. Every world is generated from
+one seed: terrain, biomes, villages, battle sites, dragons and 16 characters. Fight with seven
+weapons, throw up cover with one key, fly a jetpack, ride small dragons and play with friends
+over the internet or LAN. No build step: plain HTML, CSS and JavaScript on top of
+[three.js](https://threejs.org).
 
 ![Blockcraft Battle Ground](screenshot.png)
 
 ## Play
 
-**Hosted:** <https://elsharqia-games.github.io/blockcraft-battle-ground/>
+- **Hosted:** <https://elsharqia-games.github.io/blockcraft-battle-ground/>
+- **Local:** open `index.html` (works from `file://`; three.js loads from a CDN the first time).
+- **LAN server:** `npm start` (or `node server.js`, or double-click `start.bat`), then open
+  `http://localhost:8080`. Friends on the same network open `http://YOUR-IP:8080`.
 
-**Local / double-click:** open `index.html`. It runs straight from `file://` and still
-loads three.js from a CDN, so you need an internet connection the first time (or a cached copy).
-There is no install or bundling step. Keep `index.html`, `src/` and `assets/` together.
+On **Home**, pick a mode with the arrows and press **Play**. Your character, Settings and Help
+are in the menu below Play. **Esc** pauses.
 
-The **Home** screen puts **Play, Create room and Join by code** together. Mode & map,
-Characters and Settings have their own pages; connection help stays secondary.
-Click **Play** to enter. Mode & map also has **Play this match**, so setup does not require a trip back.
-**Esc** opens a separate **Pause** menu with Resume, Settings, room invites and Home;
-Back from Settings never resumes the game. Settings apply immediately and persist locally.
-The game requests fullscreen and keyboard capture where supported so gameplay key combinations
-take priority. Pausing releases the mouse; keyboard handling returns to normal outside gameplay.
+### Phones
 
-**LAN server (also serves the files):**
+Turn the phone sideways. The left thumb moves (push to the rim to sprint), the right thumb
+looks. Fire, Aim, Jump, Slide, Reload, Gun, Build and Rotate sit under the right thumb; Pause,
+Score, View and Jet are at the top. Phones default to **Fast** graphics (no shadows).
 
-```bash
-npm start          # or: node server.js
-# then open http://localhost:8080
-```
+## Play with friends
 
-On Windows you can also double-click `start.bat`.
+1. On Home, press **Create room** and send the 5-letter code (or an `index.html?room=CODE` link).
+2. Friends paste the code into **Join with a code**.
+3. Everyone presses **Play**. In a match, `P` copies the code again.
 
-## Play with a friend
+Internet rooms use public MQTT relays (`broker.emqx.io`, then `broker.hivemq.com`), so there is
+no server to run, but rooms are not private. One player is elected host; the host's tab
+decides hits, deaths, scores and teams, and picks the mode and map. LAN play uses `server.js`
+as the authority instead.
 
-### Internet (no server needed)
-
-1. Both of you open the same page (`index.html` or the hosted link).
-2. On **Home**, one player clicks **Create room** — a 5-character invite code appears beside **Copy code**.
-3. Send the code or an `index.html?room=CODE` link to your friend. They paste it into the Home room field and press **Join** or **Enter**.
-4. Both click **Play online** when the shared world is ready. `P` copies the active code again, `M` mutes sound.
-
-Joining keeps the menu open while connecting; **Cancel connection** is available if it stalls.
-The active invite code is separate from the join field, so Copy never shares an unsubmitted edit.
-Leaving from Home disconnects without silently joining another session. Home does not end your
-current match; **Return to match** takes you back. Settings save immediately and Back returns
-to the screen you came from, never straight into gameplay.
-
-Rooms travel over public MQTT-over-WebSocket relays (`broker.emqx.io`, then
-`broker.hivemq.com` as a fallback), so there is no server to host — but the relay is public,
-so do not treat rooms as private. Room codes match sessions; both players need this game.
-Block edits are retained per room, so a friend who joins later still sees the world you
-changed.
-
-You can also link straight into a room: `index.html?room=CODE`.
-
-### LAN / same machine
-
-Run `node server.js` and open `http://localhost:8080`; the built-in zero-dependency
-WebSocket server relays positions, shots, damage and edits. Friends on the same network open
-`http://YOUR-LOCAL-IP:8080` (or pass `?server=ws://YOUR-LOCAL-IP:8080`).
+**Teams.** Each player is put on the smaller team when they join and keeps that team until it
+is changed. The **Players** list on Home and in Pause shows both teams: anyone can switch their
+own side, and the host can move anybody. A switched player respawns at full health on the new
+side.
 
 ## Controls
 
@@ -73,296 +48,139 @@ WebSocket server relays positions, shots, damage and edits. Friends on the same 
 | --- | --- |
 | `W A S D` | Move |
 | Mouse | Look |
-| Left click | Shoot in combat; place the selected quick-build piece |
-| Right click | Hold to look through the weapon's optical scope in combat; click to cancel a quick-build piece |
-| `R` | Reload the current weapon |
-| `1`–`7` | In combat, select pistol, rifle, shotgun, SMG, sniper, revolver or LMG, in that order |
-| `Q` / wheel | Cycle weapons in combat; `Q` also leaves a blueprint and equips the next gun |
-| `Z` / `X` / `G` | Select a quick-build wall / stair-ramp / floor |
-| `T` | Rotate the quick-build piece |
-| `1`–`9` / wheel, with a blueprint active | Choose the construction material from the hotbar |
-| `Shift` + wheel, in building mode or with a blueprint active | Cycle all solid materials through the selected hotbar slot |
-| `B` | Toggle traditional mining/building mode (combat ↔ individual blocks) |
-| `E` | Mount a nearby small dragon / dismount; no inventory or crafting menu |
-| `Space` | Jump / swim up / ascend; hold for a higher ground jump; jump-cancel crouch or slide with headroom |
-| `Shift` | Sprint on foot / boost the jetpack |
-| `C` | Crouch / sneak on foot; fuel-gated air dash with the jetpack; descend while riding |
-| `Shift` + `C` | Start a stronger sprint slide on the ground |
-| `V` | Toggle normal right-over-shoulder third-person / first-person view |
-| `Ctrl` | Change character once per press on foot; hold to descend with the jetpack |
-| `F` | Toggle the fuel-powered jetpack |
-| `Tab` (hold) | Show the match scoreboard; wheel scrolls long rosters, release `Tab` to return |
-| `M` | Mute sound |
-| `P` | Copy room code |
-| `Esc` | Cancel a quick-build piece / pause and release the mouse / go Back in menu pages |
+| `Space` | Jump; hold for a higher jump |
+| `Shift` | Sprint |
+| `Ctrl` or `C` | Crouch; press while sprinting to slide |
+| Left click | Shoot / place |
+| Right click | Aim down sights |
+| `R` | Reload (rotates the piece in build mode) |
+| `1`-`7` / wheel | Select / cycle weapons |
+| `Q` | Build mode on / off |
+| `1` `2` `3` / wheel (build mode) | Wall, floor, ramp |
+| `Shift` + wheel (build mode) | Change material |
+| `B` | Block mode: left click mines, right click places single blocks |
+| `F` | Jetpack on / off (`Space` rise, `Ctrl` descend, `Shift` boost, `C` air dash) |
+| `E` | Mount / dismount a small dragon |
+| `V` | First / third person |
+| `K` | Change character |
+| `Tab` (hold) | Scoreboard |
+| `M` / `P` / `Esc` | Mute / copy room code / pause |
 
-The character menu supports **Tab** to move between buttons and **Enter** or **Space** to
-select. On smaller or shorter screens, scroll the menu to reach every character and the
-play/room controls.
-
-### Movement
-
-Hold `C` to crouch at 3.1 blocks/second with a ledge guard. Crouch lowers both
-the stance/camera and the collision body: standing is 1.8 blocks tall, crouched
-is 1.2. A low ceiling prevents standing up until there is space.
-
-Press `C` while sprinting to slide for up to 0.8 seconds at approximately
-11–12 blocks/second, with a 1.35-second cooldown. `Space` jump-cancels the slide
-or crouch when standing/jump clearance is available. Walls and arena boundaries
-stop the slide; leaving the ground retains bounded momentum rather than flight.
-
-A jump press is buffered for 120 ms before landing, with 90 ms of grace after leaving a
-ledge. A short tap rises roughly 1.8–2 metres; holding Space during the bounded rising window
-raises that to about 2.9 metres. Re-pressing Space in mid-air cannot renew the jump.
-Water movement is about 92% of normal walking speed. Hold Space to swim up; near the
-surface it uses the same regular jump and bounded hold as land, without requiring a bank.
-Release before another surface jump. `C` dives, and Space takes priority if both are held.
-A blocked bank or low roof still prevents passage.
-
-`F` activates a visible jetpack with a 100-point fuel tank. Hovering drains
-fuel; boosting and air dashes cost more. Fuel recharges on the ground after a
-short delay, and an empty tank turns the pack off.
-
-In jetpack flight, `Shift` boosts, `C` triggers a short air dash, and `Space`
-ascends—including `Shift` + `Space` and `Ctrl` + `Space`. Only held `Ctrl` descends, so
-boosting never cancels ascent. Pausing, death, and map regeneration release held
-movement/fire inputs.
-
-A small contact shadow and team-colored ground ring mark the surface directly
-below your feet, including while jumping or using the jetpack. The ring is clearer
-in the air and quieter on the ground. It marks the ground beneath you, not a guaranteed
-future trajectory, and does not shine through solid terrain.
-
-### Settings and match modes
-
-Personal settings persist locally: global sensitivity, independent hipfire/ADS multipliers
-for each of the seven weapons, crosshair design, red/blue accent, volume and mute.
-Each weapon multiplier ranges from 0.35× to 2.5× and does not affect building or riding.
-Crosshair choices are cross, dot, circle, brackets,
-chevron, T-cross and off; optical weapon reticles remain separate.
+## Modes
 
 | Mode | Rules |
 | --- | --- |
-| Team Deathmatch | Red versus blue, all weapons |
-| Free For All | Every player is an opponent, all weapons |
-| Snipers Only | Sniper loadout in a locked, smaller arena |
-| Shotguns Only | Shotgun loadout in a locked, smaller arena |
-| Lockdown | Red versus blue in a tight arena with a restricted loadout |
+| Team Deathmatch | Red vs Blue, all weapons, first to 40 |
+| Free For All | Everyone for themselves, first to 20 |
+| Gun Game | Each kill moves you to the next gun, pistol to sniper; first through all seven wins |
+| Low Gravity | Red vs Blue at 45% gravity, first to 30 |
+| Hardcore | Red vs Blue, 1.5x damage, no health regeneration, first to 30 |
+| Snipers Only | Snipers in a long arena, first to 15 |
+| Shotguns Only | Shotguns in a tight arena, first to 15 |
+| Sidearms | Pistols and revolvers in a compact arena, first to 15 |
+| Lockdown | Red vs Blue in a tight arena with rifles, SMGs, shotguns and revolvers, first to 25 |
 
-Play setup's map randomizer regenerates terrain from a numeric seed. The room
-host controls shared mode/map changes; other players keep their personal aim
-and audio settings. A shared seed selects the same terrain, villages and arena.
+Arena modes build a walled ring with team spawn pads and mirror-symmetric cover, so neither
+side is favoured.
 
-### Camera and weapon optics
+## Weapons
 
-Normal third person places the camera over the **right shoulder**; `V` switches between
-that view and first person. The shoulder camera pulls in around nearby blocks and hides
-the avatar when too close. Both normal views keep a clear, dark-edged **hip-fire crosshair**.
-When looking steeply downward, the centre aim ray converges directly beneath your feet
-without moving the camera off the shoulder. Shooting and building use that same corrected
-ray; normal forward viewing and first-person/ADS aiming are unchanged.
+Health is **150** and regenerates 14 HP/s after 6 seconds without damage (not in Hardcore).
+Headshot multipliers differ per weapon; only a sniper headshot kills in one shot.
 
-**Hold right mouse to aim down sights** from either camera view. Each weapon has a different
-physical sight and housing, not just a reticle change. The open sights keep the actual gun
-visible and align its sight to the camera ray; the sniper uses an enclosed tube and the
-strongest magnification. Release right mouse to return to your chosen normal view.
-Health, ammo, hit markers and damage feedback stay visible while aiming.
+| Weapon | Damage | Head | Fire rate | Magazine | Body shots to kill |
+| --- | --- | --- | --- | --- | --- |
+| Pistol | 30 | 2.0x | 360 rpm | 14 | 5 |
+| Rifle | 23 | 1.6x | 640 rpm | 30 | 7 |
+| Shotgun | 14 x 9 pellets | 1.5x | 75 rpm | 6 | 2 at close range |
+| SMG | 15 | 1.4x | 880 rpm | 32 | 10 |
+| Sniper | 115 | 2.0x | 42 rpm | 5 | 2 |
+| Revolver | 58 | 2.0x | 170 rpm | 6 | 3 |
+| LMG | 21 | 1.4x | 600 rpm | 75 | 8 |
 
-| Weapon | Aiming view |
-| --- | --- |
-| Pistol | Front/rear iron sights |
-| Rifle | Reflex sight window |
-| Shotgun | Raised rib and front bead |
-| SMG | Hooded compact sight |
-| Sniper | Enclosed scope tube with mil-dot cross and range hashes |
-| Revolver | Rear notch and front blade |
-| LMG | Aperture sight and protective wings |
-
-### Hit feedback and teams
-
-Confirmed hits show floating damage numbers and a short-lived health bar above the
-target. Shotgun pellets from one shot combine into one number. Bars follow the current
-health/stance, hide behind cover and expire after a few seconds; rejected shots do not
-invent damage or HP changes. Player outlines and health borders use the actual red/blue
-team, even when teammates and opponents wear the same character skin. Non-team modes
-and ambient villagers keep a neutral outline.
-
-### Shooting cover
-
-Bullets damage voxel blocks. Keep firing to break cover: durability depends on the
-material, so tougher blocks take more hits. Built structures use the same material rules.
-
-### Quick combat construction
-
-1. Press `Z` for a wall, `X` for a stair-ramp, or `G` for a floor. Aim to position the preview.
-2. Use **`1`–`9`** or the **wheel** to choose a hotbar material; planks are the starting material.
-   Press `T` to rotate. The build HUD shows direction, voxel count, unlimited supply (`∞`) and placement feedback.
-3. **Left-click** to place it, or **hold left click** to keep building as you move and aim.
-4. **Right-click**, **Esc**, or the same blueprint key cancels the preview. Select another piece
-   with `Z`, `X` or `G`; `Q` returns to a gun, and `B` switches to traditional block building.
-
-Walls and floors are 3×3 (9 voxels); ramps have three solid steps (18 voxels). These counts
-describe structure sizes. **Building materials are unlimited**, and matching blocks are
-reused. A green preview is ready, red explains a blocked placement, and blue marks an
-already-complete piece.
-
-**Use `Space` to jump up the ramp's one-block risers.** Chained ramps share the previous
-top step. Held building repeats every 180 ms as you move or aim at a new placement.
-
-Quick pieces can **float in open air** within building reach. Leave room for the full
-piece and aim at a clear placement. Completed structures can be mined again and synchronize
-through the normal room block-edit system. While a blueprint is active, **right-click cancels it**; optical scopes
-are available when firing a weapon in combat.
-
-### Traditional blocks and unlimited materials
-
-Press `B` to switch to individual-block building. **Left-click** breaks a block;
-**right-click** places the selected hotbar block with unlimited materials. Use **`1`–`9`** or the
-**mouse wheel** to select a slot. Hold either mouse button to keep mining or placing.
-Aim into empty space to place a floating block within reach. Press `B` again to return to combat.
-
-Use **Shift + wheel** to cycle every solid material through the selected slot.
-There are no resource counts, pickup requirements, recipes or crafting popup.
-Both traditional and quick building reject occupied player/dragon bodies and blocked sight lines.
+Damage drops 20% beyond 65% of a weapon's range. Bullets also wear down blocks; tougher
+materials take more hits.
 
 ## What is in it
 
-- **World** — 256×256×80 voxel world from a seeded value-noise heightmap, with grass,
-  forest, desert, snow and ocean biomes, 880 trees, cacti, waterfalls, and 5 mudbrick
-  villages inspired by El Fayoum, each with houses, palms and villagers.
-- **Characters** — 16 selectable, animated humanoids: Steve, CJ, Mario, Ashen One, Chosen
-  Undead, Wolf, Tarnished, Seif, Meedo, Mko, Michael Jackson, Hokage, Kestrel, Oren, Kratos
-  and Leon Kennedy. Procedural pixel-art skins combine detailed canon-inspired outfits
-  with layered hair, longer back/nape coverage where appropriate, and character-specific
-  accessories. Silhouette outlines help characters stand out against the terrain.
-  Mko and Michael Jackson have separate roster entries and appearances.
-  Village NPCs mix Fayoum villagers with Michael Jackson and his own moonwalk animation.
-- **Movement** — smooth acceleration, buffered jumps, crouching/sneaking, short sprint slides,
-  swimming and fuel-powered boost/dash flight, with a collision-aware right-over-shoulder camera, a first-person
-  view, and a dedicated scope-eye view when aiming.
-- **Physics** — players, animals and villagers use swept voxel contacts rather
-  than walking through buildings or floating over removed terrain. Water adds
-  drag and buoyancy; villagers wade or paddle and chickens float.
-- **Dragons** — four larger, indestructible solid guardians (Emberwing, Jadewing, Stormcrest and Duskmantle)
-  circle the overworld with articulated wings, necks and tails. Their terrain-safe flight
-  paths use a shared clock and are initialized after terrain generation.
-  Each seed adds two or three much smaller mounts, all rideable by any player.
-  Guardians cannot be ridden. Each mount admits one rider at a time for at most 30 seconds,
-  with fire breath, a heat limit and voxel-aware core/camera collisions. Dismounts step off
-  at the dragon's current height and fall naturally, with bounded carried momentum rather
-  than a teleport to the ground. `F` can activate the jetpack during the fall if fuel remains.
-- **Combat** — seven weapons (pistol, rifle, shotgun, SMG, sniper, revolver and LMG) with
-  distinct damage, rate of fire, spread, recoil, range and per-weapon reload sequences.
-  Seven physical sight views pair distinct housings with weapon-specific magnification; the sniper zooms furthest.
-  Hip-fire works in both normal camera views. Hitscan with headshot
-  multipliers, tracers, muzzle flash, impact particles, sampled/procedural WebAudio gunshots,
-  health with regeneration, kill feed, K/D, death and respawn. Bullets chip away at
-  material-dependent block durability until cover breaks.
-  Tiny, line-of-sight aim assistance excludes teammates. Confirmed eliminations
-  trigger large messages; the death camera follows the killer until respawn.
-- **HUD** — compact red/blue scores, health, ammunition, enlarged measured FPS and live ping. The
-  topographic minimap caches terrain contours and water, overlays heading,
-  landmarks and arena boundaries, and briefly marks relevant nearby gunfire.
-- **Audio** — seven embedded CC0 firearm recordings are layered with procedural handling sounds.
-  Spatial WebAudio sources provide directional, distance-attenuated shots and impacts,
-  with muffling behind geometry, bounded voices and independent volume/mute.
-- **Building** — quick walls, stair-ramps and floors for combat cover, with rotation,
-  placement previews, floating air builds and unlimited building materials. Traditional mining/placing, 21 block types,
-  nine hotbar slots and direct material cycling, without crafting or resource management.
-- **Networking** — one transport interface with two back ends: the LAN WebSocket server
-  (`server.js`) and internet MQTT rooms. Remote players are interpolated with name tags and
-  held weapons, block edits sync both ways, and late joiners get retained edits. Hold `Tab`
-  for the live scoreboard: player, character, weapon, kills, deaths and health.
+- **World:** a 256 x 256 x 80 voxel world with grass, forest, desert, snow and ocean biomes,
+  villages with villagers and chickens, waterfalls, and eight seeded battle sites
+  (watchtowers, walled compounds, ruins and trench lines, marked T, C, R and X on the minimap).
+- **Movement:** fast acceleration, sprint slides that keep momentum into a jump, buffered
+  jumps, crouching, swimming and a fuel-powered jetpack.
+- **Building:** walls, floors and ramps placed with one click or held to build continuously,
+  plus single-block mining and placing. Materials are unlimited.
+- **Dragons:** four indestructible guardians circle the world; two or three small dragons can
+  each be ridden by one player for 30 seconds, with fire breath.
+- **Graphics:** lit terrain with sun shadows, reflective water and glass, and filmic tone
+  mapping. **High** (desktop default) or **Fast** (phones; no shadows, shorter view
+  distance), switchable in Pause or with `?gfx=low|high`.
+- **Feel:** per-weapon camera shake, muzzle flash and smoke, ejected casings, impact dust,
+  hit markers, floating damage numbers and a kill pulse. Shake respects reduced-motion.
+- **Audio:** real CC0 recordings for gunshots, reloads, impacts, footsteps and UI, played
+  positionally with distance falloff and muffling behind blocks. Sources and licences are in
+  [assets/audio/LICENCES.md](assets/audio/LICENCES.md).
+- **UI:** a console-style Home with the world visible behind it, a Players list with team
+  switching, and a minimal HUD (score, health, ammo, FPS and ping) that adapts to phones.
 
 ## Project layout
 
+The game is a set of classic scripts loaded in order by `index.html`, which is what lets it run
+from `file://`. Top-level names are shared between files through the global scope.
+
 ```
-index.html          markup, styles and the boot loader (imports three.js, loads src/*.js)
-src/04-runtime.js   shared hooks and feature APIs (loads before core)
-src/00-core.js      runtime seed, world constants, renderer, scene, camera, sky
-src/05-settings.js  persistent lobby controls, sensitivity, crosshair and audio settings
-src/10-textures.js  procedural block atlas, block definitions, voxel storage
-src/20-world.js     noise, biomes, terrain, trees, villages, waterfalls
-src/15-modes.js     match rules, teams, locked arenas and seeded regeneration (after world)
-src/22-physics.js   shared swept voxel collisions, NPC grounding and water physics
-src/30-meshing.js   face meshing and chunk rebuilds
-src/40-characters.js characters, pixel-art painters, villagers, chickens
-src/44-dragon-rules.js shared browser/server guardian and mount descriptors
-src/45-dragons.js   procedural dragons, solid articulated bodies, spawning and flight
-src/46-riding.js    exclusive 30-second mount rides, fire breath, heat and ride camera
-src/48-outline.js   character silhouette outlines and viewport synchronization
-src/50-player.js    player motion, shoulder/scope camera, avatar, block picking, spawn
-src/52-jetpack.js   fuel, boost, air dash, reusable pack/flame visuals and fuel meter
-src/53-ground-marker.js ground shadow/ring and cached surface query for downward aim
-src/55-building.js  quick construction, previews, rotation and voxel placement
-src/58-killcam.js   death camera that follows the killer until respawn
-src/60-combat.js    weapons, scope state/FOV, models, audio, effects, hit tests, health, death
-src/62-combat-fx.js bounded aim assistance, direction feedback and elimination messages
-src/63-player-feedback.js confirmed floating damage and occlusion-aware overhead health
-src/65-destruction.js material durability, bullet damage and block destruction feedback
-src/70-inventory.js unlimited building materials, hotbar, material cycling and toasts
-src/80-input.js     pointer lock, lifecycle-guarded mouse stream, keyboard and resize
-src/85-scoreboard.js hold-Tab scoreboard, roster and match statistics
-src/86-hud.js       compact red/blue HUD, live ping and consolidated match/weapon readouts
-src/87-minimap.js   cached topographic contours, heading, landmarks and arena boundary
-src/88-menu.js      Home room actions, dedicated pages/Pause, contextual Back and trusted Play/Resume
-src/90-net.js       LAN WebSocket + MQTT transport, rooms, remote players
-src/92-sync.js      ping/jitter metrics and connection/watchdog bridge
-src/94-audio.js     directional, distance-attenuated sampled/procedural WebAudio SFX
-src/99-boot.js      boot sequence and main loop
-assets/audio/      embedded CC0 recordings and their licence/provenance record
-server.js           zero-dependency static + WebSocket LAN server
+index.html               markup, base styles and the script loader
+server.js                zero-dependency static + WebSocket LAN server (room authority)
+assets/audio/            embedded CC0 sound banks and their licence record
+src/00-core.js           world constants, renderer, scene, camera, sky
+src/04-runtime.js        shared event hooks and feature registry (BC)
+src/05-settings.js       personal settings, match setup and crosshair
+src/10-textures.js       procedural block atlas and voxel storage
+src/15-modes.js          match modes, teams, arenas and seeded regeneration
+src/20-world.js          terrain, biomes, trees, villages, waterfalls
+src/21-structures.js     battle sites and arena cover
+src/22-physics.js        swept voxel collisions and water physics
+src/30-meshing.js        chunk meshing and lit world materials
+src/40-characters.js     characters, skins, villagers and chickens
+src/41-graphics.js       shadows, reflections, view distance and quality levels
+src/44-46-*.js           dragon rules, dragons and riding
+src/48-outline.js        character outlines
+src/50-player.js         movement, cameras and avatar
+src/52-jetpack.js        jetpack
+src/53-ground-marker.js  ground shadow and ring under the player
+src/55-building.js       quick build pieces and placement
+src/58-killcam.js        death camera
+src/60-combat.js         weapons, holds, shooting, damage, death and respawn
+src/62-combat-fx.js      aim assist, damage direction and kill banners
+src/63-player-feedback.js damage numbers and overhead health
+src/64-feedback-vfx.js   camera shake, flashes, casings and puffs
+src/65-destruction.js    block durability
+src/70-inventory.js      hotbar and materials
+src/80-input.js          keyboard, mouse and pointer lock
+src/82-touch.js          phone and tablet controls
+src/85-scoreboard.js     hold-Tab scoreboard
+src/86-hud.js            HUD data owners (kill feed, build, jetpack panels)
+src/87-minimap.js        minimap
+src/88-menu.js           screen flow, focus and Escape handling
+src/89-ui-system.js      menu and HUD design system, players and teams panel, icons
+src/90-net.js            LAN WebSocket and MQTT transport, rooms and host authority
+src/92-sync.js           ping and connection diagnostics
+src/94-audio.js          positional audio engine
+src/99-boot.js           boot sequence and main loop
 ```
 
-The `src/` files are plain classic scripts loaded in order, which is what lets the game run
-by double-clicking `index.html` — no bundler, no dev server, no modules over `file://`.
-Top-level `const`/`let` are shared between them through the global lexical scope. See
-`index.html` for the loader. Dragons and outlines load before player code, quick building
-before combat, and destruction before inventory/input. Keep that order when adding systems.
+`window.__blockcraft` exposes the world, player, combat and network objects, and
+`window.__blockcraft.features` (also `BC.api`) exposes each system's API, for example
+`net.requestTeam(id, team)`, `graphics.setQuality('low')` and `modes.setActive('gungame')`.
 
-After the world is ready, `window.__blockcraft` exposes the existing world, inventory,
-character, combat and network tools alongside `quickBuild`, `selectBuildPiece`,
-`cancelQuickBuild`, `rotateBuildPiece`, `placeQuickBuild`, `updateBuilding`,
-`resetBuildingInput`, `dragons`, `spawnDragons`, `updateDragons`, `updatePlayer`,
-`resetPlayerMotion`, `updateAvatarWeaponPose` and `isScopeActive` for console experiments and verification.
-Additional helpers include `makeDragon`, `BUILD_PIECES`, `setQuickBuildMaterial`,
-`buildPieceCells`, `preflightBuildPiece`, `commitBuildPiece`, `setBuildingHeld` and `resetGameplayInput`.
-Unlimited-building access is available through `UNLIMITED_BUILDING`, `buildItemCount` and
-`takeBuildItems`. Outline helpers are `addCharacterOutline` and `updateCharacterOutlines`.
-Destruction exposes `voxelDamageMap`, `damageVoxelFromShot`, `applyVoxelDamage`,
-`updateDestruction`, `resetVoxelDamage`, `VOXEL_DURABILITY` and `voxelDurability`.
-Scoreboard tools are `scoreboard`, `setScoreboardVisible` and `updateScoreboard`.
-The boot sequence spawns dragons before shader warm-up; the main loop updates motion,
-camera, combat and building in order, with a capped timestep and a fresh clock after tab resume.
-Destruction, scoreboard state and outline viewport uniforms update before every render.
+## Tests
 
-New systems are available through `window.__blockcraft.features` (also `BC.api`):
-`settings`, `modes`, `world`, `physics`, `jetpack`, `riding`, `killcam`, `combatFx`,
-`hud`, `minimap`, `menus`, `dragons`, `outlines`, `groundMarker`, `playerFeedback`, `net` and `audio`.
-The current numeric seed is exposed as
-`window.__blockcraft.seed`; `?seed=12345` overrides the saved map seed.
-
-Feature hooks run in this order: `preFrame`, player/camera/combat,
-`postPlayer`, world/remote updates, `frame`, `lateFrame`, rendering. The final
-camera override runs before the spatial listener update. Map regeneration pauses
-the frame loop so no physics or outgoing pose reads a partially built world.
-
-### Validation commands
-
-`npm run test:syntax` checks every game script, the server, inline scripts,
-classic-loader dependencies and shared-scope declarations **without starting a
-server or browser**. `npm test` runs the separate browser regression suite and
-requires Node 24+ and Chromium/Edge; it is not part of a syntax-only check.
-
-## Notes
-
-- three.js r160 is loaded from jsDelivr (unpkg as fallback).
-- The internet mode needs a WebSocket-capable network; restrictive firewalls can block the
-  public brokers, in which case use the LAN server.
-- Deployed with GitHub Pages from the repository root.
+- `npm run test:syntax`: syntax, loader order and shared-scope checks, with no browser.
+- `npm test`: the browser regression suite (Node 24+ and Chromium or Edge). It covers boot,
+  movement, combat, building, menus at three viewport sizes, audio, and two-to-three player LAN
+  matches including kills, team switching and late joins.
 
 ## License
 
-Code: MIT — see [LICENSE](LICENSE).
-Embedded firearm recordings: CC0-1.0 — see [assets/audio/LICENCES.md](assets/audio/LICENCES.md)
-for the original creator, source files and adaptations.
+Code: MIT, see [LICENSE](LICENSE). Sounds: CC0 1.0 or public domain, see
+[assets/audio/LICENCES.md](assets/audio/LICENCES.md).
