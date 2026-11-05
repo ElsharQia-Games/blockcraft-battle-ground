@@ -131,7 +131,10 @@ async function rtcReadRoute(peer) {
 }
 
 async function rtcNewPeer(id, offerer) {
-  const pc = new RTCPeerConnection({ iceServers: await rtcIceServers() });
+  // ?relay=1 forces the TURN path, to test it from any network.
+  let forceRelay = false;
+  try { forceRelay = new URLSearchParams(location.search).get('relay') === '1'; } catch (e) { /* optional */ }
+  const pc = new RTCPeerConnection({ iceServers: await rtcIceServers(), iceTransportPolicy: forceRelay ? 'relay' : 'all' });
   const peer = { id, pc, dc: null, open: false, startedAt: performance.now(), pending: [], remoteSet: false,
     offerer, route: '', restartTimer: 0, restarts: 0 };
   pc.onicecandidate = (e) => { if (e.candidate) rtcSignal(id, { type: 'ice', candidate: e.candidate.toJSON() }); };
