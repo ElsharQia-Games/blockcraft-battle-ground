@@ -34,8 +34,15 @@ Score, View and Jet are at the top. Phones default to **Fast** graphics (no shad
 
 Internet rooms find each other through public MQTT relays (`broker.emqx.io`, then
 `broker.hivemq.com`), so there is no server to run, but rooms are not private. Once in a room,
-each player opens a direct WebRTC link to the host and game traffic skips the relay. The HUD
-shows `direct` next to ping, or `relay` when a strict network forces the fallback. One player is elected host; the host's tab
+each player opens a WebRTC link to the host and game traffic skips the relay. The HUD shows the
+route next to ping: `direct`, `TURN` or `relay` (the broker fallback).
+
+**Strict networks.** Corporate or school firewalls, symmetric NAT and some mobile carriers block
+direct links. A TURN relay gets those players a fast link too. Free public TURN no longer
+exists, so add one in [`net-config.js`](net-config.js): a free [Metered](https://www.metered.ca)
+app (the page fetches short-lived credentials, which works on GitHub Pages), or your own coturn
+server. Without TURN those players fall back to the broker. The API key in `net-config.js` is
+public on a GitHub Pages site, so use a key restricted to TURN credentials. One player is elected host; the host's tab
 decides hits, deaths, scores and teams, and picks the mode and map. LAN play uses `server.js`
 as the authority instead.
 

@@ -299,7 +299,8 @@
       put('ping', H.ping, Number.isFinite(ping) ? String(ping) : '--');
       flag('net', H.net, 'is-bad', Number.isFinite(ping) && ping > 150);
       const rtcApi = BC.api.rtc, mqttRoom = typeof net !== 'undefined' && net.mode === 'mqtt' && net.online;
-      put('route', H.route, mqttRoom ? (rtcApi && rtcApi.direct ? 'direct' : 'relay') : '');
+      const route = mqttRoom && rtcApi ? rtcApi.route : '';
+      put('route', H.route, route === 'broker' ? 'relay' : route === 'turn' ? 'TURN' : route);
 
       const hp = Math.max(0, Math.round(health));
       put('hp', H.hp, String(hp));

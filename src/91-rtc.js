@@ -1,13 +1,20 @@
-/* Blockcraft Battle Ground — direct peer-to-peer links for internet rooms.
+/* Blockcraft Battle Ground — direct links for internet rooms.
    91-rtc.js (after 90-net.js, whose MQTT publish/dispatch it plugs into)
 
-   Internet rooms relay every packet through a public MQTT broker, which can be
-   on another continent: client -> broker -> host -> broker -> client. This
-   module opens a WebRTC data channel between each player and the room host
-   (a star, because the host is the authority) and sends room traffic over it.
-   The broker keeps doing discovery, signalling (offers/answers/ICE on
-   blockcraft/<room>/rtc/<id>) and is the fallback whenever a direct link is
-   not open, so nothing breaks behind strict NATs (no TURN server).
+   Transport ladder, best first:
+     1. direct   — WebRTC data channel peer-to-peer (STUN finds the path)
+     2. TURN     — the same data channel through a TURN relay (UDP, then TCP
+                   and TLS on 443, which passes strict NATs and firewalls)
+     3. broker   — the public MQTT broker that rooms already use to meet
+   Each player links to the room host (a star: the host is the authority).
+   The broker always carries discovery and signalling (offers/answers/ICE on
+   blockcraft/<room>/rtc/<id>) and takes over automatically whenever no link is
+   open, so a room never breaks.
+
+   TURN servers are not free any more, so they come from net-config.js:
+   static servers, or a Metered app whose API mints short-lived credentials
+   per session (no long-lived secret in the page). With no TURN configured
+   the ladder is direct, then broker.
 
    Safety: a data-channel message is dispatched as if it arrived on
    blockcraft/<room>/msg/<peer id>, where the id is the peer this connection
@@ -17,19 +24,62 @@
    must not be lost or reordered behind newer state. */
 'use strict';
 
-const RTC_ICE_SERVERS = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
-const RTC_OPEN_TIMEOUT_MS = 9000;
-const RTC_RETRY_MS = 15000;
+const RTC_STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+const RTC_OPEN_TIMEOUT_MS = 12000;     // TURN over TCP can take a few seconds
+const RTC_RETRY_MS = [2000, 5000, 10000, 20000];
+const RTC_RESTART_AFTER_MS = 2500;     // 'disconnected' this long -> ICE restart
 const RTC_MAX_BUFFER = 256 * 1024;
 const RTC_MAX_SIGNAL = 24000;
+const RTC_TURN_TTL_MS = 20 * 60 * 1000;
 
 const rtc = {
   supported: typeof RTCPeerConnection === 'function',
-  peers: new Map(),      // peer id -> { id, pc, dc, open, startedAt, pending: [], remoteSet }
-  lastTry: new Map(),    // host id -> last offer time (clients)
-  room: '', host: ''
+  peers: new Map(),      // peer id -> { id, pc, dc, open, startedAt, pending, remoteSet, offerer, route }
+  attempts: new Map(),   // host id -> { count, at } (clients)
+  room: '', host: '',
+  turn: { servers: [], at: -Infinity, loading: null }
 };
 
+/* ---------------- ICE servers (STUN + optional TURN) ---------------- */
+function rtcConfig() {
+  const c = typeof window !== 'undefined' && window.BC_NET_CONFIG;
+  return c && typeof c === 'object' ? c : {};
+}
+
+function rtcCleanServers(list) {
+  if (!Array.isArray(list)) return [];
+  return list.filter((s) => s && (typeof s.urls === 'string' || Array.isArray(s.urls))).map((s) => ({
+    urls: s.urls, username: typeof s.username === 'string' ? s.username : undefined,
+    credential: typeof s.credential === 'string' ? s.credential : undefined
+  }));
+}
+
+async function rtcTurnServers() {
+  const t = rtc.turn, cfg = rtcConfig();
+  if (performance.now() - t.at < RTC_TURN_TTL_MS) return t.servers;
+  if (t.loading) return t.loading;
+  t.loading = (async () => {
+    let servers = rtcCleanServers(cfg.turn);
+    const m = cfg.metered;
+    if (m && typeof m.domain === 'string' && typeof m.apiKey === 'string' && /^[\w.-]+$/.test(m.domain)) {
+      try {
+        const res = await fetch('https://' + m.domain + '/api/v1/turn/credentials?apiKey=' + encodeURIComponent(m.apiKey));
+        if (res.ok) servers = servers.concat(rtcCleanServers(await res.json()));
+      } catch (e) { /* TURN is optional; direct and broker still work */ }
+    }
+    t.servers = servers;
+    t.at = performance.now();
+    t.loading = null;
+    return servers;
+  })();
+  return t.loading;
+}
+
+async function rtcIceServers() {
+  return RTC_STUN.concat(await rtcTurnServers());
+}
+
+/* ---------------- links ---------------- */
 function rtcActive() {
   return rtc.supported && typeof net !== 'undefined' && net.mode === 'mqtt' && net.online && !!net.id && !!net.room;
 }
@@ -43,6 +93,7 @@ function rtcClose(id, reason) {
   const peer = rtc.peers.get(id);
   if (!peer) return;
   rtc.peers.delete(id);
+  clearTimeout(peer.restartTimer);
   try { if (peer.dc) peer.dc.close(); } catch (e) { /* closed */ }
   try { peer.pc.close(); } catch (e) { /* closed */ }
   peer.open = false;
@@ -53,7 +104,12 @@ function rtcCloseAll() { for (const id of [...rtc.peers.keys()]) rtcClose(id); }
 
 function rtcWireChannel(peer, dc) {
   peer.dc = dc;
-  dc.onopen = () => { peer.open = true; netEmitStatus(); };
+  dc.onopen = () => {
+    peer.open = true;
+    rtc.attempts.delete(peer.id);
+    rtcReadRoute(peer);
+    netEmitStatus();
+  };
   dc.onclose = () => { peer.open = false; rtcClose(peer.id, 'closed'); };
   dc.onerror = () => { peer.open = false; };
   dc.onmessage = (e) => {
@@ -62,15 +118,49 @@ function rtcWireChannel(peer, dc) {
   };
 }
 
-function rtcNewPeer(id) {
-  const pc = new RTCPeerConnection({ iceServers: RTC_ICE_SERVERS });
-  const peer = { id, pc, dc: null, open: false, startedAt: performance.now(), pending: [], remoteSet: false };
+// Was the chosen path direct or through a TURN relay? (For the HUD.)
+async function rtcReadRoute(peer) {
+  try {
+    const stats = await peer.pc.getStats();
+    let pair = null;
+    stats.forEach((s) => { if (s.type === 'transport' && s.selectedCandidatePairId) pair = stats.get(s.selectedCandidatePairId); });
+    if (!pair) stats.forEach((s) => { if (s.type === 'candidate-pair' && s.nominated && s.state === 'succeeded') pair = s; });
+    const local = pair && stats.get(pair.localCandidateId), remote = pair && stats.get(pair.remoteCandidateId);
+    peer.route = (local && local.candidateType === 'relay') || (remote && remote.candidateType === 'relay') ? 'turn' : 'direct';
+  } catch (e) { peer.route = 'direct'; }
+}
+
+async function rtcNewPeer(id, offerer) {
+  const pc = new RTCPeerConnection({ iceServers: await rtcIceServers() });
+  const peer = { id, pc, dc: null, open: false, startedAt: performance.now(), pending: [], remoteSet: false,
+    offerer, route: '', restartTimer: 0, restarts: 0 };
   pc.onicecandidate = (e) => { if (e.candidate) rtcSignal(id, { type: 'ice', candidate: e.candidate.toJSON() }); };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') rtcClose(id, 'failed');
+    const state = pc.connectionState;
+    if (state === 'connected') { clearTimeout(peer.restartTimer); peer.restarts = 0; rtcReadRoute(peer); }
+    else if (state === 'disconnected') {
+      // A brief Wi-Fi/mobile blip: renegotiate the path instead of dropping the link.
+      clearTimeout(peer.restartTimer);
+      peer.restartTimer = setTimeout(() => rtcRestart(peer), RTC_RESTART_AFTER_MS);
+    } else if (state === 'failed') {
+      if (peer.offerer && peer.restarts < 2) rtcRestart(peer);
+      else rtcClose(id, 'failed');
+    } else if (state === 'closed') rtcClose(id, 'closed');
   };
   rtc.peers.set(id, peer);
   return peer;
+}
+
+async function rtcRestart(peer) {
+  if (!rtc.peers.has(peer.id) || peer.pc.connectionState === 'connected') return;
+  if (!peer.offerer) return; // the host waits for the player's restart offer
+  peer.restarts++;
+  try {
+    peer.pc.setConfiguration({ iceServers: await rtcIceServers() });
+    const offer = await peer.pc.createOffer({ iceRestart: true });
+    await peer.pc.setLocalDescription(offer);
+    rtcSignal(peer.id, { type: 'offer', restart: true, sdp: peer.pc.localDescription.sdp });
+  } catch (e) { rtcClose(peer.id, 'failed'); }
 }
 
 async function rtcSetRemote(peer, description) {
@@ -79,12 +169,15 @@ async function rtcSetRemote(peer, description) {
   for (const c of peer.pending.splice(0)) { try { await peer.pc.addIceCandidate(c); } catch (e) { /* stale */ } }
 }
 
-// Client side: offer a direct link to the current host.
+// Player side: offer a link to the current host.
 async function rtcOffer(hostId) {
-  rtc.lastTry.set(hostId, performance.now());
-  const peer = rtcNewPeer(hostId);
-  rtcWireChannel(peer, peer.pc.createDataChannel('bc', { ordered: true }));
+  const a = rtc.attempts.get(hostId) || { count: 0, at: 0 };
+  a.count++; a.at = performance.now();
+  rtc.attempts.set(hostId, a);
+  let peer;
   try {
+    peer = await rtcNewPeer(hostId, true);
+    rtcWireChannel(peer, peer.pc.createDataChannel('bc', { ordered: true }));
     const offer = await peer.pc.createOffer();
     await peer.pc.setLocalDescription(offer);
     rtcSignal(hostId, { type: 'offer', sdp: peer.pc.localDescription.sdp });
@@ -101,17 +194,23 @@ async function rtcOnSignal(from, payload) {
   try {
     if (msg.type === 'offer' && typeof msg.sdp === 'string') {
       // Only the host accepts links, only from players actually in the room.
-      if (!amHost || !mqtt.presence.has(from) || rtc.peers.size >= NET_MAX_PEERS) return;
-      rtcClose(from);
-      const peer = rtcNewPeer(from);
-      peer.pc.ondatachannel = (e) => { if (e.channel.label === 'bc') rtcWireChannel(peer, e.channel); };
+      if (!amHost || !mqtt.presence.has(from)) return;
+      let peer = rtc.peers.get(from);
+      if (!(msg.restart && peer)) {
+        if (!peer && rtc.peers.size >= NET_MAX_PEERS) return;
+        rtcClose(from);
+        peer = await rtcNewPeer(from, false);
+        peer.pc.ondatachannel = (e) => { if (e.channel.label === 'bc') rtcWireChannel(peer, e.channel); };
+      }
       await rtcSetRemote(peer, { type: 'offer', sdp: msg.sdp });
       const answer = await peer.pc.createAnswer();
       await peer.pc.setLocalDescription(answer);
       rtcSignal(from, { type: 'answer', sdp: peer.pc.localDescription.sdp });
     } else if (msg.type === 'answer' && typeof msg.sdp === 'string') {
       const peer = rtc.peers.get(from);
-      if (peer && !peer.remoteSet && from === net.hostId) await rtcSetRemote(peer, { type: 'answer', sdp: msg.sdp });
+      if (peer && peer.offerer && from === net.hostId && peer.pc.signalingState === 'have-local-offer') {
+        await rtcSetRemote(peer, { type: 'answer', sdp: msg.sdp });
+      }
     } else if (msg.type === 'ice' && msg.candidate && typeof msg.candidate === 'object') {
       const peer = rtc.peers.get(from);
       if (!peer) return;
@@ -121,6 +220,7 @@ async function rtcOnSignal(from, payload) {
   } catch (e) { rtcClose(from); }
 }
 
+/* ---------------- routing ---------------- */
 // Called by mqttPublish for every non-retained publish. Returns true when the
 // broker copy can be skipped.
 function rtcRoute(topic, payload) {
@@ -133,8 +233,8 @@ function rtcRoute(topic, payload) {
     try { peer.dc.send(payload); return true; } catch (e) { return false; }
   };
   if (net.hostId !== net.id) return send(rtc.peers.get(net.hostId));
-  // Host: fan out to every direct link; skip the broker only when every
-  // player in the room has one (the others still need the broker copy).
+  // Host: fan out to every link; skip the broker only when every player in
+  // the room has one (the others still need the broker copy).
   let all = true;
   for (const id of mqtt.presence.keys()) {
     if (id === net.id) continue;
@@ -144,32 +244,50 @@ function rtcRoute(topic, payload) {
 }
 
 function rtcTick() {
-  if (!rtcActive()) { if (rtc.peers.size) rtcCloseAll(); rtc.room = rtc.host = ''; return; }
+  if (!rtcActive()) { if (rtc.peers.size) rtcCloseAll(); rtc.room = rtc.host = ''; rtc.attempts.clear(); return; }
   if (rtc.room !== net.room || rtc.host !== net.hostId) {
     rtcCloseAll();
+    rtc.attempts.clear();
     rtc.room = net.room; rtc.host = net.hostId || '';
+    rtcTurnServers(); // warm the TURN credentials before the first offer
   }
   const now = performance.now();
   for (const peer of [...rtc.peers.values()]) {
-    if (!peer.open && now - peer.startedAt > RTC_OPEN_TIMEOUT_MS) rtcClose(peer.id);
+    if (!peer.open && now - peer.startedAt > RTC_OPEN_TIMEOUT_MS && peer.pc.connectionState !== 'connected') rtcClose(peer.id);
     else if (net.hostId === net.id && !mqtt.presence.has(peer.id)) rtcClose(peer.id);
   }
   const host = net.hostId;
-  if (net.authorityReady && host && host !== net.id && mqtt.presence.has(host) && !rtc.peers.has(host) &&
-      now - (rtc.lastTry.get(host) || -Infinity) > RTC_RETRY_MS) rtcOffer(host);
+  if (!net.authorityReady || !host || host === net.id || !mqtt.presence.has(host) || rtc.peers.has(host)) return;
+  const a = rtc.attempts.get(host);
+  const wait = a ? RTC_RETRY_MS[Math.min(RTC_RETRY_MS.length - 1, a.count - 1)] : 0;
+  if (!a || now - a.at > wait) rtcOffer(host);
 }
 
-function rtcDirectCount() {
-  let n = 0;
-  for (const peer of rtc.peers.values()) if (peer.open) n++;
-  return n;
+function rtcOpenPeers() {
+  const out = [];
+  for (const peer of rtc.peers.values()) if (peer.open) out.push(peer);
+  return out;
+}
+
+// 'direct', 'turn' or 'broker' for this player's link to the host (the host
+// reports its best link).
+function rtcRouteName() {
+  if (!rtcActive()) return '';
+  if (net.hostId === net.id) {
+    const open = rtcOpenPeers();
+    return !open.length ? 'broker' : open.some((p) => p.route === 'direct') ? 'direct' : 'turn';
+  }
+  const peer = rtc.peers.get(net.hostId);
+  return peer && peer.open ? peer.route || 'direct' : 'broker';
 }
 
 setInterval(rtcTick, 1000);
 
 BC.api.rtc = {
   get supported() { return rtc.supported; },
-  get direct() { return net.hostId === net.id ? rtcDirectCount() > 0 : !!(rtc.peers.get(net.hostId) || {}).open; },
-  get links() { return rtcDirectCount(); },
+  get direct() { const r = rtcRouteName(); return r === 'direct' || r === 'turn'; },
+  get route() { return rtcRouteName(); },
+  get links() { return rtcOpenPeers().length; },
+  get turnConfigured() { const c = rtcConfig(); return !!((c.turn && c.turn.length) || (c.metered && c.metered.apiKey)); },
   close: rtcCloseAll
 };
