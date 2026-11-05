@@ -648,6 +648,7 @@ function bmRepairPlayerOverlap(force = false) {
     return true;
   }
   const wasBlocked = state.blocked;
+  if (!wasBlocked) state.blockedSince = BC.now();
   state.blocked = true;
   state.status = 'blocked';
   BC.flags.playerRepairBlocked = true;
@@ -663,8 +664,52 @@ function bmRepairPlayerOverlap(force = false) {
   return false;
 }
 
+/* Escape hatch: the local search only looks 2 blocks around the body. If that
+   stays blocked (built in by another player, spawned into a structure), lift
+   the player onto the nearest free spot within 12 blocks, preferring the top
+   of the column, and fall back to a respawn point. Never freeze for good. */
+const BC_PHYS_ESCAPE_AFTER_MS = 1200;
+const BC_PHYS_ESCAPE_RADIUS = 12;
+
+function bmEscapeFits(x, y, z) {
+  return y > 0 && y < HEIGHT + 30 && x > 0.5 && z > 0.5 && x < WORLD - 0.5 && z < WORLD - 0.5 &&
+    !collides(x, y, z, PH) && collides(x, y - 0.1, z, 0.1);
+}
+
+function bmEscapePlayer() {
+  const p = player.pos, baseX = Math.floor(p.x), baseZ = Math.floor(p.z), baseY = Math.floor(p.y);
+  let best = null, bestScore = Infinity;
+  for (let r = 0; r <= BC_PHYS_ESCAPE_RADIUS && !best; r++) {
+    for (let dx = -r; dx <= r; dx++) for (let dz = -r; dz <= r; dz++) {
+      if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue;
+      const x = baseX + dx + 0.5, z = baseZ + dz + 0.5;
+      for (let y = baseY; y <= Math.min(HEIGHT + 20, baseY + 24); y++) {
+        if (!bmEscapeFits(x, y, z)) continue;
+        const score = dx * dx + dz * dz + (y - baseY) * 0.6;
+        if (score < bestScore) { bestScore = score; best = { x, y, z }; }
+        break;
+      }
+    }
+  }
+  if (!best) {
+    let spawn = null;
+    try { const modes = BC.api.modes; spawn = modes && modes.respawnPoint ? modes.respawnPoint(modes.localTeam) : null; } catch (e) { /* optional */ }
+    if (!spawn || !Number.isFinite(spawn.x)) spawn = typeof findSpawn === 'function' ? findSpawn() : null;
+    if (spawn) best = spawn;
+  }
+  if (!best) return false;
+  p.set(best.x, best.y, best.z);
+  player.vel.set(0, 0, 0);
+  bmClearPlayerRepair('escaped');
+  bmPlayerRepairMotionReset();
+  if (typeof toast === 'function') toast('Moved you out of the blocks');
+  BC.emit('playerRepaired', bmPlayerRepairState());
+  return true;
+}
+
 function bmBeforePlayerRepair(dt, now, playing) {
   if (!bmPlayerRepairEligible()) { bmClearPlayerRepair(); return; }
+  if (bmPlayerRepair.blocked && BC.now() - (bmPlayerRepair.blockedSince || 0) > BC_PHYS_ESCAPE_AFTER_MS && bmEscapePlayer()) return;
   if (bmPlayerRepair.blocked && bmReadPlayerRepairBox()) {
     const box = bmRepairSource;
     if (box.x !== bmPlayerRepair.fromX || box.y !== bmPlayerRepair.fromY ||
