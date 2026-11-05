@@ -32,8 +32,10 @@ Score, View and Jet are at the top. Phones default to **Fast** graphics (no shad
 2. Friends paste the code into **Join with a code**.
 3. Everyone presses **Play**. In a match, `P` copies the code again.
 
-Internet rooms use public MQTT relays (`broker.emqx.io`, then `broker.hivemq.com`), so there is
-no server to run, but rooms are not private. One player is elected host; the host's tab
+Internet rooms find each other through public MQTT relays (`broker.emqx.io`, then
+`broker.hivemq.com`), so there is no server to run, but rooms are not private. Once in a room,
+each player opens a direct WebRTC link to the host and game traffic skips the relay. The HUD
+shows `direct` next to ping, or `relay` when a strict network forces the fallback. One player is elected host; the host's tab
 decides hits, deaths, scores and teams, and picks the mode and map. LAN play uses `server.js`
 as the authority instead.
 
@@ -117,8 +119,9 @@ materials take more hits.
   distance), switchable in Pause or with `?gfx=low|high`.
 - **Feel:** per-weapon camera shake, muzzle flash and smoke, ejected casings, impact dust,
   hit markers, floating damage numbers and a kill pulse. Shake respects reduced-motion.
-- **Audio:** real CC0 recordings for gunshots, reloads, impacts, footsteps and UI, played
-  positionally with distance falloff and muffling behind blocks. Sources and licences are in
+- **Audio:** real CC0 recordings: several takes per gun, far-mic reports for distant shots,
+  each gun's own reload, impacts and breaks that match the block, footsteps per surface. All
+  positional, with distance falloff and muffling behind blocks. Sources and licences are in
   [assets/audio/LICENCES.md](assets/audio/LICENCES.md).
 - **UI:** a console-style Home with the world visible behind it, a Players list with team
   switching, and a minimal HUD (score, health, ammo, FPS and ping) that adapts to phones.
@@ -164,6 +167,7 @@ src/87-minimap.js        minimap
 src/88-menu.js           screen flow, focus and Escape handling
 src/89-ui-system.js      menu and HUD design system, players and teams panel, icons
 src/90-net.js            LAN WebSocket and MQTT transport, rooms and host authority
+src/91-rtc.js            direct WebRTC links between players and the host
 src/92-sync.js           ping and connection diagnostics
 src/94-audio.js          positional audio engine
 src/99-boot.js           boot sequence and main loop
