@@ -2100,7 +2100,7 @@ function netMqttAuthority(packet, to) {
 
 function netMqttQueueState(packet) {
   mqtt.pendingStates.set(packet.id, packet);
-  if (!mqtt.stateTimer) mqtt.stateTimer = setTimeout(netMqttFlushStates, 15);
+  if (!mqtt.stateTimer) mqtt.stateTimer = setTimeout(netMqttFlushStates, 50); // 20/s: faster trips public-broker rate limits and drops messages
 }
 
 function netMqttFlushStates() {

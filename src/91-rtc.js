@@ -28,7 +28,7 @@
 'use strict';
 
 const RTC_STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
-const RTC_OPEN_TIMEOUT_MS = 15000;     // gathering + resends + TURN over TCP
+const RTC_OPEN_TIMEOUT_MS = 25000;     // gathering + a slow, lossy broker + TURN over TCP
 const RTC_RETRY_MS = [2000, 5000, 10000, 20000];
 const RTC_RESTART_AFTER_MS = 2500;     // 'disconnected' this long -> ICE restart
 const RTC_MAX_BUFFER = 256 * 1024;
@@ -260,7 +260,13 @@ async function rtcOnSignal(from, payload) {
       await peer.pc.setLocalDescription(answer);
       await rtcGathered(peer.pc);
       peer.answerSdp = peer.pc.localDescription.sdp;
-      rtcSignal(from, { type: 'answer', sdp: peer.answerSdp });
+      // The public broker loses messages; repeat the answer unprompted.
+      const sendAnswer = () => {
+        if (rtc.peers.get(from) === peer && !peer.open && peer.answerSdp) rtcSignal(from, { type: 'answer', sdp: peer.answerSdp });
+      };
+      sendAnswer();
+      setTimeout(sendAnswer, 1000);
+      setTimeout(sendAnswer, 3000);
     } else if (msg.type === 'answer' && typeof msg.sdp === 'string') {
       const peer = rtc.peers.get(from);
       if (peer && peer.offerer && from === net.hostId && peer.pc.signalingState === 'have-local-offer') {
