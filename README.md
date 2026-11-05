@@ -119,9 +119,9 @@ materials take more hits.
   distance), switchable in Pause or with `?gfx=low|high`.
 - **Feel:** per-weapon camera shake, muzzle flash and smoke, ejected casings, impact dust,
   hit markers, floating damage numbers and a kill pulse. Shake respects reduced-motion.
-- **Audio:** real CC0 recordings: several takes per gun, far-mic reports for distant shots,
-  each gun's own reload, impacts and breaks that match the block, footsteps per surface. All
-  positional, with distance falloff and muffling behind blocks. Sources and licences are in
+- **Audio:** CC0 firearm recordings for gunshots, synthesized reloads, impacts and UI, and
+  recorded footsteps per surface, landing thuds and a jetpack thruster loop. All positional,
+  with distance falloff and muffling behind blocks. Sources and licences are in
   [assets/audio/LICENCES.md](assets/audio/LICENCES.md).
 - **UI:** a console-style Home with the world visible behind it, a Players list with team
   switching, and a minimal HUD (score, health, ammo, FPS and ping) that adapts to phones.
