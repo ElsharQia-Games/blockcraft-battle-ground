@@ -68,7 +68,9 @@
   function showMode(def, allowed) {
     modeNodes.name.textContent = def.name;
     modeNodes.rule.textContent = (def.teams ? 'Red vs Blue' : 'Free for all') + '. First to ' + def.scoreToWin + '.';
-    modeNodes.desc.textContent = allowed ? def.desc : def.desc + ' The room host picks the mode.';
+    // The selector already states the rule; the hint only adds who decides.
+    modeNodes.desc.textContent = allowed ? '' : 'The room host picks the mode.';
+    modeNodes.root.title = def.desc;
     modeNodes.prev.disabled = modeNodes.next.disabled = !allowed;
   }
   function stepMode(dir) {
@@ -433,7 +435,8 @@ function UI_CSS() {
     box-shadow: inset 0 0 0 2px var(--ui-accent); }
   .ui-modepick-name { font: 900 19px/1.15 var(--ui-display); }
   .ui-modepick-rule { color: var(--ui-ink-2); font-size: 13px; }
-  .ui-mode-desc { color: var(--ui-ink-2); font-size: 14px; max-width: 42ch; min-height: 2.9em; }
+  .ui-mode-desc { color: var(--ui-ink-3); font-size: 13px; }
+  .ui-mode-desc:empty { display: none; }
   .ui-match-host:empty { display: none; }
   .ui-match-host :is(#bcMatchMode, #bcMatchRule) { display: none; }
   .ui-match-host .bcs-match { display: flex; gap: 4px 12px; flex-wrap: wrap; margin: 0; font-size: 13px; color: var(--ui-ink-3); }
