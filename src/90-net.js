@@ -2678,6 +2678,9 @@ function mqttPacket(type, body) {
   return new Uint8Array([type, ...mqttVarint(body.length), ...body]);
 }
 function mqttPublish(topic, payload, retain) {
+  // Room messages take the direct WebRTC path when it is open (91-rtc.js);
+  // it returns true when the broker copy is no longer needed.
+  if (!retain && typeof rtcRoute === 'function' && rtcRoute(topic, payload)) return true;
   if (!mqtt.ws || mqtt.ws.readyState !== 1 || !mqtt.connected) return false;
   if (payload.length > NET_MAX_FRAME || topic.length > 128) {
     netDisconnect('Network packet exceeded the size limit', true); return false;
@@ -2923,8 +2926,17 @@ function mqttHandlePublish(first, body) {
     if (!pid) return;
     try { mqtt.ws.send(mqttPacket(0x40, [pid >> 8, pid & 255])); } catch (e) { mqttLoseConnection(mqtt.ws); return; }
   }
-  const payload = new TextDecoder().decode(body.subarray(p));
+  mqttDispatch(topic, new TextDecoder().decode(body.subarray(p)), body.length);
+}
+
+// Shared by the broker and the WebRTC data channels (91-rtc.js), so direct
+// messages get exactly the same identity, budget, ordering and dedupe rules.
+function mqttDispatch(topic, payload, bytes) {
   const parts = topic.split('/');
+  if (parts.length === 4 && parts[0] === 'blockcraft' && parts[1] === mqtt.room && parts[2] === 'rtc') {
+    if (typeof rtcOnSignal === 'function' && netValidId(parts[3]) && parts[3] !== net.id) rtcOnSignal(parts[3], payload);
+    return;
+  }
   if (parts.length !== 4 || parts[0] !== 'blockcraft' || parts[1] !== mqtt.room ||
       !['presence', 'match', 'msg'].includes(parts[2])) return;
   // Old unscoped retained /e topics are deliberately NOT replayed. Only the
@@ -2936,7 +2948,7 @@ function mqttHandlePublish(first, body) {
   try { msg = JSON.parse(payload); } catch (e) { return; }
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
   const control = parts[2] !== 'msg' || msg.t === 'ping' || msg.t === 'pong';
-  if (!netMqttBudget(from, body.length, control, msg.t === 'authority' && from === net.hostId)) return;
+  if (!netMqttBudget(from, bytes, control, msg.t === 'authority' && from === net.hostId)) return;
   const now = performance.now();
   if (parts[2] === 'presence') {
     if (msg.t !== 'presence' || msg.id !== from || !Number.isFinite(msg.at) || Math.abs(netEpochNow() - msg.at) > 60000) return;

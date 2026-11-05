@@ -249,7 +249,7 @@
       <div class="hud-mode"><span id="hudMode">TDM</span><small id="hudGoal">First to 40</small></div>
       <div class="hud-side is-blue"><b id="hudScoreBlue">0</b></div>
     </div>
-    <div class="hud-net" id="hudNet"><span id="hudFps">60</span><small>fps</small><span id="hudPing">--</span><small>ms</small></div>
+    <div class="hud-net" id="hudNet"><span id="hudFps">60</span><small>fps</small><span id="hudPing">--</span><small>ms</small><small id="hudRoute"></small></div>
     <div class="hud-vitals" id="hudVitals">
       <div class="hud-hp"><b id="hudHp">150</b><small id="hudKd">0 / 0</small></div>
       <div class="hud-hpbar" id="hudHpBar"><span id="hudHpFill"></span></div>
@@ -263,7 +263,7 @@
   const $ = (id) => document.getElementById(id);
   const H = {
     red: $('hudScoreRed'), blue: $('hudScoreBlue'),
-    mode: $('hudMode'), goal: $('hudGoal'), score: $('hudScore'), fps: $('hudFps'), ping: $('hudPing'), net: $('hudNet'),
+    mode: $('hudMode'), goal: $('hudGoal'), score: $('hudScore'), fps: $('hudFps'), ping: $('hudPing'), net: $('hudNet'), route: $('hudRoute'),
     hp: $('hudHp'), kd: $('hudKd'), hpFill: $('hudHpFill'), hpBar: $('hudHpBar'), vitals: $('hudVitals'),
     ammo: $('hudAmmo'), mag: $('hudMag'), gun: $('hudGun'), slots: $('hudSlots'), reload: $('hudReload'), reloadFill: $('hudReloadFill'),
     weapon: $('hudWeapon')
@@ -298,6 +298,8 @@
       const connection = api(), ping = connection && typeof connection.getPing === 'function' ? connection.getPing() : NaN;
       put('ping', H.ping, Number.isFinite(ping) ? String(ping) : '--');
       flag('net', H.net, 'is-bad', Number.isFinite(ping) && ping > 150);
+      const rtcApi = BC.api.rtc, mqttRoom = typeof net !== 'undefined' && net.mode === 'mqtt' && net.online;
+      put('route', H.route, mqttRoom ? (rtcApi && rtcApi.direct ? 'direct' : 'relay') : '');
 
       const hp = Math.max(0, Math.round(health));
       put('hp', H.hp, String(hp));
