@@ -8,14 +8,17 @@
      unreliable for positions and ping, where a late packet is worthless and
      waiting for a lost one would stall everything behind it.
    - Public MQTT brokers are used only as a meeting point: the host beacons,
-     players send an offer, the host answers. Every handshake message goes
-     through ALL brokers at once, so one slow or lossy broker does not matter,
+     players ask who hosts, the host answers, players send an offer. Every
+     handshake message goes through ALL brokers at once and the first copy wins,
+     so one slow or lossy broker does not matter,
      and a live room does not care if every broker disappears.
    - Paths: a link first tries the best route ICE can find (direct when
      possible, TURN otherwise). Retries force TURN (UDP, TCP, or TLS on 443),
      which passes strict NATs and firewalls. TURN servers come from
      net-config.js. ?relay=1 forces TURN from the start, ?direct=1 never uses it.
-   - Staying alive: a dropped link reconnects by itself. If the host is gone, the
+   - Staying alive: when the network changes under a link (Wi-Fi to mobile), the
+     player first repairs it with an ICE restart, which keeps the channels and
+     everything queued on them. A link that can't be repaired is rebuilt. If the host is gone, the
      player first in id order takes over, keeping the world, and the others
      reconnect to its beacon. A player asks "who hosts?" several times first, so
      a live host is never replaced because a few broker messages went missing.
@@ -31,21 +34,24 @@
 'use strict';
 
 const ROOM_PROTOCOL = 1;           // bump when old and new builds can't share a room
-const ROOM_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt'];
+const ROOM_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt',
+  'wss://broker-cn.emqx.io:8084/mqtt', 'wss://mqtt-dashboard.com:8884/mqtt'];
 const ROOM_STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
 const ROOM_BEACON_MS = 2000;
 const ROOM_WHO_MS = 1000;          // "who hosts?" while looking for one
 const ROOM_WHO_EMPTY = 5;          // unanswered asks before a joiner hosts an empty room
 const ROOM_WHO_GONE = 6;           // unanswered asks before a host counts as gone
 const ROOM_BROKER_TIMEOUT_MS = 8000;
+const ROOM_EMPTY_WAIT_MS = 8000;   // or every broker is up: only then can a room be called empty
 const ROOM_GATHER_MS = 1500;       // bundle candidates into the SDP for at most this long
 const ROOM_RESEND_MS = 2000;       // re-send an unanswered offer
-const ROOM_LINK_TIMEOUT_MS = 12000;
-const ROOM_SILENCE_MS = 8000;      // quiet this long and WebRTC reports trouble: dead
+const ROOM_LINK_TIMEOUT_MS = 10000;
+const ROOM_REPAIR_MS = 2500;       // quiet this long and WebRTC reports trouble: repair (player)
+const ROOM_REPAIR_WAIT_MS = 6000;  // how long a repair gets before the link is rebuilt
+const ROOM_SILENCE_MS = 5000;      // quiet this long and WebRTC reports trouble: dead
 const ROOM_STALL_MS = 30000;       // quiet this long, whatever WebRTC reports: dead
 const ROOM_STALL_NOTICE_MS = 3000; // quiet this long: tell the player
-const ROOM_TAKEOVER_MS = 4000;     // the successor waits this long for the old host to return
-const ROOM_TAKEOVER_STEP_MS = 2000;// each player after the successor waits this much longer
+const ROOM_TAKEOVER_STEP_MS = 2000;// once the host is gone, each player in line waits this much longer
 const ROOM_GIVE_UP_MS = 45000;      // stop retrying and ask the player
 const ROOM_NO_BROKER_MS = 15000;   // no broker at all: say so
 const ROOM_FAST_MAX = 16000;       // bigger than this: loss is too likely, use the reliable channel
@@ -57,7 +63,7 @@ const roomNet = {
   links: new Map(),              // peer id -> link
   hostId: '', beaconAt: -Infinity, lastHostId: '',
   attempts: 0, nextTryAt: 0, downAt: 0, findAt: 0, tickAt: 0, deadline: 0, signalUpAt: 0, noSignalAt: 0,
-  whoAt: 0, whoCount: 0, whoReplyAt: 0, failure: '', notice: '', noticeUntil: 0, hostLeft: false, badPingSince: 0, timer: null, beaconTimer: null, session: 0
+  hostN: 0, whoAt: 0, whoCount: 0, goneAt: 0, whoReplyAt: 0, failure: '', notice: '', noticeUntil: 0, hostLeft: false, badPingSince: 0, timer: null, beaconTimer: null, session: 0
 };
 
 /* ---------------- handshake over public MQTT brokers ---------------- */
@@ -73,9 +79,10 @@ function roomTopic() { return 'bc3/' + roomNet.code + '/sig'; }
 function roomBrokerOpen(url, session) {
   const entry = { url, ws: null, ready: false, buffer: new Uint8Array(0), ping: null, fails: 0, probeAt: 0 };
   roomNet.brokers.push(entry);
-  const retry = () => setTimeout(connect, roomBackoff(entry.fails++, 30000));
+  const retry = () => { entry.retry = setTimeout(connect, roomBackoff(entry.fails++, 8000)); };
   const connect = () => {
-    if (session !== roomNet.session) return;
+    clearTimeout(entry.retry);
+    if (session !== roomNet.session || (entry.ws && entry.ws.readyState <= 1)) return;
     let ws;
     try { ws = new WebSocket(url, 'mqtt'); } catch (e) { retry(); return; }
     entry.ws = ws;
@@ -97,6 +104,7 @@ function roomBrokerOpen(url, session) {
       if (session === roomNet.session) retry();
     };
   };
+  entry.connect = connect;
   connect();
 }
 
@@ -144,6 +152,7 @@ function roomBrokerData(entry, chunk) {
       entry.fails = 0;
       if (!roomNet.findAt) { roomNet.findAt = performance.now(); roomNet.deadline = roomNet.findAt + ROOM_GIVE_UP_MS; }
       if (roomNet.role === 'host') roomBeacon();
+      else if (!roomNet.hostId || roomNet.role === 'reconnecting') roomSignal({ k: 'who' }); // don't wait for the next beacon
     } else if (type === 3) { // PUBLISH, QoS 0
       const n = (body[0] << 8) | body[1];
       try { roomSignalIn(JSON.parse(new TextDecoder().decode(body.subarray(2 + n)))); } catch (e) { /* not ours */ }
@@ -214,9 +223,17 @@ function roomGathered(pc) {
 /* ---------------- links ---------------- */
 function roomLinkNew(id, pc) {
   const link = { id, pc, dc: null, fast: null, open: false, startedAt: performance.now(), rxAt: performance.now(),
-    route: '', offerSdp: '', answerSdp: '', timers: [] };
+    route: '', offerSdp: '', answerSdp: '', timers: [], repairAt: 0 };
   pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') roomLinkLost(link);
+    if (pc.connectionState === 'closed') roomLinkLost(link);
+    else if (pc.connectionState === 'failed') {
+      if (link.open && roomNet.role !== 'host' && !link.repairAt) roomRepair(link);
+      else if (roomNet.role !== 'host') { if (!link.repairAt) roomLinkLost(link); }
+      else roomLinkLost(link);
+    } else if (pc.connectionState === 'connected') {
+      link.repairAt = 0;
+      roomReadRoute(link);
+    }
   };
   roomNet.links.set(id, link);
   return link;
@@ -330,6 +347,7 @@ async function roomConnect(hostId) {
 async function roomOnOffer(m) {
   if (roomNet.role !== 'host') return;
   let link = roomNet.links.get(m.from);
+  if (m.repair === true) { if (link) roomOnRepair(m, link); return; }
   if (link && link.offerSdp === m.sdp) {
     if (link.answerSdp) roomSignal({ k: 'answer', to: m.from, sdp: link.answerSdp });
     return;
@@ -374,7 +392,7 @@ function roomOpenLinks() {
 }
 
 function roomOnBeacon(m) {
-  roomNet.whoCount = 0;
+  roomNet.whoCount = roomNet.goneAt = 0;
   if (roomNet.role === 'host') {
     // Two hosts: the room with more players stays, and a tie goes to the lower id.
     const mine = roomOpenLinks(), theirs = Number.isSafeInteger(m.n) ? m.n : 0;
@@ -385,14 +403,58 @@ function roomOnBeacon(m) {
     if (roomNet.role === 'finding') roomFail('This room runs a different version. Refresh the page.');
     return;
   }
-  if (roomNet.hostId !== m.from) { roomNet.attempts = 0; roomNet.nextTryAt = 0; } // a new host starts clean
+  // Stay with the host we have. If it loses a split it hands over by itself, so
+  // a stray beacon must never pull a player away from a working link.
+  const now = performance.now(), current = roomNet.links.get(roomNet.hostId), n = Number.isSafeInteger(m.n) ? m.n : 0;
+  if (m.from !== roomNet.hostId) {
+    if (current && current.open) return;
+    const fresh = roomNet.hostId && now - roomNet.beaconAt < ROOM_BEACON_MS * 2;
+    if (fresh && (n < roomNet.hostN || (n === roomNet.hostN && m.from > roomNet.hostId))) return;
+    roomNet.attempts = 0;
+    roomNet.nextTryAt = 0;
+  }
+  roomNet.hostN = n;
   roomNet.hostId = m.from;
-  roomNet.beaconAt = performance.now();
+  roomNet.beaconAt = now;
   if (roomNet.role === 'failed') return;
   if (!roomNet.links.has(m.from)) {
     for (const link of [...roomNet.links.values()]) if (link.id !== m.from) roomLinkClose(link);
     roomTryConnect(m.from);
   }
+}
+
+// Player: new network paths on the existing connection. The channels survive.
+async function roomRepair(link) {
+  link.repairAt = performance.now();
+  const pc = link.pc;
+  try {
+    pc.restartIce();
+    await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
+    await roomGathered(pc);
+  } catch (e) { roomLinkLost(link); return; }
+  const send = () => {
+    if (roomNet.links.get(link.id) !== link || !link.repairAt || pc.signalingState !== 'have-local-offer') return;
+    roomSignal({ k: 'offer', to: link.id, sdp: pc.localDescription.sdp, repair: true });
+    link.timers.push(setTimeout(send, 1500));
+  };
+  send();
+}
+
+async function roomOnRepair(m, link) {
+  if (link.offerSdp === m.sdp) {
+    if (link.answerSdp) roomSignal({ k: 'answer', to: m.from, sdp: link.answerSdp });
+    return;
+  }
+  link.offerSdp = m.sdp;
+  link.answerSdp = '';
+  link.rxAt = performance.now();   // the player is alive and working on it
+  try {
+    await link.pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
+    await link.pc.setLocalDescription(await link.pc.createAnswer());
+    await roomGathered(link.pc);
+  } catch (e) { roomLinkClose(link); return; }
+  link.answerSdp = link.pc.localDescription.sdp;
+  roomSignal({ k: 'answer', to: m.from, sdp: link.answerSdp });
 }
 
 function roomYieldTo(id) {
@@ -508,6 +570,7 @@ function roomStatus() {
   if (role === 'player' && !net.authorityReady) return { tone: 'busy', title: 'Syncing the match', detail: '' };
   if (role === 'player') {
     const link = roomNet.links.get(roomNet.hostId), quiet = link ? now - link.rxAt : 0;
+    if (link && link.repairAt) return { tone: 'busy', title: 'Network changed', detail: 'Restoring the connection…' };
     if (quiet > ROOM_STALL_NOTICE_MS) return { tone: 'busy', title: 'Waiting for the host', detail: Math.round(quiet / 1000) + 's' };
   }
   if (now < roomNet.noticeUntil) return { tone: 'good', title: roomNet.notice, detail: '' };
@@ -523,7 +586,7 @@ function roomStatus() {
 
 function roomWatchQuality(now) {
   const ping = BC.api.net && BC.api.net.getPing ? BC.api.net.getPing() : NaN;
-  const bad = roomNet.role === 'player' && (!Number.isFinite(ping) || ping > 250);
+  const bad = roomNet.role === 'player' && (!Number.isFinite(ping) || ping > 200);
   if (!bad) roomNet.badPingSince = 0;
   else if (!roomNet.badPingSince) roomNet.badPingSince = now;
 }
@@ -554,8 +617,12 @@ function roomTick() {
   if (now - roomNet.tickAt > 2000) for (const link of roomNet.links.values()) link.rxAt = now;
   roomNet.tickAt = now;
   for (const link of [...roomNet.links.values()]) {
-    const quiet = now - link.rxAt;
-    if (link.open && (quiet > ROOM_STALL_MS || (quiet > ROOM_SILENCE_MS && link.pc.connectionState !== 'connected'))) roomLinkLost(link);
+    const quiet = now - link.rxAt, trouble = link.pc.connectionState !== 'connected';
+    if (link.open && trouble && role !== 'host' && !link.repairAt && quiet > ROOM_REPAIR_MS) roomRepair(link);
+    // The host gives a repair time to arrive before writing a link off.
+    const limit = role === 'host' ? ROOM_SILENCE_MS + ROOM_REPAIR_WAIT_MS : ROOM_SILENCE_MS;
+    const repairing = link.repairAt && now - link.repairAt < ROOM_REPAIR_WAIT_MS;
+    if (link.open && (quiet > ROOM_STALL_MS || (quiet > limit && trouble && !repairing))) roomLinkLost(link);
     else if (!link.open && now - link.startedAt > ROOM_LINK_TIMEOUT_MS) roomLinkClose(link);
   }
   if (role === 'finding') {
@@ -563,22 +630,23 @@ function roomTick() {
       roomNet.hostId = '';            // that host went away before we linked
       roomNet.findAt = now;
     }
-    if (!roomNet.hostId && roomNet.whoCount >= ROOM_WHO_EMPTY) { roomBecomeHost(); roomNotify('Room was empty, you are hosting it'); return; }
+    const allAsked = roomNet.brokers.every((b) => b.ready) || now - roomNet.findAt > ROOM_EMPTY_WAIT_MS;
+    if (!roomNet.hostId && roomNet.whoCount >= ROOM_WHO_EMPTY && allAsked) { roomBecomeHost(); roomNotify('Room was empty, you are hosting it'); return; }
     if (now > roomNet.deadline && !roomNet.failure) roomNet.failure = roomNet.findAt ? 'Can\'t reach the host of room ' + roomNet.code : 'Can\'t reach the room servers';
   } else if (role === 'reconnecting') {
-    const quiet = now - roomNet.downAt;
     if (roomNet.hostId && now - roomNet.beaconAt < ROOM_BEACON_MS * 2) {
       if (!roomNet.links.size) roomTryConnect(roomNet.hostId);
       if (now > roomNet.deadline && !roomNet.failure) roomNet.failure = 'Can\'t get back to the host';
       return;
     }
     const ids = [...net.authPlayers.keys()].filter((id) => id !== roomNet.lastHostId).sort();
-    // Only with a working broker, and after long enough on it to have heard a beacon.
-    const heard = roomSignalReady() && now - roomNet.signalUpAt > ROOM_BEACON_MS * 2 &&
-      (roomNet.hostLeft || roomNet.whoCount >= ROOM_WHO_GONE);
-    const rank = ids.indexOf(net.id);
-    const turn = ROOM_TAKEOVER_MS + (rank < 0 ? ids.length : rank) * ROOM_TAKEOVER_STEP_MS;
-    if (heard && quiet > turn) roomBecomeHost();
+    // Only with a working broker, and after long enough on it to have heard a
+    // beacon. Then one at a time, so the first new host's beacon stops the rest.
+    const gone = roomNet.hostLeft || roomNet.whoCount >= ROOM_WHO_GONE;
+    if (!gone) roomNet.goneAt = 0;
+    else if (!roomNet.goneAt) roomNet.goneAt = now;
+    const rank = ids.indexOf(net.id), heard = roomSignalReady() && now - roomNet.signalUpAt > ROOM_BEACON_MS * 2;
+    if (gone && heard && now - roomNet.goneAt >= (rank < 0 ? ids.length : rank) * ROOM_TAKEOVER_STEP_MS) roomBecomeHost();
     else if (now > roomNet.deadline && !roomNet.failure) roomNet.failure = 'Lost the connection to the room';
   } else if (role === 'player' && !roomNet.links.has(roomNet.hostId)) {
     roomNet.role = 'reconnecting';
@@ -632,8 +700,10 @@ function roomRouteName() {
 window.addEventListener('online', () => {
   if (!roomNet.role) return;
   roomNet.nextTryAt = 0;
-  for (const b of roomNet.brokers) b.fails = 0;
+  for (const b of roomNet.brokers) { b.fails = 0; b.connect(); }
   roomProbeBrokers();
+  // An attempt started while offline can't work: don't wait for it to time out.
+  for (const link of [...roomNet.links.values()]) if (!link.open && roomNet.role !== 'host') roomLinkClose(link);
   if (roomNet.role === 'failed') roomRetry();
 });
 
@@ -641,6 +711,7 @@ window.addEventListener('online', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden || !roomNet.role) return;
   roomNet.nextTryAt = 0;
+  for (const b of roomNet.brokers) b.connect();
   roomProbeBrokers();
 });
 

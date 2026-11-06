@@ -18,6 +18,7 @@ const NET_MODE_DAMAGE = { hardcore: 1.5 };
 const NET_NO_REGEN_MODES = new Set(['hardcore']);
 function netModeDamage() { return NET_MODE_DAMAGE[net.matchMode] || 1; }
 const NET_MAX_FRAME = 32 * 1024;
+const NET_INTERP_MS = 100;  // draw other players this far in the past, so a lost packet never shows
 const NET_MAX_BUFFER = 256 * 1024;
 const NET_SHOT_WINDOW = 1000;
 const NET_PEER_TIMEOUT = 16000;
@@ -1171,6 +1172,7 @@ function addRemote(p) {
     // A server-authorised correction (or respawn) is a snap, not a glide.
     r.x = nx; r.y = ny; r.z = nz;
     r.vx = r.vy = r.vz = 0;
+    r.trail = [];
   } else {
     const dt = Math.max(0.02, (now - priorRx) / 1000);
     const moving = Math.abs(nx - r.px) + Math.abs(ny - r.py) + Math.abs(nz - r.pz) > 0.01;
@@ -1184,6 +1186,9 @@ function addRemote(p) {
   }
   r.tx = nx; r.ty = ny; r.tz = nz;
   r.px = nx; r.py = ny; r.pz = nz;
+  if (!r.trail) r.trail = [];
+  r.trail.push({ at: now, x: nx, y: ny, z: nz });
+  if (r.trail.length > 12) r.trail.shift();
   r.recvAt = now;
   r.lastRx = now;
   r.tyaw = netPoseYaw(p.yaw, r.tyaw);
@@ -2610,7 +2615,6 @@ function roomInbound(from, text) {
     roomNet.hostLeft = true;
     roomNet.beaconAt = -Infinity;
     roomLinkLost(roomNet.links.get(from));
-    roomNet.downAt -= ROOM_TAKEOVER_MS;
     return;
   }
   if (msg.t === 'peerLink') {
@@ -2856,19 +2860,32 @@ function updateNetPlayers(dt) {
     if (dead || age > 2500) {
       if (!dead && age > 2500) { tx = r.x; ty = r.y; tz = r.z; }
       r.vx = r.vy = r.vz = 0;
-    } else if (age > 0 && age <= 250) {
-      const ahead = age / 1000;
-      tx = Math.max(0, Math.min(WORLD, r.tx + r.vx * ahead));
-      ty = Math.max(-8, Math.min(HEIGHT + 48, r.ty + r.vy * ahead));
-      tz = Math.max(0, Math.min(WORLD, r.tz + r.vz * ahead));
+    } else {
+      // Between the two received positions around (now - NET_INTERP_MS); past
+      // the newest one, carry on briefly along the last known velocity.
+      const trail = r.trail || [], at = now - NET_INTERP_MS;
+      let i = trail.length - 1;
+      while (i > 0 && trail[i - 1].at > at) i--;
+      const a = trail[i - 1], b = trail[i];
+      if (a && b && b.at > at) {
+        const f = Math.max(0, Math.min(1, (at - a.at) / Math.max(1, b.at - a.at)));
+        tx = a.x + (b.x - a.x) * f;
+        ty = a.y + (b.y - a.y) * f;
+        tz = a.z + (b.z - a.z) * f;
+      } else if (age > NET_INTERP_MS && age <= NET_INTERP_MS + 250) {
+        const ahead = (age - NET_INTERP_MS) / 1000;
+        tx = Math.max(0, Math.min(WORLD, r.tx + r.vx * ahead));
+        ty = Math.max(-8, Math.min(HEIGHT + 48, r.ty + r.vy * ahead));
+        tz = Math.max(0, Math.min(WORLD, r.tz + r.vz * ahead));
+      }
     }
 
-    const k = combatDamp(12, dt);
+    const k = combatDamp(28, dt);
     const dx = tx - r.x, dz = tz - r.z;
     const dist = Math.hypot(dx, dz);
     r.x += dx * k;
     r.z += dz * k;
-    r.y += (ty - r.y) * combatDamp(12, dt);
+    r.y += (ty - r.y) * combatDamp(28, dt);
     const dy = Math.atan2(Math.sin(r.tyaw - r.yaw), Math.cos(r.tyaw - r.yaw));
     r.yaw += dy * combatDamp(16, dt);
     r.pitch += (r.tpitch - r.pitch) * combatDamp(18, dt);

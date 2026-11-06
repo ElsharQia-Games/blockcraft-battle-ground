@@ -40,7 +40,7 @@ packet never holds up the ones behind it.
 
 Public MQTT brokers (`broker.emqx.io` and `broker.hivemq.com`, both at once) are used only so
 players can find the host, so rooms are not private. Once linked, a room does not need them. A
-dropped link reconnects by itself, and retries back off. If the host leaves, the next player
+network change repairs the link in place, a dropped link reconnects by itself, and retries back off. If the host leaves, the next player
 takes over and keeps the world and scores. A banner shows what the connection is doing, and if
 it can't recover you get **Retry** and **Leave**. The bars next to ping show connection quality.
 
