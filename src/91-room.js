@@ -48,6 +48,7 @@ const ROOM_EMPTY_WAIT_MS = 8000;   // or every broker is up: only then can a roo
 const ROOM_CANDS_MS = 800;         // re-send known routes this often until the link opens
 const ROOM_RESEND_MS = 2000;       // re-send an unanswered offer
 const ROOM_LINK_TIMEOUT_MS = 12000;
+const ROOM_LINK_SLOW_MS = 30000;   // a found route is finishing its handshake: give it longer
 const ROOM_REPAIR_MS = 2500;       // quiet this long and WebRTC reports trouble: repair (player)
 const ROOM_REPAIR_WAIT_MS = 6000;  // how long a repair gets before the link is rebuilt
 const ROOM_SILENCE_MS = 5000;      // quiet this long and WebRTC reports trouble: dead
@@ -614,7 +615,7 @@ function roomStatus() {
 
 function roomWatchQuality(now) {
   const ping = BC.api.net && BC.api.net.getPing ? BC.api.net.getPing() : NaN;
-  const bad = roomNet.role === 'player' && (!Number.isFinite(ping) || ping > 200);
+  const bad = roomNet.role === 'player' && Number.isFinite(ping) && ping > 200;
   if (!bad) roomNet.badPingSince = 0;
   else if (!roomNet.badPingSince) roomNet.badPingSince = now;
 }
@@ -651,7 +652,7 @@ function roomTick() {
     const limit = role === 'host' ? ROOM_SILENCE_MS + ROOM_REPAIR_WAIT_MS : ROOM_SILENCE_MS;
     const repairing = link.repairAt && now - link.repairAt < ROOM_REPAIR_WAIT_MS;
     if (link.open && (quiet > ROOM_STALL_MS || (quiet > limit && trouble && !repairing))) roomLinkLost(link);
-    else if (!link.open && now - link.startedAt > ROOM_LINK_TIMEOUT_MS) roomLinkClose(link);
+    else if (!link.open && now - link.startedAt > (link.pc.connectionState === 'connecting' ? ROOM_LINK_SLOW_MS : ROOM_LINK_TIMEOUT_MS)) roomLinkClose(link);
   }
   if (role === 'finding') {
     if (roomNet.hostId && !roomNet.links.size && now - roomNet.beaconAt > ROOM_BEACON_MS * 3) {
