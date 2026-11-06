@@ -11,6 +11,7 @@ const JET_MAX_FUEL = 100;
 const JET_DRAIN = 16;                 // fuel / second while active
 const JET_RECHARGE = 22;              // fuel / second once safely grounded
 const JET_RECHARGE_DELAY = 0.8;       // seconds on the floor before refuelling
+const JET_GROUND_GRACE = 0.25;        // steps and small hops don't count as leaving the ground
 const JET_MIN_ACTIVATE = 3;           // don't launch on fumes
 const JET_LAUNCH_COST = 1.5;          // rapid F toggles cannot create free impulses
 const JET_LAUNCH_COOLDOWN = 0.25;
@@ -283,9 +284,11 @@ function jetAdvance(dt) {
     jetState.thrusting = false;
     jetState.boosting = false;
     jetCancelDash();
-    const phys = BC.api && BC.api.physics;
-    const grounded = typeof player !== 'undefined' && player && player.onGround && player.vel.y <= 0 &&
-      (!phys || typeof phys.supportAt !== 'function' || Number.isFinite(phys.supportAt(player.pos.x, player.pos.y, player.pos.z, 0.3, 0.05)));
+    // Ground contact flickers at every step, so walking and sprinting must not
+    // restart the delay; only a real time in the air does.
+    const touching = typeof player !== 'undefined' && player && player.onGround;
+    jetState.airTime = touching ? 0 : (jetState.airTime || 0) + dt;
+    const grounded = jetState.airTime < JET_GROUND_GRACE;
     if (grounded) {
       const wait = Math.max(0, JET_RECHARGE_DELAY - jetState.groundTimer);
       jetState.groundTimer = Math.min(JET_RECHARGE_DELAY, jetState.groundTimer + dt);
