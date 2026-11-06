@@ -2108,10 +2108,28 @@ function netMqttQueueState(packet) {
 function netMqttFlushStates() {
   if (mqtt.stateTimer) { clearTimeout(mqtt.stateTimer); mqtt.stateTimer = null; }
   if (!net.online || net.hostId !== net.id || !net.authorityReady || !mqtt.pendingStates.size) return;
-  mqtt.stateFlushAt = performance.now();
+  const now = mqtt.stateFlushAt = performance.now();
   const players = [...mqtt.pendingStates.values()];
   mqtt.pendingStates.clear();
-  netMqttAuthority({ t: 'states', players });
+  handleNet({ t: 'states', players, generation: net.generation, epoch: net.epoch, authoritative: true }, net.id);
+  const changed = [], rows = [];
+  for (const p of players) {
+    const r = net.authPlayers.get(p.id);
+    if (!r) continue;
+    const key = roomSlowKey(p);
+    if (key !== r.slowKey) { r.slowKey = key; changed.push(p); continue; }
+    const row = roomPoseRow(p), same = String(row);
+    // Someone standing still only sends enough to show they are alive.
+    if (same === r.rowKey && now - (r.rowAt || 0) < 800) continue;
+    r.rowKey = same;
+    r.rowAt = now;
+    rows.push([p.id.slice(-6), p.sid, ...row]);
+  }
+  if (changed.length) {
+    netSend({ t: 'authority', hostId: net.id, generation: net.generation, epoch: net.epoch, wireSeq: ++mqtt.wireSeq,
+      packet: { t: 'states', players: changed, generation: net.generation, epoch: net.epoch, authoritative: true } });
+  }
+  if (rows.length) roomSendRows(rows, net.generation);
 }
 
 function netMqttRoster(to) {
@@ -2600,6 +2618,12 @@ function roomInbound(from, text) {
   if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
   if (msg.t === 'ping' || msg.t === 'pong') { handleNet(msg, from); return; }
   if (roomNet.role === 'host') {
+    const link = roomNet.links.get(from);
+    if (msg.t === 'state' && link) link.lastState = msg;
+    if (msg.t === 's') {
+      if (!link || !link.lastState || !Array.isArray(msg.p) || msg.p.length !== 6 || msg.g !== link.lastState.generation) return;
+      msg = { ...roomApplyRow(link.lastState, msg.p), seq: msg.q };
+    }
     if (!netMqttBudget(from, text.length, false, false) || !netInboundOK(msg)) return;
     msg.id = from;
     if (msg.t === 'join' && msg.player && typeof msg.player === 'object') msg.player.id = from;
@@ -2615,6 +2639,17 @@ function roomInbound(from, text) {
     roomNet.hostLeft = true;
     roomNet.beaconAt = -Infinity;
     roomLinkLost(roomNet.links.get(from));
+    return;
+  }
+  if (msg.t === 'p') {
+    if (!net.authorityReady || msg.g !== net.generation || !Array.isArray(msg.r)) return;
+    const players = [];
+    for (const row of msg.r) {
+      if (!Array.isArray(row) || row.length !== 8) continue;
+      const id = [...net.authPlayers.keys()].find((key) => key.endsWith(row[0])), base = id && net.authPlayers.get(id);
+      if (base) players.push({ ...roomApplyRow(base, row.slice(2)), t: 'state', id, sid: row[1] });
+    }
+    if (players.length) handleNet({ t: 'states', players }, from);
     return;
   }
   if (msg.t === 'peerLink') {

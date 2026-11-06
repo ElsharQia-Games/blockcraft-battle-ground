@@ -7,6 +7,10 @@
      channels: reliable and ordered for events (shots, deaths, edits), and
      unreliable for positions and ping, where a late packet is worthless and
      waiting for a lost one would stall everything behind it.
+   - Bandwidth is ping. The host uploads every player to every player, so a home
+     upload line fills quickly and everything queues behind it. Positions are
+     short rows of numbers, a still player sends next to nothing, and the rest
+     (name, weapon, health) goes only when it changes.
    - Public MQTT brokers are used only as a meeting point: the host beacons,
      players ask who hosts, the host answers, players send an offer. Every
      handshake message goes through ALL brokers at once and the first copy wins,
@@ -58,6 +62,9 @@ const ROOM_TAKEOVER_STEP_MS = 2000;// once the host is gone, each player in line
 const ROOM_GIVE_UP_MS = 45000;      // stop retrying and ask the player
 const ROOM_NO_BROKER_MS = 15000;   // no broker at all: say so
 const ROOM_FAST_MAX = 16000;       // bigger than this: loss is too likely, use the reliable channel
+const ROOM_FULL_EVERY_MS = 1000;   // a player's full state, in case the last one was lost
+const ROOM_FULL_REPEATS = 3;       // sends after a change, since they travel unreliably
+const ROOM_POSE_FLAGS = ['aim', 'firing', 'combat', 'build', 'crouch', 'slide', 'fly', 'onGround', 'boost', 'dash'];
 const ROOM_MAX_BUFFER = 256 * 1024;
 
 const roomNet = {
@@ -530,12 +537,63 @@ function roomLinkSend(link, text, fast) {
 
 // Only what the next packet replaces anyway may go unreliable.
 function roomIsFast(msg) {
-  return msg.t === 'state' || msg.t === 'ping' || msg.t === 'pong' || (msg.t === 'authority' && msg.packet.t === 'states');
+  return msg.t === 'state' || msg.t === 'ping' || msg.t === 'pong';
+}
+
+/* ---------------- compact positions ---------------- */
+function roomRound(value, scale) { return Math.round(value * scale) / scale; }
+
+function roomPoseFlags(p) {
+  let flags = 0;
+  ROOM_POSE_FLAGS.forEach((name, bit) => { if (p[name]) flags |= 1 << bit; });
+  return flags;
+}
+
+function roomPoseRow(p) {
+  return [roomRound(p.x, 100), roomRound(p.y, 100), roomRound(p.z, 100), roomRound(p.yaw, 1000), roomRound(p.pitch, 1000), roomPoseFlags(p)];
+}
+
+function roomApplyRow(base, row) {
+  const p = { ...base, x: row[0], y: row[1], z: row[2], yaw: row[3], pitch: row[4] };
+  ROOM_POSE_FLAGS.forEach((name, bit) => { p[name] = row[5] & (1 << bit) ? 1 : 0; });
+  p.sliding = p.slide;
+  return p;
+}
+
+// The fields that don't change every frame. Fuel and health are coarse, or a
+// jetpack flight or health regen would count as a change on every tick.
+function roomSlowKey(p) {
+  return [p.name, p.character, p.weapon, Math.round((p.hp || 0) / 5), p.kills, p.deaths, p.life, (p.reload || 0) >= 0 ? 1 : 0, p.reloadTotal,
+    p.reloadRounds, p.dragon, p.team, Math.round((p.fuel || 0) / 10), p.bodyHeight, p.height].join('|');
+}
+
+// Player to host: the whole state only when it changed, otherwise a row.
+function roomPlayerState(link, msg) {
+  const now = performance.now(), key = roomSlowKey(msg);
+  if (key !== link.slowKey) { link.slowKey = key; link.fullLeft = ROOM_FULL_REPEATS; }
+  if (link.fullLeft > 0 || now - (link.fullAt || 0) >= ROOM_FULL_EVERY_MS) {
+    link.fullLeft = Math.max(0, (link.fullLeft || 0) - 1);
+    link.fullAt = now;
+    return msg;
+  }
+  return { t: 's', q: msg.seq, g: msg.generation, p: roomPoseRow(msg) };
+}
+
+// Host: rows for one flush, leaving each player's own row out of what they get.
+function roomSendRows(rows, generation) {
+  for (const link of roomNet.links.values()) {
+    const tail = link.id.slice(-6), list = rows.filter((row) => row[0] !== tail);
+    if (list.length) roomLinkSend(link, JSON.stringify({ t: 'p', g: generation, r: list }), true);
+  }
 }
 
 // Host: to one player, or everyone. Player: always to the host.
 function roomSend(msg) {
-  const text = JSON.stringify(msg), fast = roomIsFast(msg);
+  if (msg.t === 'state' && roomNet.role !== 'host') {
+    const link = roomNet.links.get(roomNet.hostId);
+    if (link) msg = roomPlayerState(link, msg);
+  }
+  const text = JSON.stringify(msg), fast = roomIsFast(msg) || msg.t === 's';
   if (roomNet.role !== 'host') return roomLinkSend(roomNet.links.get(roomNet.hostId), text, fast);
   if (msg.to) return roomLinkSend(roomNet.links.get(msg.to), text, fast) || true;
   for (const link of roomNet.links.values()) roomLinkSend(link, text, fast);
