@@ -34,12 +34,15 @@ Score, View and Jet are at the top. Phones default to **Fast** graphics (no shad
 
 **How internet rooms work.** There is no game server: the player who creates the room hosts it
 in their browser, and their tab decides hits, deaths, scores and teams, and picks the mode and
-map. Everyone else holds one WebRTC link to the host, and all game traffic runs on it.
+map. Everyone else holds one WebRTC link to the host, and all game traffic runs on it: events
+(shots, deaths, edits) on a reliable channel, positions and ping on an unreliable one, so a lost
+packet never holds up the ones behind it.
 
 Public MQTT brokers (`broker.emqx.io` and `broker.hivemq.com`, both at once) are used only so
 players can find the host, so rooms are not private. Once linked, a room does not need them. A
-dropped link reconnects by itself. If the host leaves, the next player takes over and keeps the
-world and scores.
+dropped link reconnects by itself, and retries back off. If the host leaves, the next player
+takes over and keeps the world and scores. A banner shows what the connection is doing, and if
+it can't recover you get **Retry** and **Leave**. The bars next to ping show connection quality.
 
 A link takes the fastest route available, direct when it can, and uses a TURN relay when it
 can't. The HUD shows the route next to ping: `direct` or `TURN`. Add `?relay=1` to force TURN or
@@ -183,6 +186,7 @@ src/88-menu.js           screen flow, focus and Escape handling
 src/89-ui-system.js      menu and HUD design system, players and teams panel, icons
 src/90-net.js            LAN WebSocket, game protocol and host authority
 src/91-room.js           internet rooms: finding the host, WebRTC links, reconnects, host takeover
+src/93-connection.js     connection banner: status, Retry and Leave
 src/92-sync.js           ping and connection diagnostics
 src/94-audio.js          positional audio engine
 src/99-boot.js           boot sequence and main loop

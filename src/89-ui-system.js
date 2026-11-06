@@ -249,7 +249,7 @@
       <div class="hud-mode"><span id="hudMode">TDM</span><small id="hudGoal">First to 40</small></div>
       <div class="hud-side is-blue"><b id="hudScoreBlue">0</b></div>
     </div>
-    <div class="hud-net" id="hudNet"><span id="hudFps">60</span><small>fps</small><span id="hudPing">--</span><small>ms</small><small id="hudRoute"></small></div>
+    <div class="hud-net" id="hudNet"><span id="hudFps">60</span><small>fps</small><span id="hudPing">--</span><small>ms</small><i class="hud-bars" id="hudBars"><b></b><b></b><b></b></i><small id="hudRoute"></small></div>
     <div class="hud-vitals" id="hudVitals">
       <div class="hud-hp"><b id="hudHp">150</b><small id="hudKd">0 / 0</small></div>
       <div class="hud-hpbar" id="hudHpBar"><span id="hudHpFill"></span></div>
@@ -263,7 +263,7 @@
   const $ = (id) => document.getElementById(id);
   const H = {
     red: $('hudScoreRed'), blue: $('hudScoreBlue'),
-    mode: $('hudMode'), goal: $('hudGoal'), score: $('hudScore'), fps: $('hudFps'), ping: $('hudPing'), net: $('hudNet'), route: $('hudRoute'),
+    mode: $('hudMode'), goal: $('hudGoal'), score: $('hudScore'), fps: $('hudFps'), ping: $('hudPing'), bars: $('hudBars'), net: $('hudNet'), route: $('hudRoute'),
     hp: $('hudHp'), kd: $('hudKd'), hpFill: $('hudHpFill'), hpBar: $('hudHpBar'), vitals: $('hudVitals'),
     ammo: $('hudAmmo'), mag: $('hudMag'), gun: $('hudGun'), slots: $('hudSlots'), reload: $('hudReload'), reloadFill: $('hudReloadFill'),
     weapon: $('hudWeapon')
@@ -301,6 +301,8 @@
       const rtcApi = BC.api.rtc, mqttRoom = typeof net !== 'undefined' && net.mode === 'mqtt' && net.online;
       const route = mqttRoom && rtcApi ? rtcApi.route : '';
       put('route', H.route, route === 'turn' ? 'TURN' : route);
+      const bars = !mqttRoom ? '' : !Number.isFinite(ping) ? '0' : ping < 80 ? '3' : ping < 150 ? '2' : '1';
+      if (last.bars !== bars) { last.bars = bars; H.bars.dataset.q = bars; }
 
       const hp = Math.max(0, Math.round(health));
       put('hp', H.hp, String(hp));
@@ -621,6 +623,13 @@ function UI_CSS() {
   .hud-net small { font-size: 11px; margin-right: 8px; }
   .hud-net small:last-child { margin-right: 0; }
   .hud-net.is-bad #hudPing { color: var(--ui-red); }
+  .hud-bars { display: none; align-self: center; align-items: flex-end; gap: 2px; height: 12px; margin-right: 6px; }
+  .hud-bars[data-q="0"], .hud-bars[data-q="1"], .hud-bars[data-q="2"], .hud-bars[data-q="3"] { display: inline-flex; }
+  .hud-bars b { width: 3px; height: 5px; background: var(--ui-ink-3); }
+  .hud-bars b:nth-child(2) { height: 8px; } .hud-bars b:nth-child(3) { height: 12px; }
+  .hud-bars[data-q="3"] b { background: #3fae62; }
+  .hud-bars[data-q="2"] b:nth-child(-n+2) { background: #e2b33c; }
+  .hud-bars[data-q="1"] b:first-child { background: var(--ui-red); }
   .hud-vitals { position: absolute; left: max(20px, env(safe-area-inset-left)); bottom: max(18px, env(safe-area-inset-bottom)); width: 230px; display: grid; gap: 8px; }
   .hud-hp { display: flex; align-items: baseline; gap: 10px; }
   #hudHp { font: 900 44px/1 var(--ui-display); }
