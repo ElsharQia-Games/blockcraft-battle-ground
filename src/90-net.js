@@ -36,7 +36,7 @@ const net = {
   attempts: 0, lastSent: 0, warned: false, closedByUs: false,
   room: '',
   ping: 0, jitter: 0, lastPong: 0, lastRx: 0,
-  seq: 0, rxSeq: new Map(), pingTimer: null,
+  seq: 0, stateSeq: 0, rxSeq: new Map(), pingTimer: null,
   desync: false, sendBlockedUntil: 0, outbox: [], flushTimer: null,
   packetCount: 0, lastPacketAt: 0, lastPingReplyAt: 0,
   hostId: null, generation: 0, seed: null, matchMode: null, epoch: '',
@@ -662,7 +662,9 @@ function netRememberEditBatch(msg) {
 function netSendNow(msg) {
   if (!netConnectedTransport()) return false;
   if (msg.generation !== undefined && msg.t !== 'join' && msg.t !== 'match' && msg.generation !== net.generation) return true;
-  if (netMqttAction(msg.t)) msg = { ...msg, seq: ++net.seq };
+  // Positions travel on the unreliable channel, so they count separately from
+  // the reliable actions: neither may overtake and invalidate the other.
+  if (netMqttAction(msg.t)) msg = { ...msg, seq: msg.t === 'state' ? ++net.stateSeq : ++net.seq };
   if (msg.t === 'ping') {
     if (net.mode === 'mqtt' && !netPingPeer()) return true; // alone in the room
     msg = { ...msg, seq: ++net.pingSeq, at: performance.now() };
@@ -1483,7 +1485,11 @@ function handleNet(msg, from, nested) {
     }
     case 'join':
       if (msg.player) netRememberState(msg.player);
-      addRemote(msg.player || msg);
+      { // Tell the room about newcomers, but not about everyone already there as you arrive.
+        const p = msg.player || msg, fresh = !net.players.has(p.id) && p.id !== net.id;
+        addRemote(p);
+        if (fresh && net.mode === 'mqtt' && performance.now() - net.onlineAt > 3000 && net.players.has(p.id)) toast(netPeerName(p.id) + ' joined');
+      }
       if (!net.warned) toast('Connected. ' + netPlayerCount() + ' player(s) online');
       net.warned = true;
       netEmitStatus();
@@ -1491,6 +1497,7 @@ function handleNet(msg, from, nested) {
     case 'leave':
       net.authPlayers.delete(msg.id);
       for (const [index, lease] of net.rides) if (lease.id === msg.id) net.rides.delete(index);
+      if (net.mode === 'mqtt' && net.players.has(msg.id)) toast(netPeerName(msg.id) + ' left');
       removeRemote(msg.id);
       netEmitStatus();
       break;
@@ -1956,7 +1963,7 @@ function netMqttRecord(id, msg, create) {
     const now = performance.now();
     r.shots = new Map();
     r.shot = null;
-    r.seqIn = -1;
+    r.seqIn = r.stateIn = -1;
     r.outSid = Math.max(Number.isSafeInteger(r.sid) ? r.sid : 0, net.rxSeq.get(id) || 0,
       id === net.id ? net.healthSid : 0);
     r.positionAt = r.healthAt = now;
@@ -2308,8 +2315,9 @@ function netMqttProcess(msg, from, budgeted) {
         (msg.dragonCount !== undefined && msg.dragonCount !== netDragonCount(net.seed)))))) {
     netMqttRoster(from); return true;
   }
-  if (!Number.isSafeInteger(msg.seq) || msg.seq <= r.seqIn) return true;
-  r.seqIn = msg.seq;
+  const lane = msg.t === 'state' ? 'stateIn' : 'seqIn';
+  if (!Number.isSafeInteger(msg.seq) || msg.seq <= r[lane]) return true;
+  r[lane] = msg.seq;
   if (msg.t === 'join') {
     const current = msg.generation === net.generation && msg.seed === net.seed;
     if ((!existed || current) && !netMqttPosition(r, msg, !existed)) return true;
@@ -2506,14 +2514,20 @@ function netHostStart() {
   netSend({ ...netJoinPacket(), id: net.id });
   // The old host is gone; everyone else gets the usual time to reconnect here.
   mqttRemovePeer(roomNet.lastHostId, 'timeout');
-  for (const id of net.authPlayers.keys()) if (id !== net.id) netHostLinkDown(id);
+  for (const id of net.authPlayers.keys()) if (id !== net.id) netHostHold(id);
   netMqttRoster();
   netEmitStatus();
   if (first) { toast('Online. Room ' + net.room + ' · share the code'); playTone(660, 0.09, 'sine', 0.08); }
-  else toast('You are now hosting room ' + net.room);
+  else { roomNotify('You are now hosting'); playTone(660, 0.09, 'sine', 0.08); }
+}
+
+function netPeerName(id) {
+  const p = net.players.get(id);
+  return p && p.name ? p.name : 'A player';
 }
 
 function netHostLinkUp(id) {
+  if (mqtt.graceTimers.has(id)) netPeerLinkChange(id, true);
   clearTimeout(mqtt.graceTimers.get(id));
   mqtt.graceTimers.delete(id);
   mqtt.lastRosterAt = 0;
@@ -2521,8 +2535,19 @@ function netHostLinkUp(id) {
   netEmitStatus();
 }
 
-// A player's link dropped: keep them in the match briefly so they can return.
+// Everyone hears when a player drops or comes back.
+function netPeerLinkChange(id, up) {
+  toast(netPeerName(id) + (up ? ' is back' : ' lost connection'));
+  roomSend({ t: 'peerLink', id, up });
+}
+
 function netHostLinkDown(id) {
+  netPeerLinkChange(id, false);
+  netHostHold(id);
+}
+
+// A player's link dropped: keep them in the match briefly so they can return.
+function netHostHold(id) {
   clearTimeout(mqtt.graceTimers.get(id));
   mqtt.graceTimers.set(id, setTimeout(() => {
     mqtt.graceTimers.delete(id);
@@ -2534,17 +2559,16 @@ function netPlayerLinkUp(hostId) {
   const first = !net.online;
   netRoomOnline();
   netEmitStatus();
-  if (first) toast('Joined room ' + net.room);
-  else toast('Reconnected to room ' + net.room);
+  roomNotify(first ? 'Joined room ' + net.room : 'Reconnected');
   net.warned = true;
-  if (first) playTone(660, 0.09, 'sine', 0.08);
+  playTone(660, 0.09, 'sine', 0.08);
 }
 
 function netPlayerLinkDown() {
   net.authorityReady = false;
   netDropQueue();
   netEmitStatus();
-  toast('Connection to host lost. Reconnecting…');
+  playTone(220, 0.12, 'square', 0.05);
 }
 
 // Everything that arrives on a data channel. `from` is the peer this link was
@@ -2565,6 +2589,18 @@ function roomInbound(from, text) {
     return;
   }
   if (from !== roomNet.hostId) return;
+  if (msg.t === 'hostLeft') {
+    // Skip the wait: the host said goodbye, so go straight to picking a new one.
+    roomNet.hostLeft = true;
+    roomNet.beaconAt = -Infinity;
+    roomLinkLost(roomNet.links.get(from));
+    roomNet.downAt -= ROOM_TAKEOVER_MS;
+    return;
+  }
+  if (msg.t === 'peerLink') {
+    if (netValidId(msg.id) && msg.id !== net.id) toast(netPeerName(msg.id) + (msg.up === true ? ' is back' : ' lost connection'));
+    return;
+  }
   if (msg.t === 'match') {
     if (!netValidMode(msg.mode) || !netValidSeed(msg.seed) || !Number.isSafeInteger(msg.generation) || !netToken(msg.epoch)) return;
     if (net.epoch && net.epoch !== msg.epoch) mqttResetRealm();
@@ -2717,7 +2753,7 @@ function startOnline(roomArg, create) {
   mqtt.room = room;
   mqtt.clientId = 'bc_' + Date.now().toString(36).padStart(10, '0') + Math.random().toString(36).slice(2, 8);
   net.id = mqtt.clientId;
-  net.seq = 0;
+  net.seq = net.stateSeq = 0;
   mqtt.wireSeq = 0;
   mqtt.editSerial = 0;
   mqtt.lastRosterAt = 0;
@@ -2739,8 +2775,14 @@ function createRoom() {
   copyRoom();
 }
 
+function roomSayGoodbye() {
+  if (net.mode !== 'mqtt' || !net.online) return;
+  if (net.hostId === net.id) roomSend({ t: 'hostLeft' });
+  else netSend({ t: 'leave', id: net.id });
+}
+
 function leaveOnline(returnToLan = true) {
-  if (net.mode === 'mqtt' && net.online && net.hostId !== net.id) netSend({ t: 'leave', id: net.id });
+  roomSayGoodbye();
   netDisconnect(null, returnToLan === false);
   if (returnToLan) connectNet();
   else {
@@ -2912,7 +2954,7 @@ if (createBtnEl) createBtnEl.addEventListener('click', createRoom);
 const roomBadgeEl = document.getElementById('roomBadge');
 if (roomBadgeEl) roomBadgeEl.addEventListener('click', copyRoom);
 window.addEventListener('pagehide', () => {
-  if (net.mode === 'mqtt' && net.online && net.hostId !== net.id) netSend({ t: 'leave', id: net.id });
+  roomSayGoodbye();
   netDisconnect(null, true);
 });
 
