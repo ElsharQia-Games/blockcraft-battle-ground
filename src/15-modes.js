@@ -253,7 +253,8 @@ function MODES_localId() {
 function MODES_rosterIds() {
   const ids = [MODES_localId()];
   try {
-    if (typeof net !== 'undefined' && net && (net.online || net.mode) &&
+    // Offline, net.players holds the bots.
+    if (typeof net !== 'undefined' && net &&
         net.players && typeof net.players.forEach === 'function') {
       net.players.forEach(function (_record, id) {
         if (id == null || id === '') return;
@@ -267,7 +268,7 @@ function MODES_rosterIds() {
 
 function MODES_rosterSize() {
   try {
-    if (typeof net !== 'undefined' && net && (net.online || net.mode) && net.players) return net.players.size;
+    if (typeof net !== 'undefined' && net && net.players) return net.players.size;
   } catch (e) { /* late script */ }
   return 0;
 }

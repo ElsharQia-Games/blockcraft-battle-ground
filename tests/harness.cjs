@@ -409,6 +409,7 @@ class Lab {
       url.searchParams.delete('room');
       url.searchParams.delete('shot');
       url.searchParams.set('server', this.wsURL);
+      url.searchParams.set('bots', '0'); // fixtures expect an empty solo world
       await page.send('Page.navigate', { url: url.href });
       await page.wait('world boot', () => {
         const err = document.getElementById('err');

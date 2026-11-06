@@ -2046,7 +2046,9 @@ function fireOnce() {
       if (ent.head) hitHead = true;
       if (!shotTargetId) { shotTargetId = ent.r.id; firstHitName = ent.r.name || ''; }
       const dmg = Math.round(combatDamageCap(w, ent.head) * (ent.t > w.range * 0.65 ? 0.8 : 1));
-      netSend({ t: 'hit', target: ent.r.id, dmg, head: ent.head, weapon: w.id, byId: net.id, by: playerName });
+      if (!(typeof window.botTakeHit === 'function' && window.botTakeHit(ent.r.id, dmg, ent.head, w.id))) {
+        netSend({ t: 'hit', target: ent.r.id, dmg, head: ent.head, weapon: w.id, byId: net.id, by: playerName });
+      }
       addImpact(end, '#b83030', impactInfo);
       impactInfo.silent = true;
     } else if (solid.kind === 'dragon') {

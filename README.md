@@ -187,6 +187,7 @@ src/89-ui-system.js      menu and HUD design system, players and teams panel, ic
 src/90-net.js            LAN WebSocket, game protocol and host authority
 src/91-room.js           internet rooms: finding the host, WebRTC links, reconnects, host takeover
 src/93-connection.js     connection banner: status, Retry and Leave
+src/95-bots.js           offline bots, which join as ordinary remote players
 src/92-sync.js           ping and connection diagnostics
 src/94-audio.js          positional audio engine
 src/99-boot.js           boot sequence and main loop
