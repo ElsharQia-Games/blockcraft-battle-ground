@@ -44,9 +44,9 @@ network change repairs the link in place, a dropped link reconnects by itself, a
 takes over and keeps the world and scores. A banner shows what the connection is doing, and if
 it can't recover you get **Retry** and **Leave**. The bars next to ping show connection quality.
 
-A link takes the fastest route available, direct when it can, and uses a TURN relay when it
-can't. The HUD shows the route next to ping: `direct` or `TURN`. Add `?relay=1` to force TURN or
-`?direct=1` to never use it.
+A link tries every route at once and keeps the fastest. Direct is the only low-ping route, so
+a TURN relay is just the backup for players who can't connect directly. The HUD shows the route
+next to ping: `direct` or `TURN`. Add `?relay=1` to force TURN or `?direct=1` to never use it.
 
 **Strict networks.** Corporate or school firewalls, symmetric NAT and some mobile carriers block
 direct links, and those players need TURN. Free public TURN no longer exists, so add one in

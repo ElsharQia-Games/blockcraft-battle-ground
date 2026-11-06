@@ -12,10 +12,12 @@
      handshake message goes through ALL brokers at once and the first copy wins,
      so one slow or lossy broker does not matter,
      and a live room does not care if every broker disappears.
-   - Paths: a link first tries the best route ICE can find (direct when
-     possible, TURN otherwise). Retries force TURN (UDP, TCP, or TLS on 443),
-     which passes strict NATs and firewalls. TURN servers come from
-     net-config.js. ?relay=1 forces TURN from the start, ?direct=1 never uses it.
+   - Paths: ICE races every route and keeps the fastest. Direct is the only
+     low-ping route (a relay sends players to Europe and back), so it is always
+     tried; TURN from net-config.js is there as a backup for players who can't
+     connect directly. Routes are sent as they are found (trickle ICE), because
+     relay routes can take seconds to appear. ?relay=1 forces TURN for testing,
+     ?direct=1 leaves it out.
    - Staying alive: when the network changes under a link (Wi-Fi to mobile), the
      player first repairs it with an ICE restart, which keeps the channels and
      everything queued on them. A link that can't be repaired is rebuilt. If the host is gone, the
@@ -43,9 +45,9 @@ const ROOM_WHO_EMPTY = 5;          // unanswered asks before a joiner hosts an e
 const ROOM_WHO_GONE = 6;           // unanswered asks before a host counts as gone
 const ROOM_BROKER_TIMEOUT_MS = 8000;
 const ROOM_EMPTY_WAIT_MS = 8000;   // or every broker is up: only then can a room be called empty
-const ROOM_GATHER_MS = 1500;       // bundle candidates into the SDP for at most this long
+const ROOM_CANDS_MS = 800;         // re-send known routes this often until the link opens
 const ROOM_RESEND_MS = 2000;       // re-send an unanswered offer
-const ROOM_LINK_TIMEOUT_MS = 10000;
+const ROOM_LINK_TIMEOUT_MS = 12000;
 const ROOM_REPAIR_MS = 2500;       // quiet this long and WebRTC reports trouble: repair (player)
 const ROOM_REPAIR_WAIT_MS = 6000;  // how long a repair gets before the link is rebuilt
 const ROOM_SILENCE_MS = 5000;      // quiet this long and WebRTC reports trouble: dead
@@ -181,6 +183,7 @@ function roomSignalIn(m) {
   else if (m.to !== net.id) return;
   else if (m.k === 'offer' && typeof m.sdp === 'string') roomOnOffer(m);
   else if (m.k === 'answer' && typeof m.sdp === 'string') roomOnAnswer(m);
+  else if (m.k === 'cand') roomOnCands(m);
   else if (m.k === 'full' && roomNet.role === 'finding') roomFail('Room ' + roomNet.code + ' is full');
 }
 
@@ -210,20 +213,15 @@ function roomUrlFlag(name) {
   try { return new URLSearchParams(location.search).get(name) === '1'; } catch (e) { return false; }
 }
 
-function roomGathered(pc) {
-  if (pc.iceGatheringState === 'complete') return Promise.resolve();
-  return new Promise((resolve) => {
-    const done = () => { pc.removeEventListener('icegatheringstatechange', check); clearTimeout(timer); resolve(); };
-    const check = () => { if (pc.iceGatheringState === 'complete') done(); };
-    const timer = setTimeout(done, ROOM_GATHER_MS);
-    pc.addEventListener('icegatheringstatechange', check);
-  });
-}
-
 /* ---------------- links ---------------- */
 function roomLinkNew(id, pc) {
   const link = { id, pc, dc: null, fast: null, open: false, startedAt: performance.now(), rxAt: performance.now(),
-    route: '', offerSdp: '', answerSdp: '', timers: [], repairAt: 0 };
+    route: '', offerSdp: '', answerSdp: '', timers: [], repairAt: 0, cands: [], added: new Set() };
+  pc.onicecandidate = (e) => {
+    if (!e.candidate) return;
+    link.cands.push(e.candidate.toJSON());
+    roomPushCands(link);
+  };
   pc.onconnectionstatechange = () => {
     if (pc.connectionState === 'closed') roomLinkLost(link);
     else if (pc.connectionState === 'failed') {
@@ -237,6 +235,30 @@ function roomLinkNew(id, pc) {
   };
   roomNet.links.set(id, link);
   return link;
+}
+
+// Routes go out as found, and the whole list again until the link is up, so a
+// lost message costs nothing and early ones can't arrive before the offer.
+function roomPushCands(link) {
+  if (link.candTimer || roomNet.links.get(link.id) !== link) return;
+  link.candTimer = setTimeout(() => {
+    link.candTimer = null;
+    if (roomNet.links.get(link.id) !== link || !link.cands.length) return;
+    roomSignal({ k: 'cand', to: link.id, list: link.cands });
+    if ((!link.open || link.repairAt) && performance.now() - link.startedAt < ROOM_LINK_TIMEOUT_MS * 2) {
+      link.timers.push(setTimeout(() => roomPushCands(link), ROOM_CANDS_MS));
+    }
+  }, 60);
+}
+
+function roomOnCands(m) {
+  const link = roomNet.links.get(m.from);
+  if (!link || !link.pc.remoteDescription || !Array.isArray(m.list)) return;
+  for (const c of m.list.slice(0, 64)) {
+    if (!c || typeof c.candidate !== 'string' || link.added.has(c.candidate)) continue;
+    link.added.add(c.candidate);
+    link.pc.addIceCandidate(c).catch(() => {});
+  }
 }
 
 function roomWire(link, dc) {
@@ -276,6 +298,7 @@ function roomWireFast(link, dc) {
 function roomLinkClose(link) {
   if (roomNet.links.get(link.id) === link) roomNet.links.delete(link.id);
   link.timers.forEach(clearTimeout);
+  clearTimeout(link.candTimer);
   link.open = false;
   try { if (link.dc) { link.dc.onclose = null; link.dc.close(); } } catch (e) { /* closed */ }
   try { if (link.fast) link.fast.close(); } catch (e) { /* closed */ }
@@ -324,9 +347,9 @@ async function roomConnect(hostId) {
   const session = roomNet.session;
   roomNet.hostId = hostId;
   roomNet.attempts++;
-  const iceServers = await roomIceServers();
-  const hasTurn = iceServers.some((s) => [].concat(s.urls).some((u) => /^turns?:/.test(u)));
-  const relay = hasTurn && !roomUrlFlag('direct') && (roomUrlFlag('relay') || roomNet.attempts > 1);
+  const relay = roomUrlFlag('relay');
+  let iceServers = await roomIceServers();
+  if (roomUrlFlag('direct')) iceServers = ROOM_STUN;
   const pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: relay ? 'relay' : 'all' });
   if (session !== roomNet.session || roomNet.links.has(hostId)) { pc.close(); return; }
   const link = roomLinkNew(hostId, pc);
@@ -334,11 +357,11 @@ async function roomConnect(hostId) {
   roomWireFast(link, pc.createDataChannel('fast', { ordered: false, maxRetransmits: 0 }));
   try {
     await pc.setLocalDescription(await pc.createOffer());
-    await roomGathered(pc);
   } catch (e) { roomLinkClose(link); return; }
+  const sdp = pc.localDescription.sdp;
   const send = () => {
     if (roomNet.links.get(hostId) !== link || pc.signalingState !== 'have-local-offer') return;
-    roomSignal({ k: 'offer', to: hostId, sdp: pc.localDescription.sdp, relay });
+    roomSignal({ k: 'offer', to: hostId, sdp, relay });
     link.timers.push(setTimeout(send, ROOM_RESEND_MS));
   };
   send();
@@ -364,9 +387,9 @@ async function roomOnOffer(m) {
   try {
     await pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
     await pc.setLocalDescription(await pc.createAnswer());
-    await roomGathered(pc);
   } catch (e) { roomLinkClose(link); return; }
   link.answerSdp = pc.localDescription.sdp;
+  roomPushCands(link);
   const send = () => { if (roomNet.links.get(m.from) === link && !link.open) roomSignal({ k: 'answer', to: m.from, sdp: link.answerSdp }); };
   send();
   link.timers.push(setTimeout(send, 1000), setTimeout(send, 3000));
@@ -375,7 +398,7 @@ async function roomOnOffer(m) {
 function roomOnAnswer(m) {
   const link = roomNet.links.get(m.from);
   if (!link || m.from !== roomNet.hostId || link.pc.signalingState !== 'have-local-offer') return;
-  link.pc.setRemoteDescription({ type: 'answer', sdp: m.sdp }).catch(() => roomLinkClose(link));
+  link.pc.setRemoteDescription({ type: 'answer', sdp: m.sdp }).then(() => roomPushCands(link), () => roomLinkClose(link));
 }
 
 function roomOnWho() {
@@ -428,13 +451,15 @@ async function roomRepair(link) {
   link.repairAt = performance.now();
   const pc = link.pc;
   try {
+    link.cands = [];
+    link.added.clear();
     pc.restartIce();
     await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }));
-    await roomGathered(pc);
   } catch (e) { roomLinkLost(link); return; }
+  const sdp = pc.localDescription.sdp;
   const send = () => {
     if (roomNet.links.get(link.id) !== link || !link.repairAt || pc.signalingState !== 'have-local-offer') return;
-    roomSignal({ k: 'offer', to: link.id, sdp: pc.localDescription.sdp, repair: true });
+    roomSignal({ k: 'offer', to: link.id, sdp, repair: true });
     link.timers.push(setTimeout(send, 1500));
   };
   send();
@@ -447,13 +472,16 @@ async function roomOnRepair(m, link) {
   }
   link.offerSdp = m.sdp;
   link.answerSdp = '';
-  link.rxAt = performance.now();   // the player is alive and working on it
+  link.cands = [];
+  link.added.clear();
+  link.repairAt = performance.now(); // keeps routes going out; cleared when 'connected'
+  link.rxAt = performance.now();     // the player is alive and working on it
   try {
     await link.pc.setRemoteDescription({ type: 'offer', sdp: m.sdp });
     await link.pc.setLocalDescription(await link.pc.createAnswer());
-    await roomGathered(link.pc);
   } catch (e) { roomLinkClose(link); return; }
   link.answerSdp = link.pc.localDescription.sdp;
+  roomPushCands(link);
   roomSignal({ k: 'answer', to: m.from, sdp: link.answerSdp });
 }
 
@@ -558,7 +586,7 @@ function roomStatus() {
   if (role === 'finding') {
     if (!roomNet.findAt) return { tone: 'busy', title: 'Connecting', detail: 'Reaching the room servers…' };
     if (!roomNet.hostId) return { tone: 'busy', title: 'Looking for room ' + roomNet.code, detail: '' };
-    return { tone: 'busy', title: 'Connecting to the host', detail: tries > 1 ? 'Try ' + tries + ', using the relay' : '' };
+    return { tone: 'busy', title: 'Connecting to the host', detail: tries > 1 ? 'Try ' + tries : '' };
   }
   if (role === 'reconnecting') {
     const secs = Math.round((now - roomNet.downAt) / 1000);
