@@ -5,10 +5,6 @@
 /* ============================================================
    Multiplayer: LAN WebSocket server + internet MQTT relay
    ============================================================ */
-const MQTT_RELAYS = [
-  'wss://broker.emqx.io:8084/mqtt',
-  'wss://broker.hivemq.com:8884/mqtt'
-];
 const NET_SEND_MS = 50;
 const NET_MAX_QUEUE = 48;
 const NET_MAX_EDITS = 6000;
@@ -57,16 +53,11 @@ const net = {
   editInFlight: new Map(), matchScores: { red: 0, blue: 0 }, scoreSeq: -1
 };
 
+// Host-side room state. The transport itself lives in 91-room.js.
 const mqtt = {
-  ws: null, clientId: null, room: '', relay: 0,
-  connected: false, subscribed: false, closedByUs: false,
-  lastRx: 0, keep: null, tick: null, openTimer: null, reconnectTimer: null,
-  fails: 0, peerSeen: new Map(), presence: new Map(), configs: new Map(),
-  buffer: new Uint8Array(0), electionTimer: null, hostAt: 0, pingAt: null,
-  brokerPingSeq: null, lastConfigAt: 0, lastRosterAt: 0, editSerial: 0,
-  lastPresenceAt: 0, pendingJoins: new Map(), pendingStates: new Map(),
-  stateTimer: null, historyJobs: new Map(), electing: false, wireSeq: 0,
-  authoritySeq: -1, limiters: new Map(), previousHost: null, lastJoinAt: 0, scoreSerial: 0
+  clientId: null, room: '', tick: null, lastRosterAt: 0, lastJoinAt: 0,
+  pendingStates: new Map(), stateTimer: null, stateFlushAt: 0, historyJobs: new Map(),
+  graceTimers: new Map(), limiters: new Map(), wireSeq: 0, editSerial: 0, scoreSerial: 0
 };
 
 function netUrl() {
@@ -314,7 +305,6 @@ function netSetAuthority(id, ready) {
   net.hostId = netValidId(id) ? id : null;
   net.authorityReady = !!(ready && net.hostId && net.online);
   if (changed) {
-    mqtt.authoritySeq = -1;
     if (net.configTask) {
       net.configVersion++;
       net.configPending = true;
@@ -496,14 +486,12 @@ function netPositionSfx(msg, fallbackY) {
    Only transport backpressure creates a queue. State packets are expendable,
    critical events (died/hit/ping) are never evicted. */
 function netConnectedTransport() {
-  if (net.mode === 'mqtt') return !!(mqtt.ws && mqtt.ws.readyState === 1 && mqtt.connected && mqtt.subscribed);
+  if (net.mode === 'mqtt') return roomReady();
   return !!(net.ws && net.ws.readyState === 1);
 }
 
 function netTransportBuffered() {
-  if (net.mode === 'mqtt') {
-    return !!(mqtt.ws && mqtt.ws.readyState === 1 && mqtt.ws.bufferedAmount > 128 * 1024);
-  }
+  if (net.mode === 'mqtt') return roomBuffered();
   return !!(net.ws && net.ws.readyState === 1 && net.ws.bufferedAmount > 256 * 1024);
 }
 
@@ -676,7 +664,7 @@ function netSendNow(msg) {
   if (msg.generation !== undefined && msg.t !== 'join' && msg.t !== 'match' && msg.generation !== net.generation) return true;
   if (netMqttAction(msg.t)) msg = { ...msg, seq: ++net.seq };
   if (msg.t === 'ping') {
-    if (net.mode === 'mqtt' && !netPingPeer()) return mqttSendBrokerPing();
+    if (net.mode === 'mqtt' && !netPingPeer()) return true; // alone in the room
     msg = { ...msg, seq: ++net.pingSeq, at: performance.now() };
     const to = net.mode === 'mqtt' ? netPingPeer() : null;
     if (to) msg.to = to;
@@ -687,8 +675,7 @@ function netSendNow(msg) {
     if (msg.t === 'authority' && msg.hostId !== net.hostId) return true;
     if (msg.t === 'match' || msg.t === 'seed') return netBroadcastConfig(msg);
     if (net.authorityReady && net.hostId === net.id && netMqttAction(msg.t)) return netMqttProcess(msg, net.id);
-    const ok = mqttPublish('blockcraft/' + net.room + '/msg/' + net.id, JSON.stringify(msg), false);
-    return ok;
+    return roomSend(msg);
   }
   try { net.ws.send(JSON.stringify(msg)); return true; }
   catch (e) { netDisconnect('Network send failed', true); return false; }
@@ -792,9 +779,9 @@ function netSendPing() {
 }
 
 function netPingPeer() {
-  if (net.hostId && net.hostId !== net.id && mqtt.presence.has(net.hostId)) return net.hostId;
-  const ids = [...mqtt.presence.keys()].filter((id) => id !== net.id).sort();
-  return ids[0] || null;
+  if (net.hostId && net.hostId !== net.id) return net.hostId;
+  for (const link of roomNet.links.values()) if (link.open) return link.id;
+  return null;
 }
 
 function netRecordPong(msg, from) {
@@ -824,7 +811,6 @@ function netStopPing() {
     net.pingTimer = null;
   }
   net.pings.clear();
-  mqtt.pingAt = mqtt.brokerPingSeq = null;
 }
 
 function netPlayerCount() { return net.players.size + (net.online ? 1 : 0); }
@@ -1105,7 +1091,6 @@ function removeRemote(id) {
   r.jetpackRig = null;
   scene.remove(r.group);
   net.players.delete(id);
-  mqtt.peerSeen.delete(id);
   net.rxSeq.delete(id);
   updateRoomBadge();
 }
@@ -1119,11 +1104,9 @@ function addRemote(p) {
     ? p.character : existing ? existing.character : 'steve';
   const incomingName = typeof p.name === 'string' ? safeName(p.name) : existing ? existing.name : 'Player';
   if (existing && (existing.character !== incomingChar || existing.name !== incomingName)) {
-    const seen = mqtt.peerSeen.get(p.id);
     const sequence = net.rxSeq.get(p.id);
     const authority = net.authPlayers.get(p.id);
     removeRemote(p.id);
-    if (seen) mqtt.peerSeen.set(p.id, seen);
     if (sequence !== undefined) net.rxSeq.set(p.id, sequence);
     if (authority) net.authPlayers.set(p.id, authority);
   }
@@ -1507,7 +1490,6 @@ function handleNet(msg, from, nested) {
       break;
     case 'leave':
       net.authPlayers.delete(msg.id);
-      mqtt.presence.delete(msg.id);
       for (const [index, lease] of net.rides) if (lease.id === msg.id) net.rides.delete(index);
       removeRemote(msg.id);
       netEmitStatus();
@@ -1747,9 +1729,6 @@ function handleNet(msg, from, nested) {
       // LAN pings are answered by server.js. The MQTT relay has no server, so a
       // peer answers directly (echoing the sender's own clock stamp).
       if (net.mode !== 'mqtt' || !Number.isFinite(msg.at) || from === net.id || msg.to !== net.id || !Number.isSafeInteger(msg.seq)) break;
-      const peer = mqtt.presence.get(from);
-      if (!peer || (peer.pingReplyAt && rxNow - peer.pingReplyAt < 750)) break;
-      peer.pingReplyAt = rxNow;
       netSend({ t: 'pong', at: msg.at, seq: msg.seq, to: from });
       break;
     }
@@ -1843,21 +1822,15 @@ function netCancelSession(clearHistory, keepAuthority) {
 }
 
 function netDisconnect(reason, manual) {
-  const active = !!(net.mode || net.ws || mqtt.ws || net.reconnectTimer || mqtt.reconnectTimer);
+  const active = !!(net.mode || net.ws || net.reconnectTimer);
   net.closedByUs = manual === true;
-  mqtt.closedByUs = true;
   netClearLanTimers();
   mqttClearTimers();
   netDropLanSocket();
-  mqttDropSocket();
+  roomStop();
   net.online = false;
   netCancelSession(true, false);
-  mqtt.presence.clear();
-  mqtt.peerSeen.clear();
-  mqtt.configs.clear();
-  mqtt.pendingJoins.clear();
   mqtt.limiters.clear();
-  mqtt.buffer = new Uint8Array(0);
   net.mode = null;
   net.id = null;
   net.room = '';
@@ -2098,14 +2071,18 @@ function netMqttAuthority(packet, to) {
   return netSend(envelope);
 }
 
+// Relays run on arrival, with the timer only as a backstop: background tabs
+// clamp timers to 1 s, which would freeze everyone when the host alt-tabs.
 function netMqttQueueState(packet) {
   mqtt.pendingStates.set(packet.id, packet);
-  if (!mqtt.stateTimer) mqtt.stateTimer = setTimeout(netMqttFlushStates, 50); // 20/s: faster trips public-broker rate limits and drops messages
+  if (performance.now() - mqtt.stateFlushAt >= NET_SEND_MS) netMqttFlushStates();
+  else if (!mqtt.stateTimer) mqtt.stateTimer = setTimeout(netMqttFlushStates, NET_SEND_MS);
 }
 
 function netMqttFlushStates() {
-  mqtt.stateTimer = null;
+  if (mqtt.stateTimer) { clearTimeout(mqtt.stateTimer); mqtt.stateTimer = null; }
   if (!net.online || net.hostId !== net.id || !net.authorityReady || !mqtt.pendingStates.size) return;
+  mqtt.stateFlushAt = performance.now();
   const players = [...mqtt.pendingStates.values()];
   mqtt.pendingStates.clear();
   netMqttAuthority({ t: 'states', players });
@@ -2490,103 +2467,121 @@ function mqttNewEpoch() {
   } catch (e) { return 'm' + Date.now().toString(36) + Math.random().toString(36).slice(2, 10); }
 }
 
-function mqttLiveIds() {
-  const now = performance.now();
-  const ids = [net.id];
-  for (const [id, peer] of mqtt.presence) if (id !== net.id && now - peer.seen < NET_PEER_TIMEOUT) ids.push(id);
-  return ids.filter(netValidId).sort();
-}
-
-function mqttCandidateHost() {
-  const ids = mqttLiveIds();
-  // Keep a live, advertised incumbent. A later join must adopt its history,
-  // not depose it simply because that peer's wall clock produced a lower id.
-  if (net.authorityReady && ids.includes(net.hostId)) return net.hostId;
-  const candidates = [...mqtt.configs.values()].filter((c) => ids.includes(c.hostId));
-  candidates.sort((a, b) => b.generation - a.generation || (a.hostId < b.hostId ? -1 : a.hostId > b.hostId ? 1 : 0));
-  return candidates.length ? candidates[0].hostId : ids[0] || null;
-}
-
 function mqttAdvertiseConfig() {
   if (!net.online || !net.authorityReady || net.hostId !== net.id || !netValidSeed(net.seed) || !netValidMode(net.matchMode)) return;
-  const config = { t: 'match', ...netConfig(), at: netEpochNow() };
-  mqtt.configs.set(net.id, config);
-  mqtt.lastConfigAt = performance.now();
-  mqttPublish('blockcraft/' + net.room + '/match/' + net.id, JSON.stringify(config), true);
+  roomSend({ t: 'match', ...netConfig(), at: netEpochNow() });
 }
 
-function mqttAdvertisePresence() {
-  if (!net.online || !net.id) return;
-  const now = performance.now();
-  const packet = { t: 'presence', id: net.id, at: netEpochNow() };
-  mqtt.presence.set(net.id, { ...mqtt.presence.get(net.id), seen: now, at: packet.at });
-  mqtt.lastPresenceAt = now;
-  mqttPublish('blockcraft/' + net.room + '/presence/' + net.id, JSON.stringify(packet), true);
+/* ---------------- room events from 91-room.js ---------------- */
+function netRoomOnline() {
+  net.online = true;
+  net.attempts = 0;
+  net.desync = false;
+  net.onlineAt = net.lastRx = performance.now();
+  net.lastSent = 0;
+  mqttStartTimers();
+  netStartPing();
+  updateRoomBadge();
 }
 
-function mqttScheduleElection() {
-  if (!net.online || mqtt.electionTimer) return;
-  const candidate = mqttCandidateHost();
-  if (net.authorityReady && candidate === net.hostId) return;
-  if (net.hostId && candidate && candidate !== net.hostId) {
-    mqtt.previousHost = net.hostId;
-    netSetAuthority(candidate, false);
-    netEmitStatus();
-  }
-  mqtt.electing = true;
-  const session = net.session;
-  mqtt.electionTimer = setTimeout(() => { if (session === net.session) mqttElectHost(); }, 650);
-}
-
-function mqttElectHost() {
-  mqtt.electionTimer = null;
-  mqtt.electing = false;
-  if (!net.online || net.mode !== 'mqtt') return;
-  const ids = mqttLiveIds(), host = mqttCandidateHost();
-  if (!host) return;
-  const previousHost = mqtt.previousHost || net.hostId;
-  mqtt.previousHost = null;
-  if (host === previousHost && net.authorityReady) return;
-  let inherited = net.authorityReady && netValidSeed(net.seed) && netValidMode(net.matchMode) && net.generation > 0 ? netConfig() : null;
-  if (!inherited) {
-    const candidates = [...mqtt.configs.values()].filter((c) => ids.includes(c.hostId) &&
-      netValidMode(c.mode) && netValidSeed(c.seed) && Number.isSafeInteger(c.generation) && c.generation > 0 && netToken(c.epoch));
-    candidates.sort((a, b) => b.generation - a.generation || (a.hostId < b.hostId ? -1 : a.hostId > b.hostId ? 1 : 0));
-    inherited = candidates[0] || null;
-  }
-  if (!inherited && netValidSeed(net.seed) && netValidMode(net.matchMode) && net.generation > 0) inherited = netConfig();
-  if (inherited && net.epoch && inherited.epoch !== net.epoch) mqttResetRealm();
-  netSetAuthority(host, false);
-  if (previousHost && previousHost !== host) {
-    net.rides.clear();
-    for (const r of net.authPlayers.values()) { r.dragon = -1; if (r.shots) r.shots.clear(); r.shot = null; }
-  }
-  if (host === net.id) {
-    for (const edit of net.editHistory.values()) if (Number.isSafeInteger(edit.sid)) mqtt.editSerial = Math.max(mqtt.editSerial, edit.sid);
-    for (const edit of net.pendingEdits.values()) if (netEditMatches(edit) && Number.isSafeInteger(edit.sid)) mqtt.editSerial = Math.max(mqtt.editSerial, edit.sid);
-    for (const sid of net.editSeq.values()) if (Number.isSafeInteger(sid)) mqtt.editSerial = Math.max(mqtt.editSerial, sid);
-    mqtt.scoreSerial = inherited && Number.isSafeInteger(inherited.scoreSeq) ? inherited.scoreSeq : Math.max(0, net.scoreSeq);
-    const config = { mode: inherited ? inherited.mode : netCurrentMode(), seed: inherited ? inherited.seed : netCurrentSeed(),
-      generation: inherited ? inherited.generation : 1, epoch: inherited ? inherited.epoch : mqttNewEpoch(),
-      hostId: host, forceRideable: false, scores: inherited ? inherited.scores : { red: 0, blue: 0 },
-      dragonCount: netDragonCount(inherited ? inherited.seed : netCurrentSeed()), dragons: inherited ? inherited.dragons : [],
-      scoreSeq: mqtt.scoreSerial };
-    if (!netValidSeed(config.seed)) { net.desync = true; netEmitStatus(); return; }
-    netSetAuthority(host, true);
-    netReceiveConfig(config, host);
-    mqttAdvertiseConfig();
-    netSend({ ...netJoinPacket(), id: net.id });
-    for (const [id, join] of mqtt.pendingJoins) {
-      if (mqtt.presence.has(id)) netMqttProcess(join, id, true);
-    }
-    mqtt.pendingJoins.clear();
-    netMqttRoster();
-  } else {
-    const config = mqtt.configs.get(host);
-    if (config && (!net.epoch || config.epoch === net.epoch) && netReceiveConfig(config, host)) netSetAuthority(host, true);
-    netSend({ ...netJoinPacket(), id: net.id });
-  }
+// This browser hosts: a new room, or a takeover that keeps world and scores.
+function netHostStart() {
+  const first = !net.online;
+  const inherited = !first && netValidSeed(net.seed) && netValidMode(net.matchMode) && net.generation > 0 ? netConfig() : null;
+  netRoomOnline();
+  net.rides.clear();
+  for (const r of net.authPlayers.values()) { r.dragon = -1; if (r.shots) r.shots.clear(); r.shot = null; }
+  for (const edit of net.editHistory.values()) if (Number.isSafeInteger(edit.sid)) mqtt.editSerial = Math.max(mqtt.editSerial, edit.sid);
+  for (const edit of net.pendingEdits.values()) if (netEditMatches(edit) && Number.isSafeInteger(edit.sid)) mqtt.editSerial = Math.max(mqtt.editSerial, edit.sid);
+  for (const sid of net.editSeq.values()) if (Number.isSafeInteger(sid)) mqtt.editSerial = Math.max(mqtt.editSerial, sid);
+  mqtt.scoreSerial = inherited && Number.isSafeInteger(inherited.scoreSeq) ? inherited.scoreSeq : Math.max(0, net.scoreSeq);
+  const config = { mode: inherited ? inherited.mode : netCurrentMode(), seed: inherited ? inherited.seed : netCurrentSeed(),
+    generation: inherited ? inherited.generation : 1, epoch: inherited ? inherited.epoch : mqttNewEpoch(),
+    hostId: net.id, forceRideable: false, scores: inherited ? inherited.scores : { red: 0, blue: 0 },
+    dragonCount: netDragonCount(inherited ? inherited.seed : netCurrentSeed()), dragons: inherited ? inherited.dragons : [],
+    scoreSeq: mqtt.scoreSerial };
+  if (!netValidSeed(config.seed)) { net.desync = true; netEmitStatus(); return; }
+  netSetAuthority(net.id, true);
+  netReceiveConfig(config, net.id);
+  netSend({ ...netJoinPacket(), id: net.id });
+  // The old host is gone; everyone else gets the usual time to reconnect here.
+  mqttRemovePeer(roomNet.lastHostId, 'timeout');
+  for (const id of net.authPlayers.keys()) if (id !== net.id) netHostLinkDown(id);
+  netMqttRoster();
   netEmitStatus();
+  if (first) { toast('Online. Room ' + net.room + ' · share the code'); playTone(660, 0.09, 'sine', 0.08); }
+  else toast('You are now hosting room ' + net.room);
+}
+
+function netHostLinkUp(id) {
+  clearTimeout(mqtt.graceTimers.get(id));
+  mqtt.graceTimers.delete(id);
+  mqtt.lastRosterAt = 0;
+  roomSend({ t: 'match', ...netConfig(), at: netEpochNow(), to: id });
+  netEmitStatus();
+}
+
+// A player's link dropped: keep them in the match briefly so they can return.
+function netHostLinkDown(id) {
+  clearTimeout(mqtt.graceTimers.get(id));
+  mqtt.graceTimers.set(id, setTimeout(() => {
+    mqtt.graceTimers.delete(id);
+    if (!roomNet.links.has(id)) mqttRemovePeer(id, 'timeout');
+  }, 15000));
+}
+
+function netPlayerLinkUp(hostId) {
+  const first = !net.online;
+  netRoomOnline();
+  netEmitStatus();
+  if (first) toast('Joined room ' + net.room);
+  else toast('Reconnected to room ' + net.room);
+  net.warned = true;
+  if (first) playTone(660, 0.09, 'sine', 0.08);
+}
+
+function netPlayerLinkDown() {
+  net.authorityReady = false;
+  netDropQueue();
+  netEmitStatus();
+  toast('Connection to host lost. Reconnecting…');
+}
+
+// Everything that arrives on a data channel. `from` is the peer this link was
+// negotiated with, never a field inside the message.
+function roomInbound(from, text) {
+  let msg;
+  try { msg = JSON.parse(text); } catch (e) { return; }
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
+  if (msg.t === 'ping' || msg.t === 'pong') { handleNet(msg, from); return; }
+  if (roomNet.role === 'host') {
+    if (!netMqttBudget(from, text.length, false, false) || !netInboundOK(msg)) return;
+    msg.id = from;
+    if (msg.t === 'join' && msg.player && typeof msg.player === 'object') msg.player.id = from;
+    if (msg.t === 'hit') msg.byId = from;
+    if (msg.t === 'voxelHit') msg.by = from;
+    if (msg.t === 'leave') { roomLinkLost(roomNet.links.get(from)); mqttRemovePeer(from, 'left'); return; }
+    netMqttProcess(msg, from, true);
+    return;
+  }
+  if (from !== roomNet.hostId) return;
+  if (msg.t === 'match') {
+    if (!netValidMode(msg.mode) || !netValidSeed(msg.seed) || !Number.isSafeInteger(msg.generation) || !netToken(msg.epoch)) return;
+    if (net.epoch && net.epoch !== msg.epoch) mqttResetRealm();
+    const wasReady = net.authorityReady;
+    net.hostId = from;
+    netSetAuthority(from, true);
+    handleNet(msg, from);
+    if (!wasReady) { mqtt.lastJoinAt = performance.now(); netSend({ ...netJoinPacket(), id: net.id }); }
+    netEmitStatus();
+  } else if (msg.t === 'authority') {
+    const packet = msg.packet;
+    if (!net.authorityReady || msg.epoch !== net.epoch || msg.generation !== net.generation || !netInboundOK(packet)) return;
+    if (!['join', 'state', 'states', 'roster', 'health', 'correction', 'shot', 'hit', 'voxelHit', 'edit', 'edits', 'editAck', 'editReject',
+      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'leave', 'teamSet'].includes(packet.t) ||
+      packet.generation !== net.generation || packet.epoch !== net.epoch) return;
+    handleNet(packet, from);
+  }
 }
 
 function netBroadcastConfig(config) {
@@ -2610,16 +2605,12 @@ function netBroadcastConfig(config) {
 function mqttRemovePeer(id, reason) {
   if (!netValidId(id) || id === net.id) return;
   const record = net.authPlayers.get(id);
-  if (!record && !mqtt.presence.has(id) && !net.players.has(id)) return;
+  if (!record && !net.players.has(id)) return;
   if (net.hostId === net.id && record) netMqttReleaseRide(record, reason || 'left');
-  mqtt.presence.delete(id);
-  mqtt.peerSeen.delete(id);
-  mqtt.pendingJoins.delete(id);
   mqtt.historyJobs.delete(id);
   mqtt.pendingStates.delete(id);
   if (net.hostId === net.id) netMqttAuthority({ t: 'leave', id });
   else { net.authPlayers.delete(id); removeRemote(id); }
-  mqttScheduleElection();
   netEmitStatus();
 }
 
@@ -2627,7 +2618,7 @@ function mqttDrainHistory() {
   if (net.hostId !== net.id || netTransportBuffered() || net.outbox.length > 8) return;
   let count = 0;
   for (const [id, job] of mqtt.historyJobs) {
-    if (job.generation !== net.generation || job.epoch !== net.epoch || !mqtt.presence.has(id)) { mqtt.historyJobs.delete(id); continue; }
+    if (job.generation !== net.generation || job.epoch !== net.epoch || !roomNet.links.has(id)) { mqtt.historyJobs.delete(id); continue; }
     if (job.cursor >= job.edits.length) { mqtt.historyJobs.delete(id); continue; }
     if (count++ >= 4 || netTransportBuffered()) break;
     const edits = job.edits.slice(job.cursor, job.cursor + 64);
@@ -2637,87 +2628,13 @@ function mqttDrainHistory() {
   }
 }
 
-function mqttSendBrokerPing() {
-  if (!mqtt.ws || mqtt.ws.readyState !== 1 || !mqtt.connected || netTransportBuffered()) return false;
-  const now = performance.now();
-  if (mqtt.pingAt !== null && now - mqtt.pingAt < 10000) return true;
-  try {
-    mqtt.ws.send(new Uint8Array([0xc0, 0]));
-    mqtt.pingAt = now;
-    return true;
-  } catch (e) { mqttLoseConnection(mqtt.ws); return false; }
-}
-
-function mqttRecordBrokerPong() {
-  if (mqtt.pingAt === null) return;
-  const now = performance.now(), sample = now - mqtt.pingAt;
-  mqtt.pingAt = null;
-  if (netPingPeer() || sample < 0 || sample > 10000) return;
-  const comparable = net.lastPong && net.pingSource === 'broker';
-  net.jitter = comparable ? net.jitter + (Math.abs(sample - net.ping) - net.jitter) * 0.25 : 0;
-  net.ping = comparable ? net.ping + (sample - net.ping) * 0.25 : sample;
-  net.lastPong = now;
-  net.pingSource = 'broker'; // real relay RTT when alone, never our PUBLISH echo
-}
-
-function mqttVarint(n) {
-  const out = [];
-  do {
-    let b = n & 0x7f;
-    n >>>= 7;
-    if (n > 0) b |= 0x80;
-    out.push(b);
-  } while (n > 0);
-  return out;
-}
-function mqttStr(s) {
-  const b = new TextEncoder().encode(s);
-  return [b.length >> 8, b.length & 255, ...b];
-}
-function mqttPacket(type, body) {
-  return new Uint8Array([type, ...mqttVarint(body.length), ...body]);
-}
-function mqttPublish(topic, payload, retain) {
-  // Room messages take the direct WebRTC path when it is open (91-rtc.js);
-  // it returns true when the broker copy is no longer needed.
-  if (!retain && typeof rtcRoute === 'function' && rtcRoute(topic, payload)) return true;
-  if (!mqtt.ws || mqtt.ws.readyState !== 1 || !mqtt.connected) return false;
-  if (payload.length > NET_MAX_FRAME || topic.length > 128) {
-    netDisconnect('Network packet exceeded the size limit', true); return false;
-  }
-  const body = [...mqttStr(topic), ...new TextEncoder().encode(payload)];
-  if (body.length > NET_MAX_FRAME || mqtt.ws.bufferedAmount > NET_MAX_BUFFER) {
-    mqttLoseConnection(mqtt.ws); return false;
-  }
-  try {
-    mqtt.ws.send(mqttPacket(retain ? 0x31 : 0x30, body));
-    return true;
-  } catch (e) { mqttLoseConnection(mqtt.ws); return false; }
-}
-
 function mqttClearTimers() {
-  if (mqtt.openTimer) { clearTimeout(mqtt.openTimer); mqtt.openTimer = null; }
-  if (mqtt.keep) { clearInterval(mqtt.keep); mqtt.keep = null; }
-  if (mqtt.reconnectTimer) { clearTimeout(mqtt.reconnectTimer); mqtt.reconnectTimer = null; }
   if (mqtt.tick) { clearInterval(mqtt.tick); mqtt.tick = null; }
-  if (mqtt.electionTimer) { clearTimeout(mqtt.electionTimer); mqtt.electionTimer = null; }
   if (mqtt.stateTimer) { clearTimeout(mqtt.stateTimer); mqtt.stateTimer = null; }
-  mqtt.electing = false;
+  for (const timer of mqtt.graceTimers.values()) clearTimeout(timer);
+  mqtt.graceTimers.clear();
   mqtt.pendingStates.clear();
   mqtt.historyJobs.clear();
-}
-function mqttDropSocket() {
-  const ws = mqtt.ws;
-  mqtt.ws = null;
-  mqtt.connected = false;
-  mqtt.subscribed = false;
-  mqtt.buffer = new Uint8Array(0);
-  if (ws) {
-    try {
-      ws.onopen = ws.onmessage = ws.onerror = ws.onclose = null;
-      ws.close();
-    } catch (e) { /* ignore */ }
-  }
 }
 
 function mqttResetRealm() {
@@ -2742,316 +2659,14 @@ function mqttResetRealm() {
   mqtt.historyJobs.clear();
 }
 
-function mqttLoseConnection(ws) {
-  if (!ws || mqtt.ws !== ws || net.mode !== 'mqtt') return;
-  const wasOnline = net.online;
-  const pending = net.configPending || !!net.configTask || net.configError;
-  mqttClearTimers();
-  mqttDropSocket();
-  net.online = false;
-  netCancelSession(false, true);
-  net.configPending = pending;
-  mqtt.presence.clear();
-  mqtt.peerSeen.clear();
-  mqtt.configs.clear();
-  mqtt.pendingJoins.clear();
-  mqtt.limiters.clear();
-  mqtt.authoritySeq = -1;
-  mqtt.previousHost = null;
-  updateRoomBadge();
-  netEmitStatus();
-  const hint = document.getElementById('roomHint');
-  if (hint) hint.textContent = 'Connection lost. Reconnecting to room ' + net.room + '…';
-  if (wasOnline) toast('Online link lost. Reconnecting…');
-  mqttScheduleReconnect();
-}
-
-function mqttScheduleReconnect() {
-  if (mqtt.closedByUs || net.mode !== 'mqtt') return;
-  if (mqtt.reconnectTimer) return;
-  const delay = Math.min(9000, 700 * Math.pow(1.7, Math.min(5, mqtt.fails)));
-  mqtt.fails++;
-  const session = net.session;
-  mqtt.reconnectTimer = setTimeout(() => {
-    mqtt.reconnectTimer = null;
-    if (session === net.session && !mqtt.closedByUs && net.mode === 'mqtt') mqttOpen(mqtt.relay + (mqtt.fails % 2 === 0 ? 1 : 0));
-  }, delay);
-}
-
-function mqttOpen(relay) {
-  mqttClearTimers();
-  mqttDropSocket();
-  if (!mqtt.room || !mqtt.clientId || mqtt.closedByUs) return;
-
-  relay = relay || 0;
-  if (relay % MQTT_RELAYS.length !== mqtt.relay % MQTT_RELAYS.length) mqttResetRealm();
-  const url = MQTT_RELAYS[relay % MQTT_RELAYS.length];
-  mqtt.relay = relay;
-  let ws;
-  try { ws = new WebSocket(url, ['mqtt']); } catch (e) { mqttScheduleReconnect(); return; }
-  mqtt.ws = ws;
-  const session = net.session;
-  const current = () => mqtt.ws === ws && net.mode === 'mqtt' && net.session === session;
-  ws.binaryType = 'arraybuffer';
-  mqtt.connected = false;
-  mqtt.subscribed = false;
-  mqtt.lastRx = performance.now();
-  mqtt.buffer = new Uint8Array(0);
-
-  mqtt.openTimer = setTimeout(() => {
-    if (!mqtt.subscribed && current()) mqttLoseConnection(ws);
-  }, 10000);
-
-  ws.onopen = () => {
-    if (!current()) return;
-    const willTopic = 'blockcraft/' + mqtt.room + '/presence/' + mqtt.clientId;
-    const will = ''; // retained empty Last Will removes stale election members
-    const body = [
-      ...mqttStr('MQTT'), 4, 0x26, 0, 15,
-      ...mqttStr(mqtt.clientId),
-      ...mqttStr(willTopic),
-      ...mqttStr(will)
-    ];
-    try { ws.send(mqttPacket(0x10, body)); } catch (e) { mqttLoseConnection(ws); }
-  };
-  ws.onmessage = (ev) => {
-    if (!current()) return;
-    const data = ev.data;
-    if (data instanceof ArrayBuffer) mqttOnData(new Uint8Array(data));
-    else if (ArrayBuffer.isView(data)) mqttOnData(new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-  };
-  ws.onerror = () => { /* onclose handles it */ };
-  ws.onclose = () => {
-    if (current()) mqttLoseConnection(ws);
-  };
-}
-
-function mqttOnData(buf) {
-  if (!mqtt.ws || buf.length + mqtt.buffer.length > NET_MAX_BUFFER) { mqttLoseConnection(mqtt.ws); return; }
-  const socket = mqtt.ws;
-  if (mqtt.buffer.length) {
-    const combined = new Uint8Array(mqtt.buffer.length + buf.length);
-    combined.set(mqtt.buffer);
-    combined.set(buf, mqtt.buffer.length);
-    buf = combined;
-  }
-  let i = 0;
-  while (i < buf.length) {
-    const start = i;
-    const first = buf[i++];
-    const type = first >> 4;
-    let len = 0, mul = 1, b, digits = 0;
-    do {
-      if (i >= buf.length) { mqtt.buffer = buf.slice(start); return; }
-      if (++digits > 4) { mqttLoseConnection(socket); return; }
-      b = buf[i++];
-      len += (b & 0x7f) * mul;
-      mul *= 128;
-    } while (b & 0x80);
-    if (len > NET_MAX_FRAME) { mqttLoseConnection(socket); return; }
-    if (i + len > buf.length) { mqtt.buffer = buf.slice(start); return; }
-    const body = buf.subarray(i, i + len);
-    i += len;
-    mqtt.lastRx = performance.now();
-
-    if (type === 2) { // CONNACK
-      if (first !== 0x20 || body.length !== 2 || body[0] > 1 || mqtt.connected) { mqttLoseConnection(socket); return; }
-      const rc = body[1];
-      if (rc === 0) {
-        mqtt.connected = true;
-        const filter = 'blockcraft/' + mqtt.room + '/#';
-        const subBody = [0, 1, ...mqttStr(filter), 0];
-        try { socket.send(mqttPacket(0x82, subBody)); } catch (e) { mqttLoseConnection(socket); return; }
-      } else {
-        mqttLoseConnection(socket); return;
-      }
-    } else if (type === 3) { // PUBLISH
-      mqttHandlePublish(first, body);
-    } else if (type === 9) { // SUBACK
-      if (first !== 0x90) { mqttLoseConnection(socket); return; }
-      mqttOnSuback(body);
-    } else if (type === 13) { // PINGRESP
-      if (first !== 0xd0 || body.length) { mqttLoseConnection(socket); return; }
-      mqttRecordBrokerPong();
-      handleNet({ t: 'brokerPong' }, 'broker');
-    }
-    if (mqtt.ws !== socket) return;
-  }
-  mqtt.buffer = new Uint8Array(0);
-}
-
-function mqttOnSuback(body) {
-  if (mqtt.subscribed) return;
-  if (body.length !== 3 || body[0] !== 0 || body[1] !== 1 || body[2] !== 0) {
-    mqttLoseConnection(mqtt.ws);
-    return;
-  }
-  mqtt.subscribed = true;
-  net.online = true;
-  net.id = mqtt.clientId;
-  net.attempts = 0;
-  net.desync = false;
-  net.onlineAt = net.lastRx = performance.now();
-  netSetAuthority(net.hostId, false);
-  net.rxSeq.clear();
-  mqtt.fails = 0;
-  if (mqtt.openTimer) { clearTimeout(mqtt.openTimer); mqtt.openTimer = null; }
-  mqttStartTimers();
-  updateRoomBadge();
-  mqttAdvertisePresence();
-  netSend({ ...netJoinPacket(), id: mqtt.clientId });
-  mqtt.lastJoinAt = performance.now();
-  mqttScheduleElection();
-  net.lastSent = 0;
-  netStartPing();
-  netSendPing();
-  netEmitStatus();
-  if (!net.warned) toast('Online. Room ' + mqtt.room + ' · share the code');
-  else toast('Reconnected to room ' + mqtt.room);
-  net.warned = true;
-  playTone(660, 0.09, 'sine', 0.08);
-}
-
-function mqttHandlePublish(first, body) {
-  const qos = (first >> 1) & 3;
-  if (qos > 1 || body.length < 2) return;
-  const topicLen = (body[0] << 8) | body[1];
-  if (body.length < 2 + topicLen) return;
-  const topic = new TextDecoder().decode(body.subarray(2, 2 + topicLen));
-  let p = 2 + topicLen;
-  if (qos > 0) {
-    if (body.length < p + 2) return;
-    const pid = (body[p] << 8) | body[p + 1];
-    p += 2;
-    if (!pid) return;
-    try { mqtt.ws.send(mqttPacket(0x40, [pid >> 8, pid & 255])); } catch (e) { mqttLoseConnection(mqtt.ws); return; }
-  }
-  mqttDispatch(topic, new TextDecoder().decode(body.subarray(p)), body.length);
-}
-
-// Shared by the broker and the WebRTC data channels (91-rtc.js), so direct
-// messages get exactly the same identity, budget, ordering and dedupe rules.
-function mqttDispatch(topic, payload, bytes) {
-  const parts = topic.split('/');
-  if (parts.length === 4 && parts[0] === 'blockcraft' && parts[1] === mqtt.room && parts[2] === 'rtc') {
-    if (typeof rtcOnSignal === 'function' && netValidId(parts[3]) && parts[3] !== net.id) rtcOnSignal(parts[3], payload);
-    return;
-  }
-  if (parts.length !== 4 || parts[0] !== 'blockcraft' || parts[1] !== mqtt.room ||
-      !['presence', 'match', 'msg'].includes(parts[2])) return;
-  // Old unscoped retained /e topics are deliberately NOT replayed. Only the
-  // current host's generation/epoch-scoped history can mutate this world.
-  const from = parts[3] || '';
-  if (!netValidId(from) || from === net.id) return; // no self-echo ping/grant/death
-  if (parts[2] === 'presence' && !payload) { mqttRemovePeer(from, 'left'); return; }
-  let msg;
-  try { msg = JSON.parse(payload); } catch (e) { return; }
-  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return;
-  const control = parts[2] !== 'msg' || msg.t === 'ping' || msg.t === 'pong';
-  if (!netMqttBudget(from, bytes, control, msg.t === 'authority' && from === net.hostId)) return;
-  const now = performance.now();
-  if (parts[2] === 'presence') {
-    if (msg.t !== 'presence' || msg.id !== from || !Number.isFinite(msg.at) || Math.abs(netEpochNow() - msg.at) > 60000) return;
-    if (!mqtt.presence.has(from) && mqtt.presence.size >= NET_MAX_PEERS * 2) return;
-    const old = mqtt.presence.get(from);
-    if (old && msg.at < old.at) return;
-    mqtt.presence.set(from, { ...old, seen: now, at: msg.at });
-    mqtt.peerSeen.set(from, now);
-    mqttScheduleElection();
-    return;
-  }
-  if (parts[2] === 'match') {
-    if (msg.t !== 'match' || msg.hostId !== from || !netValidMode(msg.mode) || !netValidSeed(msg.seed) ||
-        !Number.isSafeInteger(msg.generation) || msg.generation < 1 || !netToken(msg.epoch)) return;
-    if ((msg.dragonCount !== undefined && msg.dragonCount !== netDragonCount(msg.seed)) ||
-        (msg.dragons !== undefined && !netValidateDragonCatalog(msg.dragons, msg.seed, msg.generation, msg.dragonCount, true))) return;
-    if (net.authorityReady && from !== net.hostId) return;
-    if (!mqtt.configs.has(from) && mqtt.configs.size >= NET_MAX_PEERS * 2) return;
-    const old = mqtt.configs.get(from);
-    if (old && old.epoch === msg.epoch && old.generation > msg.generation) return;
-    msg.forceRideable = false;
-    mqtt.configs.set(from, msg);
-    if (mqtt.electing || !mqtt.presence.has(from) || mqttCandidateHost() !== from) return;
-    if (net.epoch && net.epoch !== msg.epoch) {
-      if (net.authorityReady) return;
-      mqttResetRealm();
-    }
-    netSetAuthority(from, true);
-    handleNet(msg, from);
-    return;
-  }
-  if (msg.t === 'authority') {
-    if (!net.authorityReady || from !== net.hostId || mqttCandidateHost() !== from || msg.hostId !== from ||
-        msg.epoch !== net.epoch || msg.generation !== net.generation || !Number.isSafeInteger(msg.wireSeq) ||
-        msg.wireSeq <= mqtt.authoritySeq || (msg.to !== undefined && !netValidId(msg.to)) || !netInboundOK(msg.packet)) return;
-    const packet = msg.packet;
-    if (!['join', 'state', 'states', 'roster', 'health', 'correction', 'shot', 'hit', 'voxelHit', 'edit', 'edits', 'editAck', 'editReject',
-      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'leave', 'teamSet'].includes(packet.t) ||
-      packet.generation !== net.generation || packet.epoch !== net.epoch) return;
-    mqtt.authoritySeq = msg.wireSeq;
-    if (msg.to && msg.to !== net.id) return;
-    handleNet(packet, from);
-    return;
-  }
-  if (!netInboundOK(msg)) return;
-  if (!mqtt.presence.has(from) && mqtt.presence.size >= NET_MAX_PEERS * 2) return;
-  const peer = mqtt.presence.get(from) || { seen: now, at: netEpochNow() };
-  peer.seen = now;
-  mqtt.presence.set(from, peer);
-  mqtt.peerSeen.set(from, now);
-  // Player requests bind identity to the publisher topic. Host decisions use
-  // a separate envelope, preserving victim/attacker/rider identities inside.
-  msg.id = from;
-  if (msg.t === 'join' && msg.player && typeof msg.player === 'object') msg.player.id = from;
-  if (msg.t === 'hit') msg.byId = from;
-  if (msg.t === 'voxelHit') msg.by = from;
-  if (msg.t === 'ping' || msg.t === 'pong') { handleNet(msg, from); return; }
-  if (msg.t === 'leave') { mqttRemovePeer(from, 'left'); return; }
-  if (msg.t === 'join' && netValidPosition(msg) && mqtt.pendingJoins.size < NET_MAX_PEERS) mqtt.pendingJoins.set(from, msg);
-  mqttScheduleElection();
-  if (net.authorityReady && net.hostId === net.id) {
-    mqtt.pendingJoins.delete(from);
-    netMqttProcess(msg, from, true);
-  } else if (net.authorityReady && (msg.t === 'state' || msg.t === 'reload')) {
-    netApplyDirectPose(msg, from, now);
-  }
-}
-
-// Visual-only movement straight from the peer, one broker hop instead of two
-// (peer -> host -> everyone). HP, teams, kills and deaths still come only from
-// the host: in MQTT mode netApplyRemotePose reads those from authPlayers.
-function netApplyDirectPose(msg, from, now) {
-  const r = net.players.get(from);
-  if (!r || msg.generation !== net.generation || msg.epoch !== net.epoch || !netValidPosition(msg)) return;
-  if (r.hp <= 0 || r.deadUntil > now || netRiderMounted(from)) return;
-  if (Number.isSafeInteger(msg.life) && msg.life < (r.life || 0)) return;
-  if (Number.isSafeInteger(msg.seq)) {
-    if (msg.seq <= (r.directSeq || 0)) return;
-    r.directSeq = msg.seq;
-  }
-  r.directAt = now;
-  addRemote({ ...msg, id: from, team: undefined, hp: undefined, kills: undefined, deaths: undefined });
-}
-
 function mqttStartTimers() {
-  if (mqtt.keep) clearInterval(mqtt.keep);
-  mqtt.keep = setInterval(() => {
-    if (net.mode === 'mqtt' && net.online) mqttSendBrokerPing();
-  }, 5000);
-
   if (mqtt.tick) clearInterval(mqtt.tick);
   mqtt.tick = setInterval(() => {
     if (!net.online) return;
     const now = performance.now();
-    if (now - mqtt.lastRx > 12000) { mqttLoseConnection(mqtt.ws); return; }
-    for (const [id, peer] of mqtt.presence) {
-      if (id !== net.id && now - peer.seen > NET_PEER_TIMEOUT) mqttRemovePeer(id, 'timeout');
-    }
+    if (net.hostId === net.id) net.lastRx = now; // a host is never out of date, even alone
     for (const [key, bucket] of mqtt.limiters) if (now - bucket.at > NET_PEER_TIMEOUT * 2) mqtt.limiters.delete(key);
-    if (now - mqtt.lastPresenceAt >= 3000 && !netTransportBuffered()) mqttAdvertisePresence();
-    if (!net.authorityReady) mqttScheduleElection();
     if (net.hostId === net.id && net.authorityReady) {
-      for (const r of net.authPlayers.values()) if (r.id !== net.id && !mqtt.presence.has(r.id)) mqttRemovePeer(r.id, 'timeout');
       for (const lease of net.rides.values()) {
         if (lease.until <= now) {
           const rider = net.authPlayers.get(lease.id);
@@ -3059,14 +2674,14 @@ function mqttStartTimers() {
           else net.rides.delete(lease.dragon);
         }
       }
-      if (now - mqtt.lastConfigAt >= 3000 && !netTransportBuffered()) mqttAdvertiseConfig();
+      netMqttFlushStates();
       if (now - mqtt.lastRosterAt >= 2000 && !netTransportBuffered()) {
         mqtt.lastRosterAt = now;
         netMqttRoster();
         for (const lease of net.rides.values()) netMqttAuthority({ ...netMqttLeasePacket(lease, true, 'heartbeat'), t: 'ride' });
       }
       mqttDrainHistory();
-    } else if ((!net.authorityReady || !net.authPlayers.has(net.id)) && now - mqtt.lastJoinAt >= 6000) {
+    } else if (net.authorityReady && !net.authPlayers.has(net.id) && now - mqtt.lastJoinAt >= 3000) {
       mqtt.lastJoinAt = now;
       netSend({ ...netJoinPacket(), id: net.id });
     }
@@ -3074,7 +2689,7 @@ function mqttStartTimers() {
   }, 250);
 }
 
-function startOnline(roomArg) {
+function startOnline(roomArg, create) {
   const typed = normalizeRoom(roomArg || (document.getElementById('roomInput') || {}).value);
   if (!typed) {
     toast('Enter a room code, or press Create room');
@@ -3100,19 +2715,12 @@ function startOnline(roomArg) {
   net.warned = false;
   net.desync = false;
   mqtt.room = room;
-  mqtt.closedByUs = false;
-  mqtt.connected = false;
-  mqtt.subscribed = false;
-  mqtt.fails = 0;
-  mqtt.relay = 0;
   mqtt.clientId = 'bc_' + Date.now().toString(36).padStart(10, '0') + Math.random().toString(36).slice(2, 8);
   net.id = mqtt.clientId;
   net.seq = 0;
   mqtt.wireSeq = 0;
-  mqtt.authoritySeq = -1;
   mqtt.editSerial = 0;
-  mqtt.previousHost = null;
-  mqtt.lastPresenceAt = mqtt.lastConfigAt = mqtt.lastRosterAt = 0;
+  mqtt.lastRosterAt = 0;
 
   updateRoomBadge();
   netEmitStatus();
@@ -3120,23 +2728,19 @@ function startOnline(roomArg) {
   if (hint) hint.textContent = 'Connecting to room ' + room + '…';
   toast('Joining room ' + room + '…');
   // Transport only: Home/Pause stays open until an explicit Play/Resume.
-  mqttOpen(0);
+  roomStart(room, create === true);
 }
 
 function createRoom() {
   const room = randomRoom();
   const input = document.getElementById('roomInput');
   if (input) input.value = room;
-  startOnline(room);
+  startOnline(room, true);
   copyRoom();
 }
 
 function leaveOnline(returnToLan = true) {
-  if (net.mode === 'mqtt' && net.online) {
-    mqttPublish('blockcraft/' + net.room + '/msg/' + net.id, JSON.stringify({ t: 'leave', id: net.id }), false);
-    mqttPublish('blockcraft/' + net.room + '/presence/' + net.id, '', true);
-    if (net.hostId === net.id) mqttPublish('blockcraft/' + net.room + '/match/' + net.id, '', true);
-  }
+  if (net.mode === 'mqtt' && net.online && net.hostId !== net.id) netSend({ t: 'leave', id: net.id });
   netDisconnect(null, returnToLan === false);
   if (returnToLan) connectNet();
   else {
@@ -3168,9 +2772,7 @@ function remoteMuzzle(pos) {
 /* ---------------- per-frame network ---------------- */
 function sendNetState(now) {
   if (!net.online) return;
-  if (net.mode === 'mqtt') {
-    if (!mqtt.connected) return;
-  } else if (!net.ws || net.ws.readyState !== 1) return;
+  if (!netConnectedTransport()) return;
   if (now - net.lastSent < NET_SEND_MS) return;
   net.lastSent = now;
   const msg = combatNetState();
@@ -3310,10 +2912,7 @@ if (createBtnEl) createBtnEl.addEventListener('click', createRoom);
 const roomBadgeEl = document.getElementById('roomBadge');
 if (roomBadgeEl) roomBadgeEl.addEventListener('click', copyRoom);
 window.addEventListener('pagehide', () => {
-  if (net.mode === 'mqtt' && mqtt.connected) {
-    mqttPublish('blockcraft/' + net.room + '/msg/' + net.id, JSON.stringify({ t: 'leave', id: net.id }), false);
-    mqttPublish('blockcraft/' + net.room + '/presence/' + net.id, '', true);
-  }
+  if (net.mode === 'mqtt' && net.online && net.hostId !== net.id) netSend({ t: 'leave', id: net.id });
   netDisconnect(null, true);
 });
 

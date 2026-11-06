@@ -492,8 +492,7 @@
     var sync = BC.api.net;
     if (sync && typeof sync.connected === 'boolean') return sync.connected;
     if (n.mode === 'ws') return !!(n.ws && n.ws.readyState === 1);
-    return n.mode === 'mqtt' && typeof mqtt !== 'undefined' && !!mqtt &&
-      !!(mqtt.connected && mqtt.subscribed && mqtt.ws && mqtt.ws.readyState === 1);
+    return n.mode === 'mqtt' && typeof roomReady === 'function' && roomReady();
   }
 
   function mqttAuthority() {

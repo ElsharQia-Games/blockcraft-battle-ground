@@ -83,14 +83,14 @@
     if (!n || !n.mode) return 'solo';
     const count = playerTotal();
     const base = n.mode === 'mqtt'
-      ? 'MQTT' + (n.room ? ' ' + n.room : '')
+      ? 'Room' + (n.room ? ' ' + n.room : '')
       : 'LAN';
     const peers = count > 1 ? ' · ' + count + 'P' : '';
     if (!n.online) return base + ' · connecting';
     if (n.configError) return base + peers + ' · sync error';
-    if (n.mode === 'mqtt' && !n.authorityReady) return base + peers + ' · agreeing host';
+    if (n.mode === 'mqtt' && !n.authorityReady) return base + peers + ' · reconnecting';
     if (n.configPending || n.localReset) return base + peers + ' · syncing';
-    return base + peers + (n.desync ? ' · resync' : n.pingSource === 'broker' ? ' · relay RTT' : '');
+    return base + peers + (n.desync ? ' · resync' : '');
   }
 
   function syncState() {
@@ -192,8 +192,8 @@
       setDesync(false);
     }
     if (silent > 12000 && transportReady()) {
+      // Internet rooms watch their own links (91-room.js).
       if (n.mode === 'ws' && typeof netLoseLanConnection === 'function') netLoseLanConnection(n.ws);
-      else if (n.mode === 'mqtt' && typeof mqttLoseConnection === 'function') mqttLoseConnection(mqtt.ws);
     }
   }
 
@@ -205,11 +205,6 @@
       n.closedByUs = true;
       if (typeof netStopPing === 'function') netStopPing();
       if (typeof netDropQueue === 'function') netDropQueue();
-      if (n.mode === 'mqtt' && typeof mqttDropSocket === 'function') {
-        if (typeof mqttClearTimers === 'function') mqttClearTimers();
-        mqtt.closedByUs = true;
-        mqttDropSocket();
-      }
       if (n.ws) {
         const ws = n.ws;
         n.ws = null;

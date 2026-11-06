@@ -633,7 +633,7 @@
       } catch (err) { ms = null; }
     }
     if (!online) { status = 'solo'; ms = null; }
-    var label = /resync/i.test(status) ? 'resync' : /^mqtt\b/i.test(status) ? 'MQTT'
+    var label = /resync/i.test(status) ? 'resync' : /^room\b/i.test(status) ? 'Room'
       : /^lan\b/i.test(status) ? 'LAN' : status;
     hudState.ping = ms;
     hudState.online = online;
