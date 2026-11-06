@@ -32,20 +32,26 @@ Score, View and Jet are at the top. Phones default to **Fast** graphics (no shad
 2. Friends paste the code into **Join with a code**.
 3. Everyone presses **Play**. In a match, `P` copies the code again.
 
-Internet rooms find each other through public MQTT relays (`broker.emqx.io`, then
-`broker.hivemq.com`), so there is no server to run, but rooms are not private. Once in a room,
-each player opens a WebRTC link to the host through a TURN relay (the default when one is
-configured, as on the hosted site) and game traffic skips the broker. Add `?direct=1` to try a
-peer-to-peer link instead. The HUD shows the route next to ping: `TURN`, `direct` or `relay`
-(the broker fallback).
+**How internet rooms work.** There is no game server: the player who creates the room hosts it
+in their browser, and their tab decides hits, deaths, scores and teams, and picks the mode and
+map. Everyone else holds one WebRTC link to the host, and all game traffic runs on it.
+
+Public MQTT brokers (`broker.emqx.io` and `broker.hivemq.com`, both at once) are used only so
+players can find the host, so rooms are not private. Once linked, a room does not need them. A
+dropped link reconnects by itself. If the host leaves, the next player takes over and keeps the
+world and scores.
+
+A link takes the fastest route available, direct when it can, and uses a TURN relay when it
+can't. The HUD shows the route next to ping: `direct` or `TURN`. Add `?relay=1` to force TURN or
+`?direct=1` to never use it.
 
 **Strict networks.** Corporate or school firewalls, symmetric NAT and some mobile carriers block
-direct links. A TURN relay gets those players a fast link too. Free public TURN no longer
-exists, so add one in [`net-config.js`](net-config.js): a free [Metered](https://www.metered.ca)
-app (the page fetches short-lived credentials, which works on GitHub Pages), or your own coturn
-server. Without TURN those players fall back to the broker. The API key in `net-config.js` is
-public on a GitHub Pages site, so use a key restricted to TURN credentials. One player is elected host; the host's tab
-decides hits, deaths, scores and teams, and picks the mode and map. LAN play uses `server.js`
+direct links, and those players need TURN. Free public TURN no longer exists, so add one in
+[`net-config.js`](net-config.js): a free [Metered](https://www.metered.ca) app or your own coturn
+server. The hosted site gets its TURN credentials from GitHub repository secrets when it deploys.
+Anything in `net-config.js` is public on a Pages site, so never commit a real credential there.
+
+LAN play uses `server.js`
 as the authority instead.
 
 **Teams.** Each player is put on the smaller team when they join and keeps that team until it
@@ -175,8 +181,8 @@ src/86-hud.js            HUD data owners (kill feed, build, jetpack panels)
 src/87-minimap.js        minimap
 src/88-menu.js           screen flow, focus and Escape handling
 src/89-ui-system.js      menu and HUD design system, players and teams panel, icons
-src/90-net.js            LAN WebSocket and MQTT transport, rooms and host authority
-src/91-rtc.js            direct WebRTC links between players and the host
+src/90-net.js            LAN WebSocket, game protocol and host authority
+src/91-room.js           internet rooms: finding the host, WebRTC links, reconnects, host takeover
 src/92-sync.js           ping and connection diagnostics
 src/94-audio.js          positional audio engine
 src/99-boot.js           boot sequence and main loop
