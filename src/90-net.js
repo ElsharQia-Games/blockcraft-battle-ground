@@ -537,10 +537,10 @@ function netQueueOutbound(msg) {
       const low = net.outbox.findIndex((m) => m.t === 'reload' || m.t === 'dragons');
       if (low >= 0) net.outbox.splice(low, 1);
       else {
-        // A finite queue cannot promise infinite delivery. End the unhealthy
-        // session explicitly rather than silently deleting a hit/death/ping.
-        netDisconnect('Network queue full. Reconnect to continue', true);
-        return false;
+        // A finite queue cannot promise infinite delivery. On LAN, end the
+        // unhealthy session; in a room, losing one old event beats losing the match.
+        if (net.mode !== 'mqtt') { netDisconnect('Network queue full. Reconnect to continue', true); return false; }
+        net.outbox.shift();
       }
     }
   }
@@ -586,7 +586,8 @@ function netQueueLocalEdit(msg) {
   if (!netValidEditCell(msg)) return false;
   const key = msg.x + ',' + msg.y + ',' + msg.z;
   if (!net.editOut.has(key) && netQueuedEditCells() >= NET_MAX_EDITS) {
-    netDisconnect('World edit backlog full. Reconnect to continue', true); return false;
+    if (net.mode !== 'mqtt') { netDisconnect('World edit backlog full. Reconnect to continue', true); return false; }
+    net.editOut.delete(net.editOut.keys().next().value);
   }
   net.editOut.delete(key);
   net.editOut.set(key, msg);
@@ -601,7 +602,12 @@ function netFlushLocalEdits(now) {
   for (const [id, batch] of net.editInFlight) {
     if (!netEditMatches(batch.packet)) { net.editInFlight.delete(id); continue; }
     if (now < batch.retryAt) continue;
-    if (batch.attempts >= 4) { netDisconnect('World edit acknowledgement timed out. Reconnect to resync', true); return; }
+    if (batch.attempts >= 4) {
+      if (net.mode !== 'mqtt') { netDisconnect('World edit acknowledgement timed out. Reconnect to resync', true); return; }
+      net.editInFlight.delete(id);
+      if (net.hostId !== net.id) netSend({ ...netJoinPacket(), id: net.id }); // joining again replays the host's edits
+      continue;
+    }
     if (net.editTokens < batch.packet.edits.length) continue;
     batch.packet.life = net.localLife || undefined;
     batch.attempts++;
@@ -641,7 +647,15 @@ function netEditResponse(msg) {
     return;
   }
   if (msg.retryable !== true) {
-    netDisconnect('World edit rejected (' + String(msg.reason || 'validation').slice(0, 32) + '). Reconnect to resync', true);
+    if (net.mode !== 'mqtt') {
+      netDisconnect('World edit rejected (' + String(msg.reason || 'validation').slice(0, 32) + '). Reconnect to resync', true);
+      return;
+    }
+    // A refused build is a normal event in a live match: take the host's blocks back.
+    net.editInFlight.delete(netToken(msg.batchId));
+    for (const cell of Array.isArray(msg.cells) ? msg.cells.slice(0, 128) : []) {
+      if (netValidEditCell(cell)) applyNetEdit({ ...cell, generation: batch.packet.generation, epoch: batch.packet.epoch });
+    }
     return;
   }
   batch.retryAt = performance.now() + netPoseNumber(msg.retryMs, 250, 50, 2000);
@@ -2385,9 +2399,11 @@ function netMqttProcess(msg, from, budgeted) {
         netMqttAuthority({ t: 'editAck', batchId, edits: current }, r.id);
         break;
       }
+      // Generous range: the host sees positions late, and jetpacks are fast.
       if (!Array.isArray(list) || !list.length || list.length > 128 || list.some((cell) => !netValidEditCell(cell) ||
-          Math.hypot(cell.x + 0.5 - r.x, cell.y + 0.5 - r.y, cell.z + 0.5 - r.z) > 48)) {
-        if (batchId) netMqttAuthority({ t: 'editReject', batchId, reason: 'shape/range', retryable: false }, r.id);
+          Math.hypot(cell.x + 0.5 - r.x, cell.y + 0.5 - r.y, cell.z + 0.5 - r.z) > 80)) {
+        const cells = Array.isArray(list) ? list.slice(0, 128).filter(netValidEditCell).map((c) => ({ x: c.x, y: c.y, z: c.z, b: getBlock(c.x, c.y, c.z) })) : [];
+        if (batchId) netMqttAuthority({ t: 'editReject', batchId, reason: 'shape/range', retryable: false, cells }, r.id);
         break;
       }
       const now = performance.now();
@@ -2552,7 +2568,7 @@ function netHostHold(id) {
   mqtt.graceTimers.set(id, setTimeout(() => {
     mqtt.graceTimers.delete(id);
     if (!roomNet.links.has(id)) mqttRemovePeer(id, 'timeout');
-  }, 15000));
+  }, 30000));
 }
 
 function netPlayerLinkUp(hostId) {
@@ -2751,6 +2767,7 @@ function startOnline(roomArg, create) {
   net.warned = false;
   net.desync = false;
   mqtt.room = room;
+  try { sessionStorage.setItem('blockcraft.activeRoom', room); } catch (e) { /* ignore */ }
   mqtt.clientId = 'bc_' + Date.now().toString(36).padStart(10, '0') + Math.random().toString(36).slice(2, 8);
   net.id = mqtt.clientId;
   net.seq = net.stateSeq = 0;
@@ -2782,6 +2799,7 @@ function roomSayGoodbye() {
 }
 
 function leaveOnline(returnToLan = true) {
+  try { sessionStorage.removeItem('blockcraft.activeRoom'); } catch (e) { /* ignore */ }
   roomSayGoodbye();
   netDisconnect(null, returnToLan === false);
   if (returnToLan) connectNet();
@@ -2953,9 +2971,16 @@ else if (onlineBtnEl) onlineBtnEl.addEventListener('click', () => startOnline())
 if (createBtnEl) createBtnEl.addEventListener('click', createRoom);
 const roomBadgeEl = document.getElementById('roomBadge');
 if (roomBadgeEl) roomBadgeEl.addEventListener('click', copyRoom);
-window.addEventListener('pagehide', () => {
+let netResumeRoom = '';
+window.addEventListener('pagehide', (e) => {
+  netResumeRoom = e.persisted && net.mode === 'mqtt' ? net.room : '';
   roomSayGoodbye();
   netDisconnect(null, true);
+});
+// Restored from the back/forward cache: go straight back to the room.
+window.addEventListener('pageshow', (e) => {
+  if (e.persisted && netResumeRoom) startOnline(netResumeRoom);
+  netResumeRoom = '';
 });
 
 window.__netEdit = (x, y, z, b) => netSend({ t: 'edit', x, y, z, b });

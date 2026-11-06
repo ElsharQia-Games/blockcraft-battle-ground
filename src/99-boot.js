@@ -115,7 +115,10 @@ async function boot() {
   if (createBtnEl) createBtnEl.disabled = false;
   if (location.search.includes('shot')) hintEl.classList.add('hidden');
   statsEl.textContent = 'ready';
-  const roomParam = normalizeRoom(new URLSearchParams(location.search).get('room') || '');
+  // A refresh in the middle of a match goes back to the same room.
+  let activeRoom = '';
+  try { activeRoom = sessionStorage.getItem('blockcraft.activeRoom') || ''; } catch (e) { /* ignore */ }
+  const roomParam = normalizeRoom(new URLSearchParams(location.search).get('room') || activeRoom);
   if (roomParam) startOnline(roomParam);
   else connectNet();
   requestAnimationFrame(loop);
