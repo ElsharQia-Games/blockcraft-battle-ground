@@ -460,10 +460,13 @@ function flushEditHistory(client) {
    fall through to a second independent damage clock. */
 function acceptSequence(client, msg) {
   if (msg.seq === undefined) return true; // compatibility with unsequenced LAN clients
-  if (!Number.isSafeInteger(msg.seq) || msg.seq <= client.seqIn) {
+  // Clients number positions and actions separately, so neither can make the
+  // other look out of date.
+  const lane = msg.t === 'state' ? 'stateSeqIn' : 'seqIn';
+  if (!Number.isSafeInteger(msg.seq) || msg.seq <= (client[lane] === undefined ? -1 : client[lane])) {
     noteDrop(client); return false;
   }
-  client.seqIn = msg.seq;
+  client[lane] = msg.seq;
   return true;
 }
 
