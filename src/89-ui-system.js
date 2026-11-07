@@ -314,7 +314,7 @@
       const w = typeof currentWeapon === 'function' ? currentWeapon() : null;
       if (w) {
         const ammo = gun.ammo[gun.index];
-        put('ammo', H.ammo, w.melee ? '2014' : String(ammo));
+        put('ammo', H.ammo, w.melee ? '—' : String(ammo));
         put('mag', H.mag, w.melee ? '' : '/ ' + w.mag);
         put('gun', H.gun, w.name);
         flag('weapon', H.weapon, 'is-low', !w.melee && ammo <= Math.ceil(w.mag * 0.25));
