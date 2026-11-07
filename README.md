@@ -3,7 +3,7 @@
 By **ElsharQia Games**.
 
 A voxel arena shooter that runs in the browser on PC and phones. Every world is generated from
-one seed: terrain, biomes, villages, battle sites, dragons and 16 characters. Fight with seven
+one seed: terrain, biomes, villages, battle sites, dragons and 16 characters. Fight with twelve
 weapons, throw up cover with one key, fly a jetpack, ride small dragons and play with friends
 over the internet or LAN. No build step: plain HTML, CSS and JavaScript on top of
 [three.js](https://threejs.org).
@@ -74,7 +74,7 @@ side.
 | Left click | Shoot / place |
 | Right click | Aim down sights |
 | `R` | Reload (rotates the piece in build mode) |
-| `1`-`7` / wheel | Select / cycle weapons |
+| `1`-`0` / wheel | Select weapons (the last two by wheel) |
 | `Q` | Build mode on / off |
 | `1` `2` `3` / wheel (build mode) | Wall, floor, ramp |
 | `Shift` + wheel (build mode) | Change material |
@@ -92,7 +92,7 @@ side.
 | --- | --- |
 | Team Deathmatch | Red vs Blue, all weapons, first to 40 |
 | Free For All | Everyone for themselves, first to 20 |
-| Gun Game | Each kill moves you to the next gun, pistol to sniper; first through all seven wins |
+| Gun Game | Each kill moves you to the next gun, strongest first and the pistol last; first through all twelve wins |
 | Low Gravity | Red vs Blue at 45% gravity, first to 30 |
 | Hardcore | Red vs Blue, 1.5x damage, no health regeneration, first to 30 |
 | Snipers Only | Snipers in a long arena, first to 15 |
@@ -100,13 +100,15 @@ side.
 | Sidearms | Pistols and revolvers in a compact arena, first to 15 |
 | Lockdown | Red vs Blue in a tight arena with rifles, SMGs, shotguns and revolvers, first to 25 |
 
-Arena modes build a walled ring with team spawn pads and mirror-symmetric cover, so neither
-side is favoured.
+Arena modes clear a walled ring and build three mirrored lanes: long in the north, tight in the
+south, blocked in the middle so the two spawn pads can't see each other.
+
+Every respawn gives **3 seconds of protection**; firing ends it early.
 
 ## Weapons
 
 Health is **150** and regenerates 14 HP/s after 6 seconds without damage (not in Hardcore).
-Headshot multipliers differ per weapon; only a sniper headshot kills in one shot.
+Headshot multipliers differ per weapon; only sniper and crossbow headshots kill in one shot.
 
 | Weapon | Damage | Head | Fire rate | Magazine | Body shots to kill |
 | --- | --- | --- | --- | --- | --- |
@@ -117,6 +119,11 @@ Headshot multipliers differ per weapon; only a sniper headshot kills in one shot
 | Sniper | 115 | 2.0x | 42 rpm | 5 | 2 |
 | Revolver | 58 | 2.0x | 170 rpm | 6 | 3 |
 | LMG | 21 | 1.4x | 600 rpm | 75 | 8 |
+| Marksman | 44 | 1.8x | 240 rpm | 12 | 4 |
+| Burst Rifle | 30 | 1.5x | 3 rounds, 800 rpm | 30 | 5 |
+| Machine Pistol | 13 | 1.3x | 1050 rpm | 28 | 12 |
+| Double Barrel | 18 x 8 pellets | 1.3x | 300 rpm | 2 | 2 at close range |
+| Crossbow | 120 | 2.0x | 60 rpm | 1 | 2 |
 
 Damage drops 20% beyond 65% of a weapon's range. Bullets also wear down blocks; tougher
 materials take more hits.
@@ -124,14 +131,17 @@ materials take more hits.
 ## What is in it
 
 - **World:** a 256 x 256 x 80 voxel world with grass, forest, desert, snow and ocean biomes,
-  villages with villagers and chickens, waterfalls, and eight seeded battle sites
-  (watchtowers, walled compounds, ruins and trench lines, marked T, C, R and X on the minimap).
+  villages with villagers and chickens, waterfalls, and a planned battlefield: a citadel in the
+  middle and two rings of sites (watchtowers, walled compounds, ruins and trench lines, marked
+  T, C, R and X on the minimap) joined by roads into loops, with cover in the open ground.
+  Respawns pick a spot out of enemy sight, close enough to get back into the fight.
 - **Movement:** fast acceleration, sprint slides that keep momentum into a jump, buffered
   jumps, crouching, swimming and a fuel-powered jetpack.
 - **Building:** walls, floors and ramps placed with one click or held to build continuously,
   plus single-block mining and placing. Materials are unlimited.
-- **Dragons:** four indestructible guardians circle the world; two or three small dragons can
-  each be ridden by one player for 30 seconds, with fire breath.
+- **Dragons:** six guardians circle the world; three or four small dragons can each be ridden
+  by one player for 30 seconds, with fire breath. Any dragon can be shot down and returns after
+  60 seconds, and riders can be shot off their mounts.
 - **Graphics:** lit terrain with sun shadows, reflective water and glass, and filmic tone
   mapping. **High** (desktop default) or **Fast** (phones; no shadows, shorter view
   distance), switchable in Pause or with `?gfx=low|high`.
@@ -164,7 +174,7 @@ src/22-physics.js        swept voxel collisions and water physics
 src/30-meshing.js        chunk meshing and lit world materials
 src/40-characters.js     characters, skins, villagers and chickens
 src/41-graphics.js       shadows, reflections, view distance and quality levels
-src/44-46-*.js           dragon rules, dragons and riding
+src/44-47-*.js           dragon rules, dragons, riding and dragon health
 src/48-outline.js        character outlines
 src/50-player.js         movement, cameras and avatar
 src/52-jetpack.js        jetpack
@@ -172,6 +182,7 @@ src/53-ground-marker.js  ground shadow and ring under the player
 src/55-building.js       quick build pieces and placement
 src/58-killcam.js        death camera
 src/60-combat.js         weapons, holds, shooting, damage, death and respawn
+src/61-spawn-shield.js   spawn protection
 src/62-combat-fx.js      aim assist, damage direction and kill banners
 src/63-player-feedback.js damage numbers and overhead health
 src/64-feedback-vfx.js   camera shake, flashes, casings and puffs
