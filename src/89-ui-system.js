@@ -598,6 +598,10 @@ function UI_CSS() {
     #pauseTitle { font-size: 28px; }
   }
   body.touch-ui .ui-keys { display: none; }
+  .ui-touch-only { display: none; }
+  body.touch-ui .ui-touch-only { display: inline-flex; }
+  /* Thumb-sized menu targets on phones. */
+  body.touch-ui .bc-menu :is(button, input, select) { min-height: 42px; }
   @media (prefers-reduced-motion: reduce) { .bc-menu * { transition: none !important; } }
 
   /* =================== HUD =================== */

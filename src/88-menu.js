@@ -438,10 +438,12 @@
       : dead ? 'Waiting to respawn. Your room and settings are unchanged.'
       : BC.flags.playerRepairBlocked ? 'Waiting for the obstruction around your character to clear.'
       : captureDenied ? 'Mouse capture did not start. Click Play again to retry.'
+      : BC.api.touch && BC.api.touch.enabled ? 'Tap Play to start. Pause is the top-right button.'
       : 'Play captures your mouse. Esc opens the pause menu.');
     text('pauseInputHint', starting ? 'Starting mouse and keyboard capture\u2026'
       : !canPlay() ? 'Waiting for world setup or respawn. Your settings are still available.'
-      : captureDenied ? 'Capture did not start. Click Resume to try again.' : 'Click Resume or press Esc to continue.');
+      : captureDenied ? 'Capture did not start. Click Resume to try again.'
+      : BC.api.touch && BC.api.touch.enabled ? 'Tap Resume to continue.' : 'Click Resume or press Esc to continue.');
   }
 
   function refresh() {

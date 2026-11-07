@@ -2194,6 +2194,19 @@
 
   API.mountNearest = mountNearest;
   API.dismount = dismount;
+  // Touch controls press the same flight keys and breath trigger.
+  API.setHeld = function (code, on) { if (RIDE_KEYS[code]) R.heldKeys[code] = !!on && API.active; };
+  API.startFire = function () {
+    if (!API.active || API.firing) return;
+    var now = BC.now();
+    updateHeat(now);
+    R.fireStartedAt = now;
+    R.fireStartHeat = API.heat;
+    API.firing = true;
+    fireBreath();
+  };
+  API.stopFire = stopFire;
+  API.canMount = function () { return !API.active && !API.pending && gameReady() && !!nearestDragon(); };
   API.fireBreath = fireBreath;
   API.rideable = isRideable;
   API.occupied = occupied;
