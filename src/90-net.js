@@ -1679,7 +1679,7 @@ function handleNet(msg, from, nested) {
         playShot(w, Math.max(0.05, 1 - dist / 75) * 0.95);
       }
       netEmitSfx({
-        kind: melee ? 'knifeSlash' : 'shot', weapon: r.weapon,
+        kind: melee ? 'knifeSlash' : 'shot', weapon: r.weapon, byId: r.id,
         position: netPositionSfx(msg) || { x: pos.x, y: pos.y, z: pos.z },
         volume: Math.max(0.05, 1 - dist / 90)
       });

@@ -19,10 +19,10 @@
 
   var MINI_GRID = 128, MINI_RANGE = 60, MINI_CONTACT_RANGE = 35;
   var MINI_ATLAS = 512, MINI_MINOR = 2, MINI_MAJOR = 5;
-  var MINI_DRAW_MS = 100, MINI_LOS_MS = 250, MINI_SIGHT_MS = 300;
-  var MINI_SHOT_MS = 1500, MINI_LOS_BUDGET = 6, MINI_RAY_STEPS = 96;
+  var MINI_DRAW_MS = 66, MINI_LOS_MS = 250, MINI_SIGHT_MS = 300;
+  var MINI_SHOT_MS = 2400, MINI_STEP_MS = 900, MINI_HEAR_REACH = 90, MINI_QUIET_REACH = 18, MINI_MAX_PINGS = 24, MINI_LOS_BUDGET = 6, MINI_RAY_STEPS = 96;
   var MINI_MAX_PEERS = 128, MINI_EDIT_BUDGET = 8, MINI_GAP = 8;
-  var MINI_WHITE = '#f5fbff', MINI_RED = '#ff3556', MINI_BLUE = '#3585ff';
+  var MINI_WHITE = '#f5fbff', MINI_RED = '#ff1830', MINI_BLUE = '#1f96ff', MINI_AMBER = '#f2b84b';
   var MINI_TAU = Math.PI * 2;
   var miniEnabled = true, miniReady = false, miniShown = false;
   var miniReason = 'boot', miniPending = '', miniRefreshQueued = false;
@@ -48,7 +48,7 @@
   var miniPositionValid = false, miniArena = null, miniRemaining = null;
   var miniSize = 146, miniRadius = 61, miniScale = miniRadius / MINI_RANGE;
   var miniDPR = 1, miniDock = { layout: 'desktop', left: 16, top: 72, bottom: null, width: 156, height: 156 };
-  var miniObstacles = [], miniShotPool = [], miniLastAnonymous = -Infinity;
+  var miniObstacles = [], miniPings = [];
   var miniLastBuild = null, miniLastSummary = '', miniSummaryAt = -Infinity;
   var miniColumnType = 0, miniColumnHeight = -1, miniColumnFound = false;
   var miniColumnGround = NaN, miniColumnWet = false, miniContourX = 0, miniContourY = 0;
@@ -57,9 +57,6 @@
   var miniBearings = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
   var miniObstacleIds = ['healthWrap', 'weaponHud', 'hotbar', 'buildHud', 'jetFuel',
     'stats', 'teamScore', 'matchChip', 'pingChip', 'killfeed', 'roomBadge', 'toast'];
-  for (var miniPoolIndex = 0; miniPoolIndex < 16; miniPoolIndex++) {
-    miniShotPool.push({ x: 0, y: 0, z: 0, until: 0, at: -Infinity });
-  }
 
   function miniNow() {
     return typeof miniBC.now === 'function' ? miniBC.now()
@@ -110,53 +107,17 @@
     miniBC.style('bc-minimap-v2', `
       #minimap {
         --bc-mini-panel-size: var(--bc-map-size, 156px);
-        position: fixed; left: var(--bc-mini-fit-left, var(--bc-map-left, 16px)); top: var(--bc-mini-fit-top, var(--bc-map-top, 72px)); bottom: auto; z-index: 5;
-        width: var(--bc-mini-fit-size, var(--bc-mini-panel-size)); height: var(--bc-mini-fit-size, var(--bc-mini-panel-size)); padding: 4px;
-        color: #f5fbff; background: var(--bc-glass-deep, rgba(10, 14, 19, .88));
-        border: 1px solid var(--bc-line, rgba(214, 232, 245, .16)); border-radius: 8px;
-        font: 500 9px/12px ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-        font-variant-numeric: tabular-nums; letter-spacing: .02em;
-        pointer-events: none; user-select: none; box-shadow: none; transition: none; animation: none;
+        position: fixed; left: var(--bc-mini-fit-left, var(--bc-map-left, 16px)); top: var(--bc-mini-fit-top, var(--bc-map-top, 72px)); bottom: auto;
+        width: var(--bc-mini-fit-size, var(--bc-mini-panel-size)); height: var(--bc-mini-fit-size, var(--bc-mini-panel-size));
+        padding: 0; background: none; border: 0; box-shadow: none; pointer-events: none; user-select: none; z-index: 6;
       }
       #minimap, #minimap * { box-sizing: border-box; pointer-events: none; }
       #minimap[hidden] { display: none !important; }
-      #minimap .bc-mini-head { position: absolute; left: 4px; right: 4px; top: 4px; z-index: 1; }
-      #minimap .bc-mini-head, #minimap .bc-mini-line, #minimap .bc-mini-meta {
-        display: flex; align-items: center; justify-content: space-between; gap: 4px; min-width: 0; height: 12px;
-      }
-      #minimapTitle { font-size: 9px; font-weight: 700; letter-spacing: .12em; }
-      #minimapTitle, #minimapRange { background: #11191f; padding: 0 2px; }
-      #minimapRange, #minimapHeading, #minimapEdge, #minimapSeed, #minimapContacts { white-space: nowrap; }
-      #minimap .bc-mini-surface { position: absolute; inset: 4px; }
+      #minimap .bc-mini-surface { position: absolute; inset: 0; }
       #minimapCanvas { display: block; width: 100%; height: 100%; }
-      #minimapNorth {
-        position: absolute; top: 4px; left: 50%; transform: translateX(-50%);
-        padding: 0 2px; background: #11191f; color: #f5fbff; font-size: 9px; font-weight: 700; line-height: 10px;
-      }
-      #minimap .bc-mini-data { position: absolute; left: 4px; right: 4px; bottom: 4px; height: 12px; min-width: 0; }
-      #minimap .bc-mini-line > span { padding: 0 2px; background: #11191f; }
-      #minimap .bc-mini-meta { position: absolute; left: 0; bottom: 24px; width: auto; height: 12px; white-space: nowrap; }
-      #minimapSeed { font: inherit; font-size: 8px; color: inherit; padding: 0 2px; background: #11191f; }
-      #minimapContacts { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); color: #f5fbff; }
-      #minimapLegend { position: absolute; left: 0; right: 0; bottom: 12px; height: 12px; display: flex; justify-content: center; gap: 6px; white-space: nowrap; }
-      #minimapLegend > span { display: flex; align-items: center; gap: 4px; white-space: nowrap; font-size: 8px; letter-spacing: 0; }
-      #minimapLegend > .bc-mini-legend-other, #minimapContours { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-      #minimapLegend > .bc-mini-legend-key { padding: 0 3px; background: #11191f; }
-      #minimapLegend i { flex: none; display: inline-block; width: 6px; height: 6px; font-style: normal; }
-      #minimapLegend .bc-mini-you { width: 0; height: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-bottom: 6px solid #f5fbff; }
-      #minimapLegend .bc-mini-ally { border-radius: 50%; background: var(--bc-red, #ff3556); box-shadow: 3px 0 0 var(--bc-blue, #3585ff); margin-right: 3px; }
-      #minimapLegend .bc-mini-foe { position: relative; }
-      #minimapLegend .bc-mini-foe::before, #minimapLegend .bc-mini-foe::after { content: ""; position: absolute; background: #f5fbff; }
-      #minimapLegend .bc-mini-foe::before { top: 2px; left: 0; width: 6px; height: 2px; }
-      #minimapLegend .bc-mini-foe::after { top: 0; left: 2px; width: 2px; height: 6px; }
-      #minimapLegend .bc-mini-build { border: 1px solid #c8d4dc; }
-      #minimapLegend .bc-mini-dragon, #minimapLegend .bc-mini-saddle { transform: rotate(45deg); border: 1px solid #d0dce5; }
-      #minimapLegend .bc-mini-saddle { background: var(--bc-blue, #3585ff); border-color: #c8d4dc; }
-      #minimap[data-edge="near"] #minimapEdge { color: var(--bc-red, #ff3556); }
-      #minimap .bc-mini-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
-      #minimap[data-layout="micro"] .bc-mini-line { font-size: 8px; }
+      #minimap .bc-mini-head, #minimap .bc-mini-data, #minimapNorth { display: none; }
+      #minimap .bc-mini-sr { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
       @media (max-width: 560px) { #minimap { --bc-mini-panel-size: min(var(--bc-map-size, 112px), 112px); } }
-      @media (prefers-reduced-motion: reduce) { #minimap, #minimap * { transition: none !important; animation: none !important; } }
     `);
     var el = miniBC.el;
     miniNodes = {
@@ -250,7 +211,8 @@
       if (type === miniWater || name === 'water') kind = 3;
       else if (name === 'grass' || name === 'dirt') kind = 1;
       else if (name === 'leaves' || name === 'log' || name === 'cactus') kind = 2;
-      else if (name === 'sand' || name === 'sandstone' || name === 'gravel') kind = 4;
+      else if (name === 'sand' || name === 'sandstone') kind = 4;
+      else if (name === 'gravel') kind = 7;
       else if (name === 'snow') kind = 5;
       else if (name && /planks|bricks|cobblestone|glass|mudbrick|gold block|diamond block/.test(name)) kind = 6;
       miniKinds[type] = kind;
@@ -304,14 +266,14 @@
   }
   function miniColorTile(tile) {
     var kind = miniTiles[tile], h = miniElevations[tile];
-    var elevation = Number.isFinite(h) ? Math.max(0, Math.min(1, (h - miniSea) / 32)) : 0;
-    var r = 170 - elevation * 65, g = 163 - elevation * 39, b = 141 - elevation * 6;
-    if (miniWet[tile]) { r = 39; g = 70; b = 93; }
-    else if (kind === 6) { r *= .68; g *= .74; b *= .82; }
-    else if (kind === 2) { r *= .92; g *= .92; b *= .92; }
-    if (kind === 255) { r = 19; g = 27; b = 33; }
+    var lift = Number.isFinite(h) ? Math.max(0, Math.min(1, (h - miniSea) / 32)) * 14 : 0;
+    var c = kind === 4 ? [150, 138, 104] : kind === 5 ? [196, 204, 210] : kind === 7 ? [128, 124, 114]
+      : kind === 6 ? [150, 150, 148] : kind === 2 ? [44, 66, 48] : kind === 1 ? [68, 92, 62] : [84, 90, 88];
+    if (miniWet[tile]) c = [30, 56, 82];
+    else { c[0] += lift; c[1] += lift; c[2] += lift; }
+    if (kind === 255) c = [19, 27, 33];
     var p = tile * 4, data = miniPixels.data;
-    data[p] = r; data[p + 1] = g; data[p + 2] = b;
+    data[p] = c[0]; data[p + 1] = c[1]; data[p + 2] = c[2];
     data[p + 3] = 255;
   }
 
@@ -359,32 +321,18 @@
       }
     }
   }
-  function miniPaintContours(x0, z0, x1, z1, labels) {
+  function miniPaintContours(x0, z0, x1, z1) {
+    // Only the shoreline. Height lines read as noise at this size.
     var ctx = miniTerrainCtx;
-    miniContourBatchCount = 0;
-    for (var pass = 0; pass < 3; pass++) {
-      ctx.beginPath(); ctx.lineWidth = pass === 1 ? 2.2 : pass === 2 ? 1.8 : 1.05;
-      ctx.strokeStyle = pass === 1 ? 'rgba(43,55,61,.78)' : pass === 2 ? '#486374' : 'rgba(56,66,69,.42)';
-      for (var z = Math.max(0, z0); z <= Math.min(MINI_GRID - 2, z1); z++) {
-        for (var x = Math.max(0, x0); x <= Math.min(MINI_GRID - 2, x1); x++) {
-          var i = z * MINI_GRID + x, j = i + MINI_GRID;
-          if (miniTiles[i] === 255 || miniTiles[i + 1] === 255 || miniTiles[j] === 255 || miniTiles[j + 1] === 255) continue;
-          if (pass === 2) {
-            miniContourCell(x, z, .5, miniWet[i], miniWet[i + 1], miniWet[j + 1], miniWet[j], false); continue;
-          }
-          var a = miniElevations[i], b = miniElevations[i + 1], c = miniElevations[j + 1], d = miniElevations[j];
-          if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || !Number.isFinite(d)) continue;
-          var wetCount = miniWet[i] + miniWet[i + 1] + miniWet[j + 1] + miniWet[j];
-          if (wetCount) continue; // never draw an elevation isoline across water
-          var lo = Math.min(a, b, c, d), hi = Math.max(a, b, c, d), step = pass === 1 ? MINI_MAJOR : MINI_MINOR;
-          for (var level = Math.ceil(lo / step) * step; level < hi; level += step) {
-            if (pass === 0 && level % MINI_MAJOR === 0) continue;
-            miniContourCell(x, z, level, a, b, c, d, labels && pass === 1);
-          }
-        }
+    ctx.beginPath(); ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(190,214,232,.35)';
+    for (var z = Math.max(0, z0); z <= Math.min(MINI_GRID - 2, z1); z++) {
+      for (var x = Math.max(0, x0); x <= Math.min(MINI_GRID - 2, x1); x++) {
+        var i = z * MINI_GRID + x, j = i + MINI_GRID;
+        if (miniTiles[i] === 255 || miniTiles[i + 1] === 255 || miniTiles[j] === 255 || miniTiles[j + 1] === 255) continue;
+        miniContourCell(x, z, .5, miniWet[i], miniWet[i + 1], miniWet[j + 1], miniWet[j], false);
       }
-      ctx.stroke();
     }
+    ctx.stroke();
   }
   function miniPaintCache(x0, z0, x1, z1, labels) {
     var ctx = miniTerrainCtx, scale = MINI_ATLAS / MINI_GRID;
@@ -551,7 +499,7 @@
   }
   function miniCollectPeers(now) {
     miniReadNet(); miniPeers.length = 0; miniPeerSerial++; miniPeerNow = now;
-    if (miniOnline && miniNet.players && typeof miniNet.players.forEach === 'function') miniNet.players.forEach(miniCollectPeer);
+    if (miniNet && miniNet.players && typeof miniNet.players.forEach === 'function') miniNet.players.forEach(miniCollectPeer);
     miniPeerMap.forEach(miniRemoveOldPeer);
   }
   function miniOpaque(x, y, z) {
@@ -606,25 +554,22 @@
   }
   function miniClearContacts() {
     miniPeerMap.forEach(miniExpireContact);
-    for (var i = 0; i < miniShotPool.length; i++) miniShotPool[i].until = 0;
-    miniContacts = 0; miniLastLOS = -Infinity; miniLastAnonymous = -Infinity;
+    miniPings.length = 0;
+    miniContacts = 0; miniLastLOS = -Infinity;
   }
-  function miniExpireContact(entry) { entry.seenUntil = entry.shotUntil = 0; entry.shotAt = -Infinity; }
-  function miniShotAllowed(p, now) {
-    if (miniPlayReason() || !miniCacheValid || !miniFinitePos(p)) return false;
-    var actor = miniPlayer(); if (!actor) return false;
-    var self = actor.pos, dx = p.x - self.x, dy = p.y - (self.y + 1.3), dz = p.z - self.z;
-    return p.x >= 0 && p.z >= 0 && p.x < miniWorld && p.z < miniWorld &&
-      dx * dx + dy * dy + dz * dz <= MINI_CONTACT_RANGE * MINI_CONTACT_RANGE;
-  }
-  function miniRecordShot(entry, p, now) {
-    if (!entry || !miniLivePeer(entry.r, now) || !miniShotAllowed(p, now)) return;
+  function miniExpireContact(entry) { entry.seenUntil = 0; entry.shotAt = -Infinity; }
+  /* A noise from an enemy marks where it happened, then fades. It gives away
+     the spot, not where they went next. Teammates are always on the map. */
+  function miniAddPing(entry, x, z, y, kind, reach, now) {
+    if (!entry || !miniLivePeer(entry.r, now) || miniPlayReason() || !miniCacheValid) return;
     entry.team = miniPeerTeam(entry.id);
-    if (miniTeam && entry.team === miniTeam || now - entry.shotAt < 80) return;
-    // A shot reveals its approximate origin, NOT the actor's continuing motion.
-    entry.shotX = Math.max(.5, Math.min(miniWorld - .5, Math.round(p.x / 4) * 4)); entry.shotY = p.y;
-    entry.shotZ = Math.max(.5, Math.min(miniWorld - .5, Math.round(p.z / 4) * 4));
-    entry.shotAt = now; entry.shotUntil = now + MINI_SHOT_MS;
+    if (miniTeam && entry.team === miniTeam) return;
+    var self = miniPlayer(); if (!self) return;
+    if (Math.hypot(x - self.pos.x, z - self.pos.z) > reach) return;
+    if (kind === 'shot' && now - entry.shotAt < 90) return;
+    if (kind === 'shot') entry.shotAt = now;
+    miniPings.push({ x: x, z: z, kind: kind, at: now, until: now + (kind === 'shot' ? MINI_SHOT_MS : MINI_STEP_MS) });
+    if (miniPings.length > MINI_MAX_PINGS) miniPings.shift();
   }
   function miniOnPacket(msg) {
     if (!msg || typeof msg !== 'object' || !miniReady) return;
@@ -645,55 +590,18 @@
       if (msg.t === 'leave') miniPeerMap.delete(msg.id);
       return;
     }
-    if (msg.t !== 'shot') return;
-    miniReadNet();
-    if (!miniOnline || !miniNet.players || typeof miniNet.players.get !== 'function' ||
-        typeof msg.id !== 'string' || !/^[\w-]{1,40}$/.test(msg.id) || msg.id === miniNet.id ||
-        msg.room && miniNet.room && msg.room !== miniNet.room) return;
-    var r = miniNet.players.get(msg.id), now = miniNow(), p = miniFinitePos(msg.from) ? msg.from : msg;
-    if (!miniLivePeer(r, now) || !miniFinitePos(p) || msg.build === true || msg.build === 1 ||
-        msg.combat === false || msg.combat === 0 || r.build || !r.combat) return;
-    try {
-      if (typeof WEAPON_BY_ID !== 'undefined' && !Object.prototype.hasOwnProperty.call(WEAPON_BY_ID, msg.weapon)) return;
-      if (miniModes && typeof miniModes.canUseWeapon === 'function' && !miniModes.canUseWeapon(msg.weapon)) return;
-    } catch (err) { return; }
-    // netPacket still precedes shot-specific validation. Independently reject
-    // forged origins instead of turning an untrusted packet into a radar blip.
-    var dx = p.x - r.x, dy = p.y - (r.y + 1.4), dz = p.z - r.z;
-    if (dx * dx + dy * dy + dz * dz > 100) return;
-    miniRecordShot(miniEntry(msg.id, r), p, now);
   }
   function miniOnSfx(info) {
-    if (!info || info.kind !== 'shot' || !miniFinitePos(info.position) || !miniReady) return;
+    if (!info || info.byId == null || !miniReady || !miniFinitePos(info.position)) return;
+    if (info.kind !== 'shot' && info.kind !== 'knifeSlash') return;
     miniReadNet();
-    var p = info.position, now = miniNow();
-    if (!miniShotAllowed(p, now) || info.local === true) return;
-    var self = miniPlayer().pos, dx = p.x - self.x, dy = p.y - (self.y + 1.4), dz = p.z - self.z;
-    if (dx * dx + dy * dy + dz * dz < 9) return; // unlabelled local muzzle events
-    var id = info.byId || info.id, entry = id != null ? miniPeerMap.get(id) : null;
-    var best = 25;
-    if (!entry) {
-      // The current remote sfx shape has no id; associate only a real, nearby
-      // peer. An arbitrary positional effect is not evidence of an opponent.
-      for (var i = 0; i < miniPeers.length; i++) {
-        var candidate = miniPeers[i], r = candidate.r;
-        dx = p.x - r.x; dy = p.y - (r.y + 1.4); dz = p.z - r.z;
-        var dist = dx * dx + dy * dy + dz * dz;
-        if (dist < best && miniLivePeer(r, now)) { best = dist; entry = candidate; }
-      }
-    }
-    if (entry) { miniRecordShot(entry, p, now); return; }
-    if (info.remote !== true || now - miniLastAnonymous < 100) return;
-    miniLastAnonymous = now;
-    var slot = miniShotPool[0];
-    for (var s = 0; s < miniShotPool.length; s++) {
-      var mark = miniShotPool[s];
-      if (mark.until <= now) { slot = mark; break; }
-      if (mark.at < slot.at) slot = mark;
-    }
-    slot.x = Math.max(.5, Math.min(miniWorld - .5, Math.round(p.x / 4) * 4)); slot.y = p.y;
-    slot.z = Math.max(.5, Math.min(miniWorld - .5, Math.round(p.z / 4) * 4));
-    slot.at = now; slot.until = now + MINI_SHOT_MS;
+    var quiet = info.kind === 'knifeSlash' || info.weapon === 'crossbow';
+    miniAddPing(miniPeerMap.get(info.byId), info.position.x, info.position.z, info.position.y, 'shot',
+      quiet ? MINI_QUIET_REACH : MINI_HEAR_REACH, miniNow());
+  }
+  function miniOnStep(sound) {
+    if (!sound || !miniReady) return;
+    miniAddPing(miniPeerMap.get(sound.id), sound.x, sound.z, sound.y, 'step', MINI_RANGE, miniNow());
   }
 
   /* ---------------- docking: only measured on changes / a 1Hz safety check ---------------- */
@@ -746,11 +654,11 @@
       if (panelSize !== preferred) miniRoot.style.setProperty('--bc-mini-fit-size', panelSize + 'px');
       if (top !== firstTop) miniRoot.style.setProperty('--bc-mini-fit-top', miniDock.top + 'px');
       if (left !== requestedLeft) miniRoot.style.setProperty('--bc-mini-fit-left', left + 'px');
-      var canvasSize = panelSize - 10;
+      var canvasSize = panelSize;
       var dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
       if (miniSize !== canvasSize || miniDPR !== dpr || miniCanvas.width !== Math.round(canvasSize * dpr)) {
         // Header/footer occupy the corners, never a band over southern terrain.
-        miniSize = canvasSize; miniDPR = dpr; miniRadius = miniSize / 2 - 12; miniScale = miniRadius / MINI_RANGE;
+        miniSize = canvasSize; miniDPR = dpr; miniRadius = miniSize / 2 - 2; miniScale = miniRadius / MINI_RANGE;
         miniCanvas.width = miniCanvas.height = Math.round(miniSize * miniDPR);
       }
       return true;
@@ -773,94 +681,76 @@
     var dx = x - miniX, dz = z - miniZ;
     return dx * dx + dz * dz <= range * range;
   }
-  function miniDrawElevationLabels() {
-    var ctx = miniCtx, c = miniSize / 2, count = 0, limit = miniSize < 104 ? 1 : 3;
-    ctx.font = '8px ui-monospace, Menlo, Consolas, monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    ctx.lineWidth = 2.5; ctx.strokeStyle = '#a6a18d'; ctx.fillStyle = '#28363e';
-    for (var i = 0; i < miniContourLabels.length && count < limit; i++) {
-      var label = miniContourLabels[i]; if (!label.valid) continue;
-      var px = c + (label.x / MINI_ATLAS * miniWorld - miniX) * miniScale;
-      var py = c + (label.y / MINI_ATLAS * miniWorld - miniZ) * miniScale;
-      var dx = px - c, dy = py - c, distance = dx * dx + dy * dy;
-      if (distance < 196 || distance > (miniRadius - 10) * (miniRadius - 10)) continue;
-      var fits = true;
-      for (var j = 0; j < count; j++) {
-        dx = px - miniLabelX[j]; dy = py - miniLabelY[j];
-        if (dx * dx + dy * dy < 676) { fits = false; break; }
-      }
-      if (!fits) continue;
-      // Label only cached, genuine major crossings, at readable CSS-pixel size.
-      // Editing the contributing cell expires its label until the next refresh.
-      ctx.strokeText(label.text, px, py); ctx.fillText(label.text, px, py);
-      miniLabelX[count] = px; miniLabelY[count++] = py;
-    }
-    ctx.font = '9px ui-monospace, Menlo, Consolas, monospace'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
-  }
-  function miniDiamond(x, z, saddle, occupied) {
+  function miniDiamond(x, z, rideable) {
     var px = miniSize / 2 + (x - miniX) * miniScale, py = miniSize / 2 + (z - miniZ) * miniScale;
-    var radius = saddle ? 3 : 4;
+    var radius = rideable ? 3 : 4;
     miniCtx.beginPath(); miniCtx.moveTo(px, py - radius); miniCtx.lineTo(px + radius, py);
     miniCtx.lineTo(px, py + radius); miniCtx.lineTo(px - radius, py); miniCtx.closePath();
-    miniCtx.strokeStyle = saddle ? '#e8f1f8' : '#d0dce5'; miniCtx.lineWidth = 1.2;
-    if (saddle) { miniCtx.fillStyle = MINI_BLUE; miniCtx.fill(); }
+    miniCtx.strokeStyle = MINI_AMBER; miniCtx.lineWidth = 1.2;
+    if (rideable) { miniCtx.fillStyle = MINI_AMBER; miniCtx.fill(); }
     miniCtx.stroke();
-    if (saddle && occupied) { miniCtx.fillStyle = MINI_WHITE; miniCtx.fillRect(px - 1, py - 1, 2, 2); }
   }
-  function miniDrawContact(x, z, team, shot) {
-    if (!miniInRange(x, z, shot ? MINI_CONTACT_RANGE + 3 : MINI_CONTACT_RANGE)) return false;
+  function miniDot(x, z, radius, colour) {
     var px = miniSize / 2 + (x - miniX) * miniScale, py = miniSize / 2 + (z - miniZ) * miniScale;
-    miniCtx.strokeStyle = team === 'blue' ? MINI_BLUE : team === 'red' ? MINI_RED : MINI_WHITE;
-    miniCtx.lineWidth = 1.4; miniCtx.beginPath();
-    if (shot) miniCtx.arc(px, py, miniSize < 80 ? 3 : 4.5, 0, MINI_TAU);
-    else { miniCtx.moveTo(px - 3, py); miniCtx.lineTo(px + 3, py); miniCtx.moveTo(px, py - 3); miniCtx.lineTo(px, py + 3); }
-    miniCtx.stroke(); return true;
+    miniCtx.beginPath(); miniCtx.arc(px, py, radius, 0, MINI_TAU);
+    miniCtx.fillStyle = colour; miniCtx.fill();
+    miniCtx.lineWidth = 1; miniCtx.strokeStyle = '#0a1016'; miniCtx.stroke();
+  }
+  // A noise past the edge of the map sits on the rim, pointing the right way.
+  function miniDrawPings(now) {
+    var c = miniSize / 2, edge = miniRadius - 4;
+    for (var i = miniPings.length - 1; i >= 0; i--) {
+      var ping = miniPings[i];
+      if (ping.until <= now) { miniPings.splice(i, 1); continue; }
+      var age = (now - ping.at) / (ping.until - ping.at);
+      var dx = (ping.x - miniX) * miniScale, dy = (ping.z - miniZ) * miniScale, far = Math.hypot(dx, dy);
+      if (far > edge) { dx *= edge / far; dy *= edge / far; }
+      var px = c + dx, py = c + dy, shot = ping.kind === 'shot';
+      miniCtx.globalAlpha = (1 - age) * (shot ? 1 : .75);
+      miniCtx.fillStyle = MINI_RED;
+      miniCtx.beginPath(); miniCtx.arc(px, py, shot ? 3 : 1.8, 0, MINI_TAU); miniCtx.fill();
+      if (shot) {
+        miniCtx.strokeStyle = MINI_RED; miniCtx.lineWidth = 1.5;
+        miniCtx.beginPath(); miniCtx.arc(px, py, 3 + age * 11, 0, MINI_TAU); miniCtx.stroke();
+      }
+      miniContacts++;
+    }
+    miniCtx.globalAlpha = 1;
   }
   function miniDrawActors(now) {
     miniAllies = miniContacts = miniDragonCount = miniSaddles = miniGuardians = miniVillageCount = 0;
+    miniCtx.fillStyle = 'rgba(232,236,238,.7)';
     for (var v = 0; v < miniVillages.length; v++) {
-      var site = miniVillages[v]; if (!miniInRange(site.x, site.z, MINI_RANGE - 2)) continue;
-      var vx = miniSize / 2 + (site.x - miniX) * miniScale, vy = miniSize / 2 + (site.z - miniZ) * miniScale;
-      miniCtx.strokeStyle = '#c8d4dc'; miniCtx.lineWidth = 1; miniCtx.strokeRect(vx - 3, vy - 3, 6, 6);
-      if (miniSize >= 104 && miniVillageCount < 2) { miniCtx.fillStyle = '#c8d4dc'; miniCtx.fillText(site.label, vx + 5, vy + 3); }
+      var site = miniVillages[v]; if (!miniInRange(site.x, site.z, MINI_RANGE)) continue;
+      miniCtx.fillRect(miniSize / 2 + (site.x - miniX) * miniScale - 2, miniSize / 2 + (site.z - miniZ) * miniScale - 2, 4, 4);
       miniVillageCount++;
     }
-    var riding = miniBC.api.riding;
     var rules = window.BCDragonRules;
     try {
       if (typeof dragons !== 'undefined' && dragons) {
         for (var d = 0; d < dragons.length; d++) {
           var dragon = dragons[d], group = dragon && dragon.group, p = group && group.position;
-          if (!p || group.visible === false || !miniFinitePos(p) || !miniInRange(p.x, p.z, MINI_RANGE - 2)) continue;
+          if (!p || group.visible === false || !miniFinitePos(p) || !miniInRange(p.x, p.z, MINI_RANGE)) continue;
           var eligible = dragon.type !== 'guardian' && (rules && typeof rules.isRideable === 'function' && miniSeed !== null
             ? rules.isRideable(miniSeed, dragon.index) : dragon.type === 'mount' && dragon.rideable === true);
-          var occupied = eligible && riding && typeof riding.occupied === 'function' && riding.occupied(dragon);
-          miniCtx.globalAlpha = eligible ? .95 : .78; miniDiamond(p.x, p.z, eligible, occupied);
+          miniDiamond(p.x, p.z, eligible);
           miniDragonCount++; if (eligible) miniSaddles++; else miniGuardians++;
         }
       }
-    } catch (err) { /* optional dragon/riding build */ }
-    miniCtx.globalAlpha = 1;
+    } catch (err) { /* optional dragon build */ }
+    miniDrawPings(now);
     for (var i = 0; i < miniPeers.length; i++) {
       var entry = miniPeers[i], r = entry.r;
       if (miniTeam && entry.team === miniTeam) {
-        if (!miniInRange(r.x, r.z, MINI_RANGE - 2)) continue;
-        var px = miniSize / 2 + (r.x - miniX) * miniScale, py = miniSize / 2 + (r.z - miniZ) * miniScale;
-        miniCtx.beginPath(); miniCtx.arc(px, py, 2.6, 0, MINI_TAU);
-        miniCtx.fillStyle = entry.team === 'blue' ? MINI_BLUE : MINI_RED; miniCtx.fill();
-        miniCtx.lineWidth = 1; miniCtx.strokeStyle = '#0a1016'; miniCtx.stroke(); miniAllies++;
-      } else if (entry.seenUntil > now) {
-        if (miniDrawContact(entry.x, entry.z, entry.team, false)) miniContacts++;
-      } else if (entry.shotUntil > now && miniDrawContact(entry.shotX, entry.shotZ, entry.team, true)) miniContacts++;
-    }
-    for (var s = 0; s < miniShotPool.length; s++) {
-      var shot = miniShotPool[s];
-      if (shot.until > now && miniDrawContact(shot.x, shot.z, null, true)) miniContacts++;
+        if (miniInRange(r.x, r.z, MINI_RANGE)) { miniDot(r.x, r.z, 3, MINI_BLUE); miniAllies++; }
+      } else if (entry.seenUntil > now && miniInRange(entry.x, entry.z, MINI_CONTACT_RANGE)) {
+        miniDot(entry.x, entry.z, 3, MINI_RED); miniContacts++;
+      }
     }
   }
   function miniDraw(now) {
     var c = miniSize / 2, ctx = miniCtx, span = MINI_RANGE / miniWorld * MINI_ATLAS;
     ctx.setTransform(miniDPR, 0, 0, miniDPR, 0, 0); ctx.clearRect(0, 0, miniSize, miniSize);
-    ctx.font = '9px ui-monospace, Menlo, Consolas, monospace'; ctx.textAlign = 'left';
     ctx.save(); ctx.beginPath(); ctx.arc(c, c, miniRadius, 0, MINI_TAU); ctx.clip();
     ctx.fillStyle = '#131b21'; ctx.fillRect(0, 0, miniSize, miniSize); ctx.imageSmoothingEnabled = true;
     // Clip the source rectangle ourselves: negative drawImage source bounds
@@ -870,33 +760,30 @@
     var ratio = miniRadius / span;
     if (x1 > x0 && y1 > y0) ctx.drawImage(miniTerrain, x0, y0, x1 - x0, y1 - y0,
       c - miniRadius + (x0 - sx) * ratio, c - miniRadius + (y0 - sy) * ratio, (x1 - x0) * ratio, (y1 - y0) * ratio);
-    miniDrawElevationLabels();
     miniArena = miniModes && miniModes.arena && miniModes.arena.active ? miniModes.arena : null;
     miniRemaining = null;
     if (miniArena && Number.isFinite(miniArena.cx) && Number.isFinite(miniArena.cz) && Number.isFinite(miniArena.radius) && miniArena.radius > 0) {
       var acx = c + (miniArena.cx - miniX) * miniScale, acy = c + (miniArena.cz - miniZ) * miniScale, ar = miniArena.radius * miniScale;
       miniRemaining = miniArena.radius - 1.8 - Math.hypot(miniX - miniArena.cx, miniZ - miniArena.cz);
-      ctx.fillStyle = 'rgba(4,8,12,.48)'; ctx.beginPath(); ctx.rect(0, 0, miniSize, miniSize);
+      ctx.fillStyle = 'rgba(4,8,12,.55)'; ctx.beginPath(); ctx.rect(0, 0, miniSize, miniSize);
       ctx.arc(acx, acy, ar, 0, MINI_TAU); ctx.fill('evenodd');
-      ctx.strokeStyle = MINI_RED; ctx.lineWidth = 1.4; ctx.beginPath(); ctx.arc(acx, acy, ar, 0, MINI_TAU); ctx.stroke();
-      ctx.strokeStyle = 'rgba(53,133,255,.55)'; ctx.lineWidth = 1; ctx.beginPath();
-      ctx.arc(acx, acy, Math.max(0, miniArena.radius - 1.8) * miniScale, 0, MINI_TAU); ctx.stroke();
+      ctx.strokeStyle = 'rgba(245,251,255,.6)'; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.arc(acx, acy, ar, 0, MINI_TAU); ctx.stroke();
     } else {
       miniArena = null; miniRemaining = Math.min(miniX, miniZ, miniWorld - miniX, miniWorld - miniZ);
-      ctx.strokeStyle = 'rgba(245,251,255,.32)'; ctx.strokeRect(c - miniX * miniScale, c - miniZ * miniScale, miniWorld * miniScale, miniWorld * miniScale);
+      ctx.strokeStyle = 'rgba(245,251,255,.4)'; ctx.lineWidth = 1;
+      ctx.strokeRect(c - miniX * miniScale, c - miniZ * miniScale, miniWorld * miniScale, miniWorld * miniScale);
     }
     miniDrawActors(now);
     // Canvas positive rotation is clockwise; world yaw +PI/2 faces -X.
     // Therefore rotate the north-facing arrow by -yaw, never rotate the map.
     ctx.save(); ctx.translate(c, c); ctx.rotate(-miniYaw); ctx.beginPath();
-    ctx.moveTo(0, -6); ctx.lineTo(4, 4); ctx.lineTo(0, 2); ctx.lineTo(-4, 4); ctx.closePath();
+    ctx.moveTo(0, -7); ctx.lineTo(5, 5); ctx.lineTo(0, 2.5); ctx.lineTo(-5, 5); ctx.closePath();
     ctx.fillStyle = MINI_WHITE; ctx.strokeStyle = '#080e13'; ctx.lineWidth = 1.5; ctx.fill(); ctx.stroke(); ctx.restore();
-    ctx.restore(); ctx.strokeStyle = 'rgba(245,251,255,.36)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(c, c, miniRadius + .5, 0, MINI_TAU); ctx.stroke();
-    ctx.strokeStyle = MINI_WHITE; ctx.beginPath(); ctx.moveTo(c, c - miniRadius); ctx.lineTo(c, c - miniRadius + 4); ctx.stroke();
-    if (miniSize >= 104) {
-      ctx.fillStyle = '#9db0bf'; ctx.textAlign = 'center'; ctx.fillText('W', 4, c + 3); ctx.fillText('E', miniSize - 4, c + 3); ctx.fillText('S', c, miniSize - 1);
-    }
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(6,10,14,.9)'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(c, c, miniRadius, 0, MINI_TAU); ctx.stroke();
+    // North: one small mark on the rim.
+    ctx.fillStyle = MINI_WHITE; ctx.beginPath(); ctx.moveTo(c, 7); ctx.lineTo(c - 4, 0.5); ctx.lineTo(c + 4, 0.5); ctx.closePath(); ctx.fill();
   }
   function miniText(node, value) { if (node.textContent !== value) node.textContent = value; }
   function miniUpdateReadouts(now) {
@@ -1070,6 +957,7 @@
   miniBC.on('netPacket', miniOnPacket, 80);
   miniBC.on('voxelChanged', miniOnVoxelChanged, 80);
   miniBC.on('sfx', miniOnSfx, 80);
+  miniBC.on('peerStep', miniOnStep, 80);
   miniBC.on('death', function () { miniSetShown(false, 'death'); miniClearContacts(); }, 80);
   miniBC.on('respawn', function () { miniClearContacts(); miniLayoutDirty = true; miniLastTick = -Infinity; }, 80);
   miniBC.on('netStatus', miniOnNetStatus, 80);

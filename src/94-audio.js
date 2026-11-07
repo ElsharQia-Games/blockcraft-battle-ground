@@ -1697,6 +1697,7 @@
       if (ox * ox + oy * oy + oz * oz > PEER_STEP_RANGE * PEER_STEP_RANGE) return;
       var block = 0;
       try { block = getBlock(Math.floor(r.x), Math.floor(r.y - 0.2), Math.floor(r.z)); } catch (e) { block = 0; }
+      BCR.emit('peerStep', { id: id, x: r.x, y: r.y, z: r.z });
       play({ kind: 'step', surface: blockSurface(block, true), position: { x: r.x, y: r.y + 0.1, z: r.z },
         volume: r.crouch ? 0.08 : speed > 7 ? 0.36 : 0.26 });
     });

@@ -168,16 +168,6 @@
     body.bc-compact-hud #roomBadge .dot { display: none; box-shadow: none; }
     body.bc-compact-hud #roomBadge:focus-visible { outline: 2px solid var(--bc-ink); outline-offset: 2px; }
 
-    /* Frame and labels only: never tint, filter or replace the terrain canvas. */
-    body.bc-compact-hud #minimap {
-      background: var(--bc-glass-deep); border-color: var(--bc-blue); border-radius: var(--bc-radius);
-      color: var(--bc-ink); box-shadow: var(--bc-panel-bevel); font-family: var(--bc-hud-font);
-    }
-    body.bc-compact-hud #minimap :is(#minimapTitle, #minimapRange, #minimapNorth, #minimapSeed),
-    body.bc-compact-hud #minimap .bc-mini-line > span,
-    body.bc-compact-hud #minimapLegend > .bc-mini-legend-key { background: var(--bc-glass-deep); }
-    body.bc-compact-hud #minimap #minimapTitle { background: var(--bc-blue-fill); color: var(--bc-ink); }
-
     body.bc-compact-hud #healthWrap {
       left: 16px; bottom: var(--bc-hud-cards-bottom); width: 176px; height: 100px;
       display: grid; grid-template-rows: 12px 32px 4px 12px;

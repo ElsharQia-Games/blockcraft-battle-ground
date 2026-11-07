@@ -135,8 +135,7 @@ materials take more hits.
 
 - **World:** a 256 x 256 x 80 voxel world with grass, forest, desert, snow and ocean biomes,
   villages with villagers and chickens, waterfalls, and a planned battlefield: a citadel in the
-  middle and two rings of sites (watchtowers, walled compounds, ruins and trench lines, marked
-  T, C, R and X on the minimap) joined by roads into loops, with cover in the open ground.
+  middle and two rings of sites (watchtowers, walled compounds, ruins and trench lines) joined by roads into loops, with cover in the open ground.
   Respawns pick a spot out of enemy sight, close enough to get back into the fight.
 - **Movement:** fast acceleration, sprint slides that keep momentum into a jump, buffered
   jumps, crouching, swimming and a fuel-powered jetpack.
