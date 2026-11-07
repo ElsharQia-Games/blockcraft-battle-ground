@@ -74,7 +74,8 @@ side.
 | Left click | Shoot / place |
 | Right click | Aim down sights |
 | `R` | Reload (rotates the piece in build mode) |
-| `1`-`0` / wheel | Select weapons (the last two by wheel) |
+| `1`-`0` / wheel | Select weapons (the last ones by wheel) |
+| `Y` | Knife out, and back to your gun |
 | `Q` | Build mode on / off |
 | `1` `2` `3` / wheel (build mode) | Wall, floor, ramp |
 | `Shift` + wheel (build mode) | Change material |
@@ -103,7 +104,8 @@ side.
 Arena modes clear a walled ring and build three mirrored lanes: long in the north, tight in the
 south, blocked in the middle so the two spawn pads can't see each other.
 
-Every respawn gives **3 seconds of protection**; firing ends it early.
+Every respawn gives **3 seconds of protection**; firing ends it early. When a side reaches the
+score the match ends, shows the result for eight seconds and the next one starts.
 
 ## Weapons
 
@@ -124,6 +126,7 @@ Headshot multipliers differ per weapon; only sniper and crossbow headshots kill 
 | Machine Pistol | 13 | 1.3x | 1050 rpm | 28 | 12 |
 | Double Barrel | 18 x 8 pellets | 1.3x | 300 rpm | 2 | 2 at close range |
 | Crossbow | 120 | 2.0x | 60 rpm | 1 | 2 |
+| Knife | Combo 40, 40, 55; stab 90 | none | Stab 1 s | - | Backstab kills |
 
 Damage drops 20% beyond 65% of a weapon's range. Bullets also wear down blocks; tougher
 materials take more hits.

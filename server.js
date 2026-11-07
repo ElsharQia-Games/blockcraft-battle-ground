@@ -84,7 +84,7 @@ const SERVER_DRAGON_CATALOG_BOUNDS = ['minCX', 'maxCX', 'minCZ', 'maxCZ', 'minAl
    is a slow fallback only: these are fire cadences, not reload durations. */
 const SERVER_FIRE_MS = {
   pistol: 167, rifle: 94, shotgun: 800, smg: 68,
-  sniper: 1430, revolver: 353, lmg: 100, dmr: 250, burst: 75, machinepistol: 57, doublebarrel: 200, crossbow: 1000
+  sniper: 1430, revolver: 353, lmg: 100, dmr: 250, burst: 75, machinepistol: 57, doublebarrel: 200, crossbow: 1000, knife: 400
 };
 const MAX_HP = 150; // keep in sync with MAX_HEALTH in src/60-combat.js
 const SPAWN_SHIELD_MS = 3000; // keep in sync with src/61-spawn-shield.js
@@ -689,7 +689,8 @@ const SERVER_WEAPONS = {
   burst: { reload: 2.00, mag: 30, damage: 30, pellets: 1, range: 120, head: 1.5 },
   machinepistol: { reload: 1.25, mag: 28, damage: 13, pellets: 1, range: 55, head: 1.3 },
   doublebarrel: { reload: 2.60, mag: 2, damage: 18, pellets: 8, range: 24, head: 1.3 },
-  crossbow: { reload: 1.80, mag: 1, damage: 120, pellets: 1, range: 130, head: 2.0 }
+  crossbow: { reload: 1.80, mag: 1, damage: 120, pellets: 1, range: 130, head: 2.0 },
+  knife: { reload: 0.5, mag: 1, damage: 150, pellets: 1, range: 3.4, head: 1.0 }
 };
 
 function cleanWeapon(value, fallback) {

@@ -10,7 +10,7 @@ const NET_MAX_QUEUE = 48;
 const NET_MAX_EDITS = 6000;
 const NET_MAX_PEERS = 32;
 const NET_FIRE_MS = { pistol: 167, rifle: 94, shotgun: 800, smg: 68, sniper: 1430, revolver: 353, lmg: 100,
-  dmr: 250, burst: 75, machinepistol: 57, doublebarrel: 200, crossbow: 1000 };
+  dmr: 250, burst: 75, machinepistol: 57, doublebarrel: 200, crossbow: 1000, knife: 400 };
 const NET_MODE_WEAPONS = { tdm: null, ffa: null, gungame: null, moon: null, hardcore: null, snipers: ['sniper', 'dmr', 'crossbow'],
   shotguns: ['shotgun', 'doublebarrel'], sidearms: ['pistol', 'revolver', 'machinepistol'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver', 'burst'] };
 // Authority-side mode rules; keep in sync with MODES (15-modes.js) and server.js.
@@ -1670,15 +1670,16 @@ function handleNet(msg, from, nested) {
       const pos = new THREE.Vector3();
       if (r.group.userData.gun) r.group.userData.gun.userData.muzzle.getWorldPosition(pos);
       else pos.set(r.x, r.y + 1.4, r.z);
-      remoteMuzzle(pos);
+      const melee = !!(WEAPON_BY_ID[r.weapon] || {}).melee;
+      if (!melee) remoteMuzzle(pos);
       const dist = pos.distanceTo(camera.position);
       const spatialAudio = netAPI('audio');
-      if (dist < 75 && !(spatialAudio && spatialAudio.available)) {
+      if (!melee && dist < 75 && !(spatialAudio && spatialAudio.available)) {
         const w = WEAPON_BY_ID[r.weapon];
         playShot(w, Math.max(0.05, 1 - dist / 75) * 0.95);
       }
       netEmitSfx({
-        kind: 'shot', weapon: r.weapon,
+        kind: melee ? 'knifeSlash' : 'shot', weapon: r.weapon,
         position: netPositionSfx(msg) || { x: pos.x, y: pos.y, z: pos.z },
         volume: Math.max(0.05, 1 - dist / 90)
       });

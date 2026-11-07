@@ -18,13 +18,15 @@ const WEAPONS = [
   { id: 'burst',    name: 'Burst Rifle', damage: 30, rpm: 800, mag: 30, spread: 0.012, recoil: 0.012, range: 120, pellets: 1, head: 1.5, auto: false, burst: 3, burstGap: 0.34, reload: 2.00, sound: 0.46, scopeFov: 56, adsSpread: 0.38, kickBack: 0.046, recover: 26, report: [0.11, 2500, 170, 3.8] },
   { id: 'machinepistol', name: 'Machine Pistol', damage: 13, rpm: 1050, mag: 28, spread: 0.030, recoil: 0.009, range: 55, pellets: 1, head: 1.3, auto: true, reload: 1.25, sound: 0.30, scopeFov: 68, adsSpread: 0.60, kickBack: 0.032, recover: 32, report: [0.07, 3600, 230, 4.6] },
   { id: 'doublebarrel', name: 'Double Barrel', damage: 18, rpm: 300, mag: 2, spread: 0.090, recoil: 0.090, range: 24, pellets: 8, head: 1.3, auto: false, reload: 2.60, sound: 0.90, scopeFov: 72, adsSpread: 0.80, kickBack: 0.140, recover: 12, report: [0.34, 760, 92, 1.9] },
-  { id: 'crossbow', name: 'Crossbow', damage: 120, rpm: 60, mag: 1, spread: 0.004, recoil: 0.030, range: 130, pellets: 1, head: 2.0, auto: false, reload: 1.80, sound: 0.14, scopeFov: 46, adsSpread: 0.10, kickBack: 0.050, recover: 14, report: [0.05, 900, 210, 6.0] }
+  { id: 'crossbow', name: 'Crossbow', damage: 120, rpm: 60, mag: 1, spread: 0.004, recoil: 0.030, range: 130, pellets: 1, head: 2.0, auto: false, reload: 1.80, sound: 0.14, scopeFov: 46, adsSpread: 0.10, kickBack: 0.050, recover: 14, report: [0.05, 900, 210, 6.0] },
+  // damage is the backstab, the most one swing can claim; see 61-knife.js.
+  { id: 'knife',    name: 'Knife',    damage: 150, rpm: 140, mag: 1, spread: 0, recoil: 0, range: 3.4, pellets: 1, head: 1.0, auto: true, melee: true, reload: 0.5, sound: 0.3, scopeFov: 70, adsSpread: 1, kickBack: 0, recover: 5, report: [0.03, 1200, 300, 8.0] }
 ];
 const WEAPON_BY_ID = Object.create(null);
 const COMBAT_OPTIC_TYPES = {
   pistol: 'reflex', rifle: 'holo', shotgun: 'spread', smg: 'chevron',
   sniper: 'mildot', revolver: 'precision', lmg: 'support',
-  dmr: 'holo', burst: 'holo', machinepistol: 'chevron', doublebarrel: 'spread', crossbow: 'holo'
+  dmr: 'holo', burst: 'holo', machinepistol: 'chevron', doublebarrel: 'spread', crossbow: 'holo', knife: 'reflex'
 };
 // Newer guns borrow the reload animation and sights of the gun they work like.
 const COMBAT_FAMILY = { dmr: 'rifle', burst: 'rifle', machinepistol: 'smg', doublebarrel: 'shotgun', crossbow: 'sniper' };
@@ -102,7 +104,9 @@ Object.assign(COMBAT_HANDLING, {
     cycle: 0.16, mechanism: 'break', cueAt: -1, reloadStages: [[0.12, 'action open'], [0.3, 'shells out'], [0.62, 'shells in'], [0.86, 'action shut']] },
   crossbow: { ...COMBAT_HANDLING.rifle, sight: 'Reflex window', role: 'Silent one-shot bolt', adsInMs: 280, adsOutMs: 170, openingShots: 0, openingScale: 1, burstGapMs: 1200,
     bloomPerShot: 0.2, bloomMax: 0.6, moveSpread: 1.3, adsMoveSpread: 1.5, recoilScale: 0.7, yawPattern: [0.2, -0.2], viewRise: 0.8, viewRoll: 0, cycle: 0.2,
-    mechanism: 'string', cueAt: -1, reloadStages: [[0.2, 'cock string'], [0.6, 'bolt in'], [0.85, 'seat']] }
+    mechanism: 'string', cueAt: -1, reloadStages: [[0.2, 'cock string'], [0.6, 'bolt in'], [0.85, 'seat']] },
+  knife: { ...COMBAT_HANDLING.smg, sight: 'None', role: 'Combo slashes, backstab kills', cycle: 0.42, mechanism: 'none', cueAt: -1,
+    bloomPerShot: 0, reloadStages: [[0.5, 'none']] }
 });
 for (const w of WEAPONS) {
   w.family = COMBAT_FAMILY[w.id] || w.id;
@@ -508,8 +512,8 @@ function updateCombatHud() {
   const w = currentWeapon();
   combatUpdateScopeHud();
   if (weaponNameEl) weaponNameEl.textContent = w.name;
-  if (ammoNowEl) ammoNowEl.textContent = String(gun.ammo[gun.index]);
-  if (ammoLineEl) ammoLineEl.classList.toggle('low', gun.ammo[gun.index] <= Math.ceil(w.mag * 0.25));
+  if (ammoNowEl) ammoNowEl.textContent = w.melee ? '\u2014' : String(gun.ammo[gun.index]);
+  if (ammoLineEl) ammoLineEl.classList.toggle('low', !w.melee && gun.ammo[gun.index] <= Math.ceil(w.mag * 0.25));
   if (reloadBarEl) reloadBarEl.classList.toggle('on', gun.reloading > 0);
   if (reloadFillEl && gun.reloading > 0) {
     reloadFillEl.style.width = Math.max(0, Math.min(1, 1 - gun.reloading / gun.reloadTotal)) * 100 + '%';
@@ -685,6 +689,11 @@ function combatAddOptic(root) {
   u.optic = optic;
   u.opticType = type;
   u.adsView = w.view;
+  if (w.melee) {
+    root.add(optic);
+    combatSightLine(root, 0.1, -0.2, 0.1);
+    return;
+  }
   if (w.opticFamily === 'pistol') {
     // Square rear notch, paired witness marks and a separate real front blade.
     // Nothing covers peripheral vision; both sights ride the reciprocating slide.
@@ -1003,6 +1012,15 @@ function makeGunModel(id) {
     combatCylinder(shell, 0.025, 0.02, brass, 0, 0, 0.047);
     shell.visible = shell.userData.combatBase.visible = false;
     muzzleZ = -0.76;
+  } else if (id === 'knife') {
+    addBox(root, 0.05, 0.075, 0.17, '#22282c', 0, -0.015, 0.1);
+    combatMetalBox(root, 0.07, 0.10, 0.02, '#8c9295', 0, -0.012, 0.005);
+    combatMetalBox(root, 0.012, 0.08, 0.30, '#cdd4d8', 0, -0.012, -0.15);
+    combatMetalBox(root, 0.012, 0.045, 0.05, '#e4e9ec', 0, 0.006, -0.32);
+    u.grip.set(0, -0.02, 0.1);
+    u.support.set(-0.28, -0.32, 0.28);
+    u.heldScale = 1;
+    muzzleZ = -0.35;
   } else if (id === 'crossbow') {
     addBox(root, 0.08, 0.09, 0.62, wood, 0, 0, -0.05);
     addBox(root, 0.09, 0.15, 0.26, wood, 0, -0.03, 0.38);
@@ -1044,7 +1062,7 @@ function makeGunModel(id) {
   }
 
   // Every barrel is authored along -Z; the attachment/aim code uses that axis.
-  combatCylinder(root, id === 'shotgun' ? 0.025 : 0.017, 0.008, '#090e12', 0, muzzleY, muzzleZ);
+  if (id !== 'knife') combatCylinder(root, id === 'shotgun' ? 0.025 : 0.017, 0.008, '#090e12', 0, muzzleY, muzzleZ);
   const muzzle = new THREE.Object3D();
   muzzle.position.set(0, muzzleY, muzzleZ - 0.006);
   root.add(muzzle);
@@ -1243,6 +1261,13 @@ function combatSampleShotMechanism(model, age, serial) {
     u.rightTarget.y += (0.055 + lift * 0.09 - u.rightTarget.y) * hand;
     u.rightTarget.z += (parts.bolt.position.z + 0.06 - u.rightTarget.z) * hand;
     pose.yaw = 0.065 * hand; pose.roll = -0.035 * hand;
+  } else if (w.melee) {
+    // 0 right to left, 1 left to right, 2 overhead, 3 the heavy thrust.
+    const swing = Number.isInteger(u.knifeSwing) ? u.knifeSwing : (serial || 0) % 3;
+    const sweep = combatStage(p, 0.08, 0.5), reach = combatPulse(p, 0, 0.1, 0.6, 1);
+    if (swing === 3) { pose.pitch = (combatPulse(p, 0, 0.3, 0.32, 0.4) * -1.0 + combatPulse(p, 0.34, 0.46, 0.7, 1) * 0.5); pose.roll = 0.5 * reach; }
+    else if (swing === 2) { pose.pitch = (-1.2 + 2.2 * sweep) * reach; }
+    else { const side = swing === 0 ? 1 : -1; pose.yaw = side * (1.0 - 2.0 * sweep) * reach; pose.roll = -side * 0.7 * reach; pose.pitch = 0.2 * reach; }
   } else if (w.id === 'revolver') {
     const turn = combatStage(p, 0.02, 0.43);
     const previous = Math.max(0, (serial || 1) - 1) % 6;
@@ -1361,7 +1386,8 @@ const COMBAT_HOLD_STANCES = {
   burst:    { hip: 1.22, ads: 1.36, roll: -0.48, adsRoll: -0.54, kick: 0.9 },
   machinepistol: { hip: 1.36, ads: 1.48, roll: -0.20, adsRoll: -0.14, kick: 0.7 },
   doublebarrel:  { hip: 1.08, ads: 1.30, roll: -0.44, adsRoll: -0.52, kick: 1.7 },
-  crossbow: { hip: 1.14, ads: 1.38, roll: -0.42, adsRoll: -0.52, kick: 0.6 }
+  crossbow: { hip: 1.14, ads: 1.38, roll: -0.42, adsRoll: -0.52, kick: 0.6 },
+  knife:    { hip: 1.10, ads: 1.10, roll: -0.12, adsRoll: -0.12, kick: 0 }
 };
 
 const combatPoseEuler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -1415,7 +1441,8 @@ function updateAvatarWeaponPose(avatar, state, dt) {
   const pitch = Math.max(-Math.PI / 2 + 0.02, Math.min(Math.PI / 2 - 0.02, Number.isFinite(state.pitch) ? state.pitch : 0));
   const rp = model.userData.reloadPose;
   const w = WEAPON_BY_ID[model.userData.weaponId] || WEAPONS[0];
-  const recoil = reload < 0 ? combatClamp01(state.kick) * w.recoil * 0.75 : 0;
+  // Mostly kickBack: heavy guns throw the arm up, fast guns barely twitch it.
+  const recoil = reload < 0 ? combatClamp01(state.kick) * (w.recoil * 0.75 + w.kickBack * 1.2) : 0;
   const stance = COMBAT_HOLD_STANCES[w.id] || COMBAT_HOLD_STANCES.rifle;
   const aimBlend = state.aim ? 1 : 0;
   const shoulder = stance.hip + (stance.ads - stance.hip) * aimBlend;
@@ -1423,6 +1450,7 @@ function updateAvatarWeaponPose(avatar, state, dt) {
   const targetR = shoulder + pitch + rp.pitch * 0.5 + recoil * stance.kick;
   right.rotation.x += (targetR - right.rotation.x) * pose.weight;
   right.rotation.z = roll * pose.weight;
+  if (w.melee) { right.rotation.y += rp.yaw * 0.9 * pose.weight; right.rotation.z += rp.roll * 0.4 * pose.weight; }
   combatPoseQuat.setFromEuler(combatPoseEuler.set(pitch + rp.pitch + recoil, rp.yaw, rp.roll));
   combatPoseInverse.copy(right.quaternion).invert();
   model.quaternion.copy(combatPoseInverse).multiply(combatPoseQuat);
@@ -2038,7 +2066,7 @@ function startReload() {
   if (!alive || !combatMode || combatQuickBuilding() || combatActionBlocked()) { combatReleaseGun(); return; }
   const w = currentWeapon();
   if (!combatWeaponAllowed(w)) { combatOnLoadoutChanged(); return; }
-  if (gun.reloading > 0 || gun.ammo[gun.index] >= w.mag) return;
+  if (w.melee || gun.reloading > 0 || gun.ammo[gun.index] >= w.mag) return;
   gun.reloading = w.reload;
   gun.reloadTotal = w.reload;
   gun.reloadIndex = gun.index;
@@ -2071,6 +2099,7 @@ function fireOnce() {
     combatOnLoadoutChanged();
     return;
   }
+  if (w.melee) { knifeAttack(false); return; }
   if (gun.cooldown > 0 || gun.reloading > 0) return;
   if (gun.ammo[gun.index] <= 0) { startReload(); return; }
   if (combatLookNeedsSync && typeof updateCamera === 'function') updateCamera(0);
@@ -2619,7 +2648,8 @@ function selectWeapon(i, silent) {
   refreshGunModels();
   if (!silent && alive && !combatActionBlocked()) {
     playTone(420, 0.04, 'square', 0.05);
-    combatEmit('sfx', { kind: 'ui', action: 'swap', weapon: WEAPONS[i].id, position: combatSourcePosition(), volume: 0.4 });
+    combatEmit('sfx', WEAPONS[i].melee ? { kind: 'knifeEquip', position: combatSourcePosition(), volume: 0.6 }
+      : { kind: 'ui', action: 'swap', weapon: WEAPONS[i].id, position: combatSourcePosition(), volume: 0.4 });
   }
   if (typeof netSend === 'function') netSend(combatNetState());
 }

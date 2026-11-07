@@ -28,7 +28,8 @@
     { id: 'sniper', name: 'Sniper' }, { id: 'revolver', name: 'Revolver' },
     { id: 'lmg', name: 'LMG' }, { id: 'dmr', name: 'Marksman' },
     { id: 'burst', name: 'Burst Rifle' }, { id: 'machinepistol', name: 'Machine Pistol' },
-    { id: 'doublebarrel', name: 'Double Barrel' }, { id: 'crossbow', name: 'Crossbow' }
+    { id: 'doublebarrel', name: 'Double Barrel' }, { id: 'crossbow', name: 'Crossbow' },
+    { id: 'knife', name: 'Knife' }
   ];
 
   var FALLBACK_MODES = [

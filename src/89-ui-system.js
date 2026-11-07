@@ -314,10 +314,10 @@
       const w = typeof currentWeapon === 'function' ? currentWeapon() : null;
       if (w) {
         const ammo = gun.ammo[gun.index];
-        put('ammo', H.ammo, String(ammo));
-        put('mag', H.mag, '/ ' + w.mag);
+        put('ammo', H.ammo, w.melee ? '2014' : String(ammo));
+        put('mag', H.mag, w.melee ? '' : '/ ' + w.mag);
         put('gun', H.gun, w.name);
-        flag('weapon', H.weapon, 'is-low', ammo <= Math.ceil(w.mag * 0.25));
+        flag('weapon', H.weapon, 'is-low', !w.melee && ammo <= Math.ceil(w.mag * 0.25));
         const reloading = gun.reloading > 0 && gun.reloadTotal > 0;
         flag('weapon', H.weapon, 'is-reloading', reloading);
         put('reload', H.reloadFill, (reloading ? (1 - gun.reloading / gun.reloadTotal) * 100 : 0).toFixed(0) + '%', 'width');

@@ -835,7 +835,7 @@ function updatePlayer(dt) {
     const flightSpeed = jet && Number.isFinite(jet.boostSpeed) ? jet.boostSpeed : FLY * 1.65;
     const airSpeed = m.airCarry > WALK ? Math.min(PLAYER_MOMENTUM_CAP, m.airCarry) : WALK;
     const speed = player.fly ? ((jet ? player.boosting : shift) ? flightSpeed : FLY)
-      : inWater ? PLAYER_WATER_SPEED : player.onGround ? (player.crouching ? SNEAK : sprinting ? SPRINT : WALK)
+      : inWater ? PLAYER_WATER_SPEED : player.onGround ? (player.crouching ? SNEAK : sprinting ? SPRINT : WALK) * knifeMoveScale()
         : (player.crouching && !m.airCarry ? SNEAK : airSpeed);
     let tx = wx * speed, tz = wz * speed;
     if (player.sliding) {

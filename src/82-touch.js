@@ -101,7 +101,8 @@ function touchAction(name) {
     case 'aim':
       if (quickBuild.active) { cancelQuickBuild(); break; }
       if (!combatMode) { setBuildingHeld(2, true); setTimeout(() => setBuildingHeld(2, false), 120); break; }
-      gun.aiming = !gun.aiming;
+      if (currentWeapon().melee) knifeAttack(true);
+      else gun.aiming = !gun.aiming;
       break;
     case 'jump': jumpQueued = true; keys.Space = true; setTimeout(() => { keys.Space = false; }, 220); break;
     case 'crouch': {

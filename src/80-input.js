@@ -10,7 +10,7 @@ const inputButtonsDown = new Set();
 let scoreboardTabHeld = false;
 const GAMEPLAY_KEYS = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight', 'ControlLeft', 'ControlRight',
-  'KeyV', 'KeyC', 'KeyF', 'KeyB', 'KeyR', 'KeyQ', 'KeyM', 'KeyP', 'KeyZ', 'KeyX', 'KeyG', 'KeyT', 'KeyK', 'Tab'
+  'KeyV', 'KeyC', 'KeyF', 'KeyB', 'KeyR', 'KeyQ', 'KeyM', 'KeyP', 'KeyZ', 'KeyX', 'KeyG', 'KeyT', 'KeyK', 'KeyY', 'Tab'
 ]);
 let inputWindowFocused = typeof document.hasFocus !== 'function' || document.hasFocus();
 let inputWasActive = false;
@@ -472,7 +472,8 @@ document.addEventListener('mousedown', (e) => {
     gun.trigger = true;
     fireOnce();
   } else if (e.button === 2) {
-    gun.aiming = true;
+    if (currentWeapon().melee) knifeAttack(true);
+    else gun.aiming = true;
   }
 });
 document.addEventListener('mouseup', (e) => {
@@ -602,6 +603,7 @@ document.addEventListener('keydown', (e) => {
   switch (e.code) {
     case 'Tab': if (typeof setScoreboardVisible === 'function') setScoreboardVisible(true); break;
     case 'Space': jumpQueued = true; break;
+    case 'KeyY': knifeToggle(); break;
     case 'KeyZ': inputSelectBuildPiece('wall'); break;
     case 'KeyX': inputSelectBuildPiece('ramp'); break;
     case 'KeyG': inputSelectBuildPiece('floor'); break;

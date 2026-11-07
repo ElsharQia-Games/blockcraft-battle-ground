@@ -11,25 +11,27 @@
 'use strict';
 
 const VFX_WEAPON = {
-  //        trauma  flash  light  casing
-  pistol:   [0.16,  0.75,  3.2,   0.8],
-  revolver: [0.30,  1.00,  4.2,   0.0],  // revolvers keep their brass
-  smg:      [0.09,  0.65,  2.6,   0.7],
-  rifle:    [0.13,  0.85,  3.4,   1.0],
-  lmg:      [0.15,  0.95,  3.8,   1.1],
-  shotgun:  [0.42,  1.35,  5.2,   1.6],
-  sniper:   [0.55,  1.30,  5.6,   1.3],
-  dmr:      [0.30,  1.05,  4.4,   1.2],
-  burst:    [0.14,  0.80,  3.2,   0.9],
-  machinepistol: [0.07, 0.55, 2.2, 0.6],
-  doublebarrel:  [0.55, 1.60, 6.0, 0.0],
-  crossbow: [0.05,  0.0,   0.0,   0.0]
+  //        trauma  flash  light  casing  punch
+  pistol:   [0.20,  0.85,  3.4,   0.8,    0.30],
+  revolver: [0.38,  1.15,  4.6,   0.0,    0.65],  // revolvers keep their brass
+  smg:      [0.11,  0.70,  2.8,   0.7,    0.12],
+  rifle:    [0.15,  0.95,  3.6,   1.0,    0.20],
+  lmg:      [0.18,  1.05,  4.0,   1.1,    0.26],
+  shotgun:  [0.62,  1.75,  6.2,   1.6,    1.00],
+  sniper:   [0.68,  1.50,  6.0,   1.3,    1.10],
+  dmr:      [0.36,  1.15,  4.6,   1.2,    0.55],
+  burst:    [0.15,  0.90,  3.4,   0.9,    0.22],
+  machinepistol: [0.08, 0.60, 2.4, 0.6,   0.09],
+  doublebarrel:  [0.78, 2.05, 7.0, 0.0,   1.35],
+  crossbow: [0.05,  0.0,   0.0,   0.0,    0.18],
+  knife:    [0.04,  0.0,   0.0,   0.0,    0.0]
 };
 const VFX_MAX_CASINGS = 24;
 const VFX_MAX_PUFFS = 24;
 
 const vfx = {
   trauma: 0,
+  punch: 0,
   seed: Math.random() * 1000,
   applied: null,
   casings: [],
@@ -49,13 +51,16 @@ function vfxNoise(t, k) {
 }
 
 function vfxApplyShake() {
-  if (vfx.trauma <= 0.001) return;
+  if (vfx.trauma <= 0.001 && vfx.punch <= 0.002) return;
   const s = vfx.trauma * vfx.trauma, t = performance.now() / 1000 + vfx.seed;
-  const yaw = vfxNoise(t, 1) * 0.035 * s, pitch = vfxNoise(t, 2) * 0.03 * s, roll = vfxNoise(t, 3) * 0.05 * s;
-  vfx.applied = { yaw, pitch, roll, x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z };
-  camera.rotation.x += pitch;
+  const yaw = vfxNoise(t, 1) * 0.08 * s, pitch = vfxNoise(t, 2) * 0.07 * s, roll = vfxNoise(t, 3) * 0.09 * s;
+  vfx.applied = { x: camera.rotation.x, y: camera.rotation.y, z: camera.rotation.z,
+    px: camera.position.x, py: camera.position.y, pz: camera.position.z };
+  camera.rotation.x += pitch + vfx.punch * 0.05;
   camera.rotation.y += yaw;
   camera.rotation.z += roll;
+  // The kick shoves the view back along the barrel, and it snaps forward again.
+  camera.translateZ(vfx.punch * 0.2);
 }
 
 function vfxRemoveShake() {
@@ -64,6 +69,7 @@ function vfxRemoveShake() {
   vfx.applied = null;
   // Restore exactly what the game set, unless something replaced it meanwhile.
   camera.rotation.set(a.x, a.y, a.z);
+  camera.position.set(a.px, a.py, a.pz);
 }
 
 /* ---------------- muzzle flash + smoke ---------------- */
@@ -142,6 +148,7 @@ function vfxSolidAt(p) {
 function vfxUpdate(dt) {
   if (!(dt > 0)) return;
   vfx.trauma = Math.max(0, vfx.trauma - dt * 2.3);
+  vfx.punch *= Math.exp(-13 * dt);
   for (let i = vfx.casings.length - 1; i >= 0; i--) {
     const c = vfx.casings[i];
     c.life -= dt;
@@ -190,6 +197,7 @@ BC.on('shot', (info) => {
   const id = info && info.weapon;
   const spec = VFX_WEAPON[id] || VFX_WEAPON.rifle;
   vfxAddTrauma(spec[0] * (gun.aiming ? 0.6 : 1));
+  vfx.punch = Math.min(1.6, vfx.punch + spec[4] * (gun.aiming ? 0.6 : 1) * (vfx.reduced ? 0.35 : 1));
   // combat emits 'shot' just before muzzleBurst(); boost the flash after it.
   queueMicrotask(() => vfxMuzzle(id));
   vfxEjectCasing(id);
