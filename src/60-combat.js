@@ -2041,7 +2041,11 @@ function fireOnce() {
 
     // No knockback and no vertical impulse: a hit only sends damage, so the
     // "everybody flies" bug cannot come from the combat layer.
-    if (liveEnt) {
+    if (liveEnt && spawnShieldPeerActive(ent.r)) {
+      if (!impactInfo.silent) combatEmit('sfx', { kind: 'shieldBlock', position: end.clone(), volume: 0.5 });
+      addImpact(end, '#9fe8ff', impactInfo);
+      impactInfo.silent = true;
+    } else if (liveEnt) {
       hitAny = true;
       if (ent.head) hitHead = true;
       if (!shotTargetId) { shotTargetId = ent.r.id; firstHitName = ent.r.name || ''; }
@@ -2210,6 +2214,7 @@ function applyDamage(dmg, byName, head, byId, info) {
   // A hit confirmed by the room authority already passed its team and range
   // checks. Re-judging it with this client's guesses made players unkillable.
   if (hit.authoritative !== true) {
+    if (spawnShieldActive()) return false;
     if (combatIsFriendly(hit.byId, hit.byName, null, hit.killerTeam || hit.byTeam)) return false;
     const hitWeapon = WEAPON_BY_ID[hit.weapon];
     if (hit.killerPos && hitWeapon && hit.killerPos.distanceTo(player.pos) > hitWeapon.range) return false;

@@ -18,12 +18,11 @@
   };
   const THINK_MS = 200, POSE_MS = 50, EYE = 1.5, GRAVITY = 24, MAX_BOTS = 7;
   const MAX_SHOTS_PER_S = 5;       // bots fire in measured bursts, whatever the gun
-  const SPAWN_SAFE_MS = 2000;      // no shots at a player who just came back
   const SPAWN_MIN_DIST = 16;
 
   const bots = new Map();
   const config = { count: 3, skill: 'normal' };
-  let serial = 0, poseAt = 0, activeKey = '', lastScore = 0, wasAlive = true, safeUntil = 0;
+  let serial = 0, poseAt = 0, activeKey = '', lastScore = 0;
 
   try {
     const saved = JSON.parse(localStorage.getItem('blockcraft.bots') || 'null');
@@ -130,7 +129,7 @@
 
   /* ---------------- senses ---------------- */
   function targetPos(t) { return t === 'player' ? player.pos : t; }
-  function targetAlive(t) { return t === 'player' ? alive && performance.now() > safeUntil : !!t && t.hp > 0 && bots.get(t.id) === t; }
+  function targetAlive(t) { return t === 'player' ? alive && !spawnShieldActive() : !!t && t.hp > 0 && bots.get(t.id) === t; }
   function clearSight(a, b) {
     const dx = b.x - a.x, dy = (b.y + 1.2) - (a.y + EYE), dz = b.z - a.z, dist = Math.hypot(dx, dy, dz);
     const steps = Math.ceil(dist / 0.7);
@@ -238,6 +237,8 @@
     bot.cool = Math.max(60 / w.rpm, 1 / MAX_SHOTS_PER_S) * (Math.random() < 0.2 ? 4 : 1);
     bot.ammo--;
     bot.firingAt = now;
+    bot.shieldUntil = 0;
+    if (net.players.has(bot.id)) net.players.get(bot.id).shieldUntil = 0;
     if (bot.ammo <= 0) { bot.reloadUntil = now + (w.reload || 2) * 1000; bot.ammo = w.mag; }
     handleNet({ t: 'shot', id: bot.id, weapon: bot.weapon, shotId: 'bot' + (++serial), x: bot.x, y: bot.y + EYE, z: bot.z,
       yaw: bot.yaw, combat: 1, build: 0, aim: 0, firing: 1 }, bot.id);
@@ -257,7 +258,7 @@
   }
 
   function hurt(bot, dmg, head, killer, weapon) {
-    if (bot.hp <= 0) return false;
+    if (bot.hp <= 0 || performance.now() < (bot.shieldUntil || 0)) return false;
     bot.hp = Math.max(0, bot.hp - dmg);
     if (killer && killer !== 'player') bot.target = bot.target || killer;
     else if (killer === 'player' && enemy(bot, 'player')) { bot.target = 'player'; bot.seenAt = bot.seenAt || performance.now(); }
@@ -302,8 +303,6 @@
     const score = match ? (match.red || 0) + (match.blue || 0) : 0;
     if (score < lastScore) for (const bot of bots.values()) { bot.kills = bot.deaths = 0; bot.weapon = weaponFor(bot); }
     lastScore = score;
-    if (alive && !wasAlive) safeUntil = now + SPAWN_SAFE_MS;
-    wasAlive = alive;
     // The match carries on through the player's own respawn timer.
     const running = (playing || !alive) && !(match && match.winner);
     for (const bot of bots.values()) {
@@ -311,6 +310,7 @@
       if (bot.hp <= 0) {
         if (now >= bot.respawnAt) {
           spawnAt(bot);
+          bot.shieldUntil = now + SPAWN_SHIELD_MS;
           handleNet({ t: 'respawn', id: bot.id, hp: MAX_HEALTH, x: bot.x, y: bot.y, z: bot.z }, bot.id);
         }
         continue;

@@ -87,6 +87,7 @@ const SERVER_FIRE_MS = {
   sniper: 1430, revolver: 353, lmg: 100
 };
 const MAX_HP = 150; // keep in sync with MAX_HEALTH in src/60-combat.js
+const SPAWN_SHIELD_MS = 3000; // keep in sync with src/61-spawn-shield.js
 
 /** @type {Map<string, Client>} */
 const clients = new Map();
@@ -1119,7 +1120,7 @@ function deathEvent(victim, killer, weapon, head) {
 
 function damageTarget(attacker, target, damage, weapon, head, eventId, shotId) {
   advanceHealth(target);
-  if (target.hp <= 0 || !enemies(attacker, target)) return;
+  if (target.hp <= 0 || !enemies(attacker, target) || nowMs() < (target.shieldUntil || 0)) return;
   const base = Math.min(SERVER_WEAPONS[weapon] ? SERVER_WEAPONS[weapon].damage * (head ? SERVER_WEAPONS[weapon].head : 1) : BREATH_DAMAGE, damage);
   const amount = Math.round(base * (SERVER_WEAPONS[weapon] ? SERVER_MODE_DAMAGE[roomMode] || 1 : 1));
   target.hp = Math.max(0, target.hp - amount);
@@ -1357,6 +1358,7 @@ function handleMessage(client, msg, bytes) {
       noteDrop(client); return;
     }
     if (!fireLock(client, client.weapon, 'shot', msg)) return;
+    client.shieldUntil = 0; // firing gives up spawn protection
     broadcast({
       t: 'shot',
       id: client.id,
@@ -1408,6 +1410,7 @@ function handleMessage(client, msg, bytes) {
       client.hp = MAX_HP;
       client.life++;
       client.lastDamageAt = -Infinity;
+      client.shieldUntil = nowMs() + SPAWN_SHIELD_MS;
     }
     applyClientPose(client, msg);
     client.reload = -1;

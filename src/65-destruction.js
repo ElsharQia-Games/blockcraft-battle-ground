@@ -10,10 +10,9 @@
    Hit deduplication retains the latest 4096 IDs for at most 180 seconds, including
    hits rejected by the current block-type check. Replacing a block clears damage.
 
-   Cracks use coordinate/material-seeded patterns on exposed voxel faces, one
-   depth-tested draw call per damaged voxel. Meshes/buffers are pooled to the same
-   192-slot high-water bound; the material, patterns and bounds are shared. Only
-   damage or exposed-face changes rewrite buffers, never a ticking animation. */
+   Damage shows as eight pixel-art stages over the block, one depth-tested draw
+   call per damaged voxel. Meshes are pooled to the same 192-slot bound and share
+   one cube and eight materials; only a change of stage touches anything. */
 'use strict';
 
 const VOXEL_DURABILITY = Object.freeze({
@@ -37,9 +36,7 @@ const VOXEL_DAMAGE_TTL_MS = 60000;
 const VOXEL_MAX_SEEN_HITS = 4096;
 const VOXEL_HIT_TTL_MS = 180000;
 const VOXEL_CRACK_VIEW_DISTANCE = 120;
-const VOXEL_CRACK_VARIANTS = 16;
-const VOXEL_CRACK_SEGMENTS = 24;
-const VOXEL_CRACK_VERTICES = 6 * VOXEL_CRACK_SEGMENTS * 6;
+const VOXEL_CRACK_STAGES = 8;
 const VOXEL_PEER_ID = /^[\w-]{1,40}$/;
 const VOXEL_HIT_ID = /^[\w.:-]{1,96}$/;
 
@@ -51,9 +48,8 @@ const DESTRUCTION_debrisPoint = new THREE.Vector3();
 const DESTRUCTION_sessionId = Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
 let DESTRUCTION_hitSerial = 0;
 let DESTRUCTION_crackMeshCount = 0;
-let DESTRUCTION_crackMaterial = null;
-let DESTRUCTION_crackPatterns = null;
-let DESTRUCTION_crackBounds = null;
+let DESTRUCTION_crackMaterials = null;
+let DESTRUCTION_crackGeometry = null;
 
 function voxelDurability(type) {
   return Number.isInteger(type) && Object.prototype.hasOwnProperty.call(VOXEL_DURABILITY, type)
@@ -153,7 +149,7 @@ function applyVoxelDamage(msg) {
       lastHit: now, expiresAt: now + VOXEL_DAMAGE_TTL_MS, progress: 1 - remaining / max,
       seed: DESTRUCTION_hash(Math.imul(x, 73856093) ^ Math.imul(y, 19349663) ^
         Math.imul(z, 83492791) ^ Math.imul(msg.block, 2654435761) ^ SEED),
-      mesh: DESTRUCTION_acquireCrack(x, y, z), faceMask: -1, renderedHealth: -1
+      mesh: DESTRUCTION_acquireCrack(x, y, z), renderedHealth: -1
     };
   } else {
     record.health = record.remaining = remaining;
@@ -180,7 +176,6 @@ function DESTRUCTION_release(record) {
   voxelDamageMap.delete(record.key);
   if (!record.mesh) return;
   record.mesh.visible = false;
-  record.mesh.geometry.setDrawRange(0, 0);
   scene.remove(record.mesh);
   DESTRUCTION_crackPool.push(record.mesh);
   record.mesh = null;
@@ -228,45 +223,65 @@ function DESTRUCTION_hash(seed) {
   return (seed ^ (seed >>> 16)) >>> 0;
 }
 
-function DESTRUCTION_faceClamp(n) { return Math.max(0.035, Math.min(0.965, n)); }
-
-function DESTRUCTION_initCracks() {
-  if (DESTRUCTION_crackMaterial) return;
-  DESTRUCTION_crackMaterial = new THREE.MeshBasicMaterial({
-    vertexColors: true, transparent: true, opacity: 1, depthTest: true, depthWrite: false,
-    side: THREE.FrontSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1,
-    toneMapped: false
-  });
-  DESTRUCTION_crackBounds = new THREE.Sphere(new THREE.Vector3(0.5, 0.5, 0.5), 0.88);
-  DESTRUCTION_crackPatterns = new Float32Array(VOXEL_CRACK_VARIANTS * VOXEL_CRACK_SEGMENTS * 4);
-  for (let variant = 0; variant < VOXEL_CRACK_VARIANTS; variant++) {
-    const random = mulberry32(DESTRUCTION_hash(0x43524143 + variant));
-    const cu = 0.42 + random() * 0.16, cv = 0.42 + random() * 0.16;
-    const base = variant * VOXEL_CRACK_SEGMENTS * 4;
-    for (let arm = 0; arm < 4; arm++) {
-      const angle = (arm + 0.18 + random() * 0.32) * Math.PI / 2;
-      const eu = DESTRUCTION_faceClamp(cu + Math.cos(angle) * 0.85);
-      const ev = DESTRUCTION_faceClamp(cv + Math.sin(angle) * 0.85);
-      let u = cu, v = cv;
-      for (let step = 0; step < 4; step++) {
-        const t = (step + 1) / 4;
-        const nu = DESTRUCTION_faceClamp(cu + (eu - cu) * t + (random() - 0.5) * 0.14 * (1 - t));
-        const nv = DESTRUCTION_faceClamp(cv + (ev - cv) * t + (random() - 0.5) * 0.14 * (1 - t));
-        const i = base + (step * 4 + arm) * 4;
-        DESTRUCTION_crackPatterns[i] = u; DESTRUCTION_crackPatterns[i + 1] = v;
-        DESTRUCTION_crackPatterns[i + 2] = nu; DESTRUCTION_crackPatterns[i + 3] = nv;
-        u = nu; v = nv;
-        if (step === 1 || step === 2) {
-          const j = base + (16 + (step - 1) * 4 + arm) * 4;
-          const branchAngle = angle + (step === 1 ? 1 : -1) * (0.8 + random() * 0.4);
-          const length = 0.14 + random() * 0.12;
-          DESTRUCTION_crackPatterns[j] = u; DESTRUCTION_crackPatterns[j + 1] = v;
-          DESTRUCTION_crackPatterns[j + 2] = DESTRUCTION_faceClamp(u + Math.cos(branchAngle) * length);
-          DESTRUCTION_crackPatterns[j + 3] = DESTRUCTION_faceClamp(v + Math.sin(branchAngle) * length);
-        }
-      }
+/* Eight pixel-art damage stages drawn into 16x16 tiles, the same grain as the
+   block textures. Each stage reveals more of one fixed crack map, so a block
+   visibly breaks up hit by hit instead of growing thin lines. */
+function DESTRUCTION_crackMap() {
+  const SIZE = 16, cells = [], seen = new Set();
+  let seed = 977;
+  const rand = () => { seed = DESTRUCTION_hash(seed + 1); return seed / 4294967296; };
+  const add = (x, y) => {
+    const key = y * SIZE + x;
+    if (x < 0 || y < 0 || x >= SIZE || y >= SIZE || seen.has(key)) return false;
+    seen.add(key);
+    cells.push([x, y]);
+    return true;
+  };
+  // Cracks run out from an off-centre strike point, forking as they go.
+  const walkers = [];
+  for (let i = 0; i < 5; i++) {
+    const a = i * Math.PI * 0.4 + rand() * 0.6;
+    walkers.push({ x: 7, y: 8, dx: Math.cos(a), dy: Math.sin(a) });
+  }
+  for (let step = 0; step < 140 && walkers.length; step++) {
+    const w = walkers[step % walkers.length];
+    w.x += w.dx + (rand() - 0.5) * 0.9;
+    w.y += w.dy + (rand() - 0.5) * 0.9;
+    add(Math.round(w.x), Math.round(w.y));
+    if (rand() < 0.08 && walkers.length < 9) {
+      const a = Math.atan2(w.dy, w.dx) + (rand() < 0.5 ? -1 : 1) * (0.7 + rand() * 0.5);
+      walkers.push({ x: w.x, y: w.y, dx: Math.cos(a), dy: Math.sin(a) });
     }
   }
+  return { SIZE, cells };
+}
+
+function DESTRUCTION_initCracks() {
+  if (DESTRUCTION_crackMaterials) return;
+  const map = DESTRUCTION_crackMap(), SIZE = map.SIZE;
+  DESTRUCTION_crackMaterials = [];
+  for (let stage = 0; stage < VOXEL_CRACK_STAGES; stage++) {
+    const canvas = document.createElement('canvas');
+    canvas.width = canvas.height = SIZE;
+    const g = canvas.getContext('2d');
+    const reveal = (stage + 1) / VOXEL_CRACK_STAGES;
+    const count = Math.ceil(map.cells.length * (0.16 + reveal * 0.84));
+    // A chipped pale lip beside each dark split, as on a stone edge.
+    g.fillStyle = 'rgba(255,244,226,0.22)';
+    for (let i = 0; i < count; i++) g.fillRect(map.cells[i][0] + 1, map.cells[i][1] + 1, 1, 1);
+    // The last stages darken the whole face: the block is about to go.
+    if (reveal > 0.6) { g.fillStyle = 'rgba(8,6,5,' + ((reveal - 0.6) * 0.75).toFixed(3) + ')'; g.fillRect(0, 0, SIZE, SIZE); }
+    g.fillStyle = 'rgba(10,8,7,0.92)';
+    for (let i = 0; i < count; i++) g.fillRect(map.cells[i][0], map.cells[i][1], 1, 1);
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.magFilter = texture.minFilter = THREE.NearestFilter;
+    texture.generateMipmaps = false;
+    DESTRUCTION_crackMaterials.push(new THREE.MeshBasicMaterial({
+      map: texture, transparent: true, depthTest: true, depthWrite: false,
+      polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, toneMapped: false
+    }));
+  }
+  DESTRUCTION_crackGeometry = new THREE.BoxGeometry(1.004, 1.004, 1.004);
 }
 
 function DESTRUCTION_acquireCrack(x, y, z) {
@@ -274,44 +289,28 @@ function DESTRUCTION_acquireCrack(x, y, z) {
   let mesh = DESTRUCTION_crackPool.pop();
   if (!mesh) {
     if (DESTRUCTION_crackMeshCount >= VOXEL_MAX_DAMAGED_BLOCKS) return null;
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(VOXEL_CRACK_VERTICES * 3), 3).setUsage(THREE.DynamicDrawUsage));
-    geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(VOXEL_CRACK_VERTICES * 3), 3).setUsage(THREE.DynamicDrawUsage));
-    geometry.setDrawRange(0, 0);
-    geometry.boundingSphere = DESTRUCTION_crackBounds;
-    mesh = new THREE.Mesh(geometry, DESTRUCTION_crackMaterial);
+    mesh = new THREE.Mesh(DESTRUCTION_crackGeometry, DESTRUCTION_crackMaterials[0]);
     mesh.name = 'voxel-damage-cracks';
     mesh.renderOrder = 3;
     mesh.matrixAutoUpdate = false;
     DESTRUCTION_crackMeshCount++;
   }
-  mesh.position.set(x, y, z);
+  mesh.position.set(x + 0.5, y + 0.5, z + 0.5);
+  // A quarter turn per block, so neighbours don't show the same crack.
+  mesh.rotation.y = (DESTRUCTION_hash(Math.imul(x, 73856093) ^ Math.imul(z, 83492791)) & 3) * Math.PI * 0.5;
   mesh.updateMatrix();
   mesh.visible = false;
   scene.add(mesh);
   return mesh;
 }
 
-function DESTRUCTION_exposedFaces(record) {
-  let mask = 0;
+function DESTRUCTION_exposed(record) {
   for (let fi = 0; fi < FACES.length; fi++) {
     const dir = FACES[fi].dir;
     const neighbor = getBlock(record.x + dir[0], record.y + dir[1], record.z + dir[2]);
-    if (neighbor === AIR || neighbor === WATER || (neighbor === GLASS && record.type !== GLASS)) mask |= 1 << fi;
+    if (neighbor === AIR || neighbor === WATER || (neighbor === GLASS && record.type !== GLASS)) return true;
   }
-  return mask;
-}
-
-function DESTRUCTION_vertex(positions, colors, offset, face, u, v, light) {
-  const origin = face.corners[0], alongU = face.corners[1], alongV = face.corners[3];
-  for (let axis = 0; axis < 3; axis++) {
-    positions[offset + axis] = origin[axis] + (alongU[axis] - origin[axis]) * u +
-      (alongV[axis] - origin[axis]) * v + face.dir[axis] * 0.002;
-  }
-  colors[offset] = light ? 0.34 : 0.012;
-  colors[offset + 1] = light ? 0.30 : 0.010;
-  colors[offset + 2] = light ? 0.24 : 0.009;
-  return offset + 3;
+  return false;
 }
 
 function DESTRUCTION_refreshCrack(record) {
@@ -323,38 +322,9 @@ function DESTRUCTION_refreshCrack(record) {
     mesh.visible = false;
     return;
   }
-  const mask = DESTRUCTION_exposedFaces(record);
-  mesh.visible = mask !== 0;
-  if (!mask || (record.faceMask === mask && record.renderedHealth === record.remaining)) return;
-  const position = mesh.geometry.attributes.position, color = mesh.geometry.attributes.color;
-  const positions = position.array, colors = color.array;
-  const segments = Math.min(VOXEL_CRACK_SEGMENTS, 4 + Math.floor(record.progress * (VOXEL_CRACK_SEGMENTS - 4)));
-  const halfWidth = 0.004 + record.progress * 0.010;
-  let offset = 0;
-  for (let fi = 0; fi < FACES.length; fi++) {
-    if (!(mask & (1 << fi))) continue;
-    const face = FACES[fi];
-    const variant = DESTRUCTION_hash(record.seed ^ Math.imul(fi + 1, 1597334677)) % VOXEL_CRACK_VARIANTS;
-    const base = variant * VOXEL_CRACK_SEGMENTS * 4;
-    for (let segment = 0; segment < segments; segment++) {
-      const i = base + segment * 4, pattern = DESTRUCTION_crackPatterns;
-      const au = pattern[i], av = pattern[i + 1], bu = pattern[i + 2], bv = pattern[i + 3];
-      const du = bu - au, dv = bv - av, length = Math.hypot(du, dv);
-      if (length < 0.0001) continue;
-      const pu = -dv / length * halfWidth, pv = du / length * halfWidth;
-      // One ribbon with a light fractured lip and dark recess. CCW winding in
-      // the face's tangent basis keeps this single-sided and one draw call.
-      offset = DESTRUCTION_vertex(positions, colors, offset, face, au + pu, av + pv, true);
-      offset = DESTRUCTION_vertex(positions, colors, offset, face, au - pu, av - pv, false);
-      offset = DESTRUCTION_vertex(positions, colors, offset, face, bu - pu, bv - pv, false);
-      offset = DESTRUCTION_vertex(positions, colors, offset, face, au + pu, av + pv, true);
-      offset = DESTRUCTION_vertex(positions, colors, offset, face, bu - pu, bv - pv, false);
-      offset = DESTRUCTION_vertex(positions, colors, offset, face, bu + pu, bv + pv, true);
-    }
-  }
-  mesh.geometry.setDrawRange(0, offset / 3);
-  position.needsUpdate = true;
-  color.needsUpdate = true;
-  record.faceMask = mask;
+  mesh.visible = DESTRUCTION_exposed(record);
+  if (record.renderedHealth === record.remaining) return;
+  const stage = Math.max(0, Math.min(VOXEL_CRACK_STAGES - 1, Math.ceil(record.progress * VOXEL_CRACK_STAGES) - 1));
+  mesh.material = DESTRUCTION_crackMaterials[stage];
   record.renderedHealth = record.remaining;
 }

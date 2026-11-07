@@ -1648,6 +1648,7 @@ function handleNet(msg, from, nested) {
       if (!r || r.hp <= 0 || r.deadUntil > performance.now() || r.dragon >= 0 || netRiderMounted(r.id)) break;
       if (netPoseFlag(msg.build, r.build) || !netPoseFlag(msg.combat, r.combat)) break;
       r.lastRx = rxNow;
+      r.shieldUntil = 0;
       netSetRemoteWeapon(r, netPoseWeapon(msg.weapon, r.weapon));
       r.combat = 1;
       r.build = 0;
@@ -1736,6 +1737,7 @@ function handleNet(msg, from, nested) {
       if (r) {
         r.deadUntil = 0;
         r.deathNoted = false;
+        r.shieldUntil = performance.now() + SPAWN_SHIELD_MS;
         r.hp = netPoseNumber(msg.hp, MAX_HEALTH, 1, MAX_HEALTH);
         r.reload = -1;
         r.firePose = r.kick = r.firing = r.aim = 0;
@@ -2300,7 +2302,7 @@ function netMqttDeath(victim, killer, weapon, head) {
 
 function netMqttDamage(attacker, target, amount, weapon, head, eventId, origin) {
   netMqttAdvanceHealth(target);
-  if (target.hp <= 0 || !netEnemies(attacker.id, target.id)) return;
+  if (target.hp <= 0 || !netEnemies(attacker.id, target.id) || performance.now() < (target.shieldUntil || 0)) return;
   const cap = weapon === 'dragon' ? 55 : combatDamageCap(WEAPON_BY_ID[weapon], head);
   amount = Math.round(Math.min(cap, amount) * (weapon === 'dragon' ? 1 : netModeDamage()));
   target.hp = Math.max(0, target.hp - amount);
@@ -2388,6 +2390,7 @@ function netMqttProcess(msg, from, budgeted) {
       if (r.hp <= 0 || !r.combat || r.dragon >= 0 || netMqttReload(r) >= 0 || !netMqttWeaponAllowed(msg.weapon) || msg.weapon !== r.weapon ||
           !netValidPosition(msg) || Math.hypot(msg.x - r.x, msg.y - r.y, msg.z - r.z) >
           10 + Math.min(16, Math.max(0, performance.now() - r.positionAt) * 0.05) || !netMqttFireLock(r, msg, 'shot')) break;
+      r.shieldUntil = 0;   // firing gives up spawn protection
       netMqttAuthority({ t: 'shot', id: r.id, weapon: r.weapon, shotId: msg.shotId,
         x: msg.x, y: msg.y, z: msg.z, yaw: r.yaw, pitch: r.pitch, aim: r.aim,
         firing: 1, combat: 1, build: 0, reload: -1, life: r.life, sid: ++r.outSid });
@@ -2481,6 +2484,7 @@ function netMqttProcess(msg, from, budgeted) {
       }
       r.hp = MAX_HEALTH;
       r.life++;
+      r.shieldUntil = performance.now() + SPAWN_SHIELD_MS;
       r.lastDamageAt = -Infinity;
       r.healthAt = performance.now();
       r.deathReported = false;

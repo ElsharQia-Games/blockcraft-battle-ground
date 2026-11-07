@@ -34,7 +34,7 @@ const characterOutlineVertexShader = `
     // expand behind the eye, or pull the hull forward through the depth buffer.
     float nearPlane = max(outlineNear, 0.0001);
     float nearFade = smoothstep(nearPlane * 1.5, nearPlane * 4.0, -mvPosition.z);
-    float width = clamp(outlineWidth, 0.0, 2.0) * nearFade;
+    float width = clamp(outlineWidth, 0.0, 4.0) * nearFade;
     clipPosition.xy += direction * (2.0 * width / viewport) * max(clipPosition.w, 0.0);
     gl_Position = clipPosition;
     #include <fog_vertex>
@@ -80,11 +80,43 @@ const characterOutlineMaterials = [
 // per avatar: two players wearing the same skin can have different team rims.
 const characterOutlineTeamMaterials = {
   neutral: characterOutlineMaterials,
-  red: [characterOutlineMaterial('red-ink', 0x701c30, 2),
-    characterOutlineMaterial('red-rim', BC.teamColor('red'), 1.1)],
-  blue: [characterOutlineMaterial('blue-ink', 0x163c74, 2),
-    characterOutlineMaterial('blue-rim', BC.teamColor('blue'), 1.1)]
+  red: [characterOutlineMaterial('red-ink', 0x3d0610, 3.4),
+    characterOutlineMaterial('red-rim', 0xff1830, 2.4)],
+  blue: [characterOutlineMaterial('blue-ink', 0x06204a, 3.4),
+    characterOutlineMaterial('blue-rim', 0x1f96ff, 2.4)]
 };
+
+/* A chevron over each player. Allies show through walls so you can find your
+   team; enemies only in plain sight, or it would be a wallhack. */
+function characterMarkerMaterial(color, seeThrough) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 64;
+  const g = canvas.getContext('2d');
+  g.beginPath(); g.moveTo(8, 14); g.lineTo(56, 14); g.lineTo(32, 54); g.closePath();
+  g.lineJoin = 'round'; g.lineWidth = 8; g.strokeStyle = '#04080ccc'; g.stroke();
+  g.fillStyle = color; g.fill();
+  const map = new THREE.CanvasTexture(canvas);
+  return new THREE.SpriteMaterial({ map, transparent: true, depthTest: !seeThrough, depthWrite: false, sizeAttenuation: false, fog: false });
+}
+let characterMarkerMaterials = null;
+
+function setCharacterMarker(peer, enemy) {
+  if (!peer || !peer.group) return;
+  if (!characterMarkerMaterials) {
+    characterMarkerMaterials = { enemy: characterMarkerMaterial('#ff1830', false), ally: characterMarkerMaterial('#1f96ff', true) };
+  }
+  let marker = peer.markerSprite;
+  if (!marker || marker.parent !== peer.group) {
+    marker = peer.markerSprite = new THREE.Sprite(characterMarkerMaterials.enemy);
+    marker.name = 'player-marker';
+    marker.userData.noOutline = true;
+    marker.renderOrder = 6;
+    marker.position.y = 2.55;
+    marker.scale.set(0.032, 0.032, 1);
+    peer.group.add(marker);
+  }
+  marker.material = enemy ? characterMarkerMaterials.enemy : characterMarkerMaterials.ally;
+}
 
 function characterOutlineOptOut(object) {
   const data = object.userData || {};
@@ -310,7 +342,7 @@ function addCharacterOutline(root) {
 function setCharacterOutlineTeam(root, team) {
   const outline = root && root.userData && root.userData.outline;
   if (!outline || !outline.isCharacterOutline) return false;
-  const next = team === 'red' || team === 'blue' ? team : 'neutral';
+  const next = team === 'red' || team === 'blue' ? team : team === 'enemy' ? 'red' : team === 'ally' ? 'blue' : 'neutral';
   if (outline.team === next) return true;
   const materials = characterOutlineTeamMaterials[next];
   for (const mesh of outline.meshes) mesh.material = materials[mesh.userData.layer];
@@ -331,13 +363,15 @@ function updateCharacterOutlines() {
   characterOutlineUniforms.outlineNear.value = Number.isFinite(camera.near) && camera.near > 0 ? camera.near : 0.08;
   const modes = BC.api && BC.api.modes;
   if (typeof localAvatar !== 'undefined' && localAvatar) {
-    setCharacterOutlineTeam(localAvatar, modes && modes.localTeam);
+    setCharacterOutlineTeam(localAvatar, 'ally');
   }
   if (typeof net !== 'undefined' && net && net.players) {
     for (const peer of net.players.values()) {
-      // The authority may reassign teams on joins, departures or mode changes.
-      const team = typeof netTeamFor === 'function' ? netTeamFor(peer.id) : peer.team;
-      setCharacterOutlineTeam(peer.group, team);
+      // Colour says friend or foe, whichever team you are on: blue is always
+      // yours, red always shoots back. Teams can change on joins and mode changes.
+      const friend = typeof combatIsFriendly === 'function' && combatIsFriendly(peer.id, peer.name, peer);
+      setCharacterOutlineTeam(peer.group, friend ? 'ally' : 'enemy');
+      setCharacterMarker(peer, !friend);
     }
   }
 }
