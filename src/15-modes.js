@@ -1270,6 +1270,9 @@ function MODES_beginRound() {
   MODES_winnerId = null;
   MODES_spawnSerial = 0;
   MODES_round = (MODES_round | 0) + 1;
+  // Gun Game climbs on this count, so a new round must start back at the first
+  // gun. In a room the host's count follows straight after.
+  try { kills = deaths = 0; if (typeof setKd === 'function') setKd(); } catch (e) { /* combat not loaded yet */ }
   try { MODES_matchStarted = (BC && typeof BC.now === 'function') ? BC.now() : Date.now(); }
   catch (e) { MODES_matchStarted = Date.now(); }
 }

@@ -148,7 +148,7 @@ function growFlora() {
       const desert = b.heat > 0.56;
       const snowy = h >= snowLineAt(x, z);
       const r = hash2(x * 13 + 7, z * 7 - 3);
-      const cell = (x >> 2) + ',' + (z >> 2);
+      const cell = (x >> 3) + ',' + (z >> 3);
       if (dense.has(cell)) continue;
 
       if (desert) {
@@ -157,13 +157,14 @@ function growFlora() {
         continue;
       }
       if (snowy) {
-        if (r > 0.985) { plantTree(x, z, h); dense.add(cell); }
+        if (r > 0.995) { plantTree(x, z, h); dense.add(cell); }
         continue;
       }
-      if (h <= SEA + 3 && b.heat > 0.42 && r < 0.05) {
+      if (h <= SEA + 3 && b.heat > 0.42 && r < 0.012) {
         plantPalm(x, z, h); dense.add(cell); continue;
       }
-      const chance = b.damp > 0.58 ? 0.07 : 0.018;
+      // Open ground with the odd clump: forests block sightlines and slow fights.
+      const chance = b.damp > 0.58 ? 0.02 : 0.005;
       if (r > 1 - chance) {
         if (plantTree(x, z, h)) { trees.push({ x, z }); dense.add(cell); }
       }
