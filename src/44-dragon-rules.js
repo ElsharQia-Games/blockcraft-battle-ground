@@ -14,14 +14,17 @@
   'use strict';
 
   var drRulesTAU = Math.PI * 2;
-  var drRulesGuardianCount = 4;
+  var drRulesGuardianCount = 6;
+  var drRulesRespawnMs = 60000;
   var drRulesGuardians = [
     { name: 'Emberwing', x: -7, z: -5, rx: 43, rz: 32, rotation: 0.25, altitude: 58, size: 1.38, period: 69, direction: 1, tiltX: 2.1, tiltZ: 1, flap: 2.6, glide: 17 },
     { name: 'Jadewing', x: 11, z: 9, rx: 57, rz: 41, rotation: 1.1, altitude: 64, size: 1.092, period: 83, direction: -1, tiltX: 1, tiltZ: -2.1, flap: 2.25, glide: 19 },
     { name: 'Stormcrest', x: -12, z: 11, rx: 61, rz: 43, rotation: -0.62, altitude: 70, size: 1.224, period: 97, direction: 1, tiltX: 2.4, tiltZ: 0.3, flap: 2.8, glide: 21 },
-    { name: 'Duskmantle', x: 14, z: -11, rx: 46, rz: 57, rotation: 0.8, altitude: 63, size: 1.02, period: 79, direction: -1, tiltX: -1.2, tiltZ: 1.7, flap: 2.4, glide: 16 }
+    { name: 'Duskmantle', x: 14, z: -11, rx: 46, rz: 57, rotation: 0.8, altitude: 63, size: 1.02, period: 79, direction: -1, tiltX: -1.2, tiltZ: 1.7, flap: 2.4, glide: 16 },
+    { name: 'Frostfang', x: 9, z: 13, rx: 72, rz: 50, rotation: 1.9, altitude: 74, size: 1.14, period: 103, direction: 1, tiltX: 1.6, tiltZ: -1.1, flap: 2.5, glide: 18 },
+    { name: 'Ashmaw', x: -13, z: -9, rx: 52, rz: 68, rotation: -1.4, altitude: 67, size: 1.3, period: 91, direction: -1, tiltX: -1.8, tiltZ: 0.9, flap: 2.9, glide: 20 }
   ];
-  var drRulesMountNames = ['Emberglide', 'Jadeglide', 'Stormglide', 'Duskglide'];
+  var drRulesMountNames = ['Emberglide', 'Jadeglide', 'Stormglide', 'Duskglide', 'Frostglide', 'Ashglide'];
 
   function drRulesSeed(seed) {
     return Number.isFinite(seed) ? seed >>> 0 : 0;
@@ -44,7 +47,7 @@
   }
 
   function drRulesCount(seed) {
-    return drRulesGuardianCount + 2 + (drRulesHash(drRulesSeed(seed) + ':mount-dragon-count') & 1);
+    return drRulesGuardianCount + 3 + (drRulesHash(drRulesSeed(seed) + ':mount-dragon-count') & 1);
   }
 
   function drRulesRideable(seed, index) {
@@ -102,15 +105,16 @@
     result.routeFamily = guardian ? 'guardian-orbit' : 'mount-yard';
     result.ambient = true;
     result.rideable = !guardian;
-    result.indestructible = guardian;
-    result.invulnerable = guardian;
+    result.indestructible = false;
+    result.invulnerable = false;
+    result.maxHp = guardian ? 900 : 500;
     result.phase = drRulesPhase(seed, index);
     result.swayPeriod = 9.4 + index * 0.8;
     return Object.freeze(result);
   }
 
   return Object.freeze({
-    guardianCount: drRulesGuardianCount, minMounts: 2, maxMounts: 3,
+    guardianCount: drRulesGuardianCount, minMounts: 3, maxMounts: 4, respawnMs: drRulesRespawnMs,
     count: drRulesCount, isRideable: drRulesRideable, descriptor: drRulesDescriptor
   });
 });

@@ -1027,6 +1027,50 @@ function releaseRide(client, reason) {
   broadcast(ridePacket(lease, false, reason));
 }
 
+/* Dragon health. Clients run the respawn timer themselves from what this sends. */
+let dragonLifeKey = '';
+const dragonLife = new Map();
+
+function dragonLifeEntry(index) {
+  const key = worldSeed + ':' + worldGeneration;
+  if (dragonLifeKey !== key) { dragonLifeKey = key; dragonLife.clear(); }
+  const descriptor = SERVER_DRAGON_RULES.descriptor(worldSeed, index);
+  if (!descriptor) return null;
+  let entry = dragonLife.get(index);
+  if (!entry || (entry.until && nowMs() >= entry.until)) {
+    entry = { hp: descriptor.maxHp, max: descriptor.maxHp, until: 0 };
+    dragonLife.set(index, entry);
+  }
+  return entry;
+}
+
+function dragonLifeSnapshot() {
+  const list = [];
+  for (const [index, entry] of dragonLife) {
+    if (entry.until && nowMs() >= entry.until) continue;
+    if (entry.hp < entry.max) list.push([index, entry.hp, entry.until ? entry.until - nowMs() : 0]);
+  }
+  return { t: 'dragonLife', generation: worldGeneration, list, snapshot: 1 };
+}
+
+function handleDragonHit(client, msg) {
+  const w = SERVER_WEAPONS[msg.weapon];
+  if (!w || !Number.isInteger(msg.dragon) || client.hp <= 0 || client.ride >= 0 || !Number.isFinite(msg.dmg) || msg.dmg <= 0 ||
+      msg.dmg > w.damage || !fireLock(client, msg.weapon, 'hit', msg)) { noteDrop(client); return; }
+  const entry = dragonLifeEntry(msg.dragon);
+  if (!entry || entry.until) return;
+  entry.hp = Math.max(0, entry.hp - msg.dmg);
+  if (entry.hp <= 0) {
+    entry.until = nowMs() + SERVER_DRAGON_RULES.respawnMs;
+    for (const lease of riderLeases.values()) {
+      const rider = clients.get(lease.id);
+      if (lease.index === msg.dragon && rider) releaseRide(rider, 'dragon');
+    }
+  }
+  broadcast({ t: 'dragonLife', generation: worldGeneration, list: [[msg.dragon, entry.hp, entry.until ? SERVER_DRAGON_RULES.respawnMs : 0]],
+    by: entry.hp <= 0 ? client.name : undefined, byId: client.id });
+}
+
 function denyRide(client, index, reason) {
   sendJSON(client, { t: 'rideDenied', id: client.id, riderId: client.id, dragon: index, index, reason,
     generation: worldGeneration, seed: worldSeed, dragonCount: SERVER_DRAGON_RULES.count(worldSeed) });
@@ -1042,7 +1086,7 @@ function handleRide(client, msg) {
     releaseRide(client, 'manual'); return;
   }
   if (index < 0 || poseFlag(msg.active, -1) !== 1 || client.hp <= 0 ||
-      SERVER_MODES[roomMode] ||
+      SERVER_MODES[roomMode] || (dragonLifeEntry(index) || {}).until ||
       !serverDragonRoleMatches(msg, SERVER_DRAGON_RULES.descriptor(worldSeed, index)) ||
       !validPosition(msg.x, msg.y, msg.z) || !Number.isFinite(msg.yaw) || !Number.isFinite(msg.pitch)) {
     denyRide(client, index, 'invalid'); return;
@@ -1085,6 +1129,7 @@ function handleRide(client, msg) {
     noteDrop(client); sendJSON(client, ridePacket(lease, true, 'correction')); return;
   }
   lease.x = msg.x; lease.y = msg.y; lease.z = msg.z;
+  client.x = msg.x; client.y = msg.y; client.z = msg.z; // shots at the rider are judged from here
   lease.yaw = poseYaw(msg.yaw, lease.yaw);
   lease.pitch = poseNumber(msg.pitch, lease.pitch, -1.5, 1.5);
   lease.at = now;
@@ -1239,6 +1284,7 @@ function handleMessage(client, msg, bytes) {
     if (client.historyJob) client.historyTimer = setTimeout(() => flushEditHistory(client), 25);
     for (const lease of riderLeases.values()) sendJSON(client, { ...ridePacket(lease, true, 'snapshot'), t: 'ride' });
     if (client.deathReported && client.deathEvent) sendJSON(client, client.deathEvent);
+    sendJSON(client, dragonLifeSnapshot());
     broadcastState({ t: 'join', player: publicPlayer(client), sid: client.seqOut++, generation: worldGeneration }, client);
     broadcast(matchConfig());
     broadcastRoster();
@@ -1291,6 +1337,7 @@ function handleMessage(client, msg, bytes) {
     if (target.team !== msg.team) setTeam(target, msg.team, client);
     return;
   }
+  if (msg.t === 'dragonHit') { handleDragonHit(client, msg); return; }
   if (msg.t === 'ride') { if (allowState(client)) handleRide(client, msg); return; }
   if (msg.t === 'breath') { handleBreath(client, msg); return; }
 

@@ -619,7 +619,7 @@
     var bestDist = MOUNT_RANGE * MOUNT_RANGE;
     for (var i = 0; i < dragons.length; i++) {
       var dragon = dragons[i];
-      if (!isRideable(dragon) || dragon.group.parent !== scene || dragon.routeReady === false || occupied(dragon)) continue;
+      if (!isRideable(dragon) || dragon.down || dragon.group.parent !== scene || dragon.routeReady === false || occupied(dragon)) continue;
       if (typeof dragon.saddlePos !== 'function') continue;
       dragon.saddlePos(R.saddle);
       var dx = R.saddle.x - player.pos.x;

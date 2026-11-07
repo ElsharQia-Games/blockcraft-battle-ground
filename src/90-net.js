@@ -738,7 +738,7 @@ function netSend(msg) {
     msg.shotId = net.shotId;
     msg.shotAt = performance.now();
   }
-  if (msg.t === 'hit' || msg.t === 'voxelHit') {
+  if (msg.t === 'hit' || msg.t === 'voxelHit' || msg.t === 'dragonHit') {
     if (netLocalRiding()) return false; // breath is NEVER a sniper hit
     msg.shotId = net.shotId || undefined;
     msg.eventId = net.id + ':event:' + (++net.eventSeq);
@@ -1514,6 +1514,9 @@ function handleNet(msg, from, nested) {
       net.warned = true;
       netEmitStatus();
       break;
+    case 'dragonLife':
+      dragonLifeReceive(msg);
+      break;
     case 'leave':
       net.authPlayers.delete(msg.id);
       for (const [index, lease] of net.rides) if (lease.id === msg.id) net.rides.delete(index);
@@ -1938,7 +1941,7 @@ function netMqttAction(type) {
   switch (type) {
     case 'join': case 'state': case 'reload': case 'shot': case 'hit':
     case 'voxelHit': case 'edit': case 'edits': case 'died': case 'respawn':
-    case 'ride': case 'breath': case 'dragons': case 'team': return true;
+    case 'ride': case 'breath': case 'dragons': case 'team': case 'dragonHit': return true;
     default: return false;
   }
 }
@@ -2227,7 +2230,7 @@ function netMqttRide(r, msg) {
       !netValidPosition(msg) || !Number.isFinite(msg.yaw) || !Number.isFinite(msg.pitch) || r.hp <= 0 || NET_MODE_WEAPONS[net.matchMode]) {
     deny('invalid'); return;
   }
-  if (!netDragonRideable(index)) { deny('not rideable'); return; }
+  if (!netDragonRideable(index) || (typeof dragons !== 'undefined' && dragons[index] && dragons[index].down)) { deny('not rideable'); return; }
   let lease = net.rides.get(index);
   if (lease && lease.until <= now) {
     const rider = net.authPlayers.get(lease.id);
@@ -2264,6 +2267,8 @@ function netMqttRide(r, msg) {
     netMqttAuthority(netMqttLeasePacket(lease, true, 'correction'), r.id); return;
   }
   lease.x = msg.x; lease.y = msg.y; lease.z = msg.z;
+  r.x = msg.x; r.y = msg.y; r.z = msg.z;   // shots at the rider are judged from here
+  r.positionAt = performance.now();
   lease.yaw = netPoseYaw(msg.yaw, lease.yaw);
   lease.pitch = netPoseNumber(msg.pitch, lease.pitch, -1.5, 1.5);
   lease.at = now;
@@ -2366,6 +2371,8 @@ function netMqttProcess(msg, from, budgeted) {
     r.name = typeof msg.name === 'string' ? safeName(msg.name).slice(0, 14) : r.name;
     r.character = typeof msg.character === 'string' && Object.prototype.hasOwnProperty.call(CHARACTERS, msg.character) ? msg.character : r.character;
     if (!existed) netMqttAuthority({ t: 'join', player: netMqttPublic(r) });
+    const dragonState = dragonLifeSnapshot();
+    if (dragonState) netMqttAuthority(dragonState, r.id);
     if (current && from === net.hostId) netReceiveDragonCatalog(msg, from);
     mqttAdvertiseConfig();
     mqtt.historyJobs.set(from, { edits: [...net.editHistory.values()].filter(netEditMatches), cursor: 0,
@@ -2407,6 +2414,16 @@ function netMqttProcess(msg, from, budgeted) {
           Math.hypot(target.x - shot.x, target.y + target.bodyHeight * 0.55 - shot.y, target.z - shot.z) > Math.min(w.range, 120) + 2 ||
           !netMqttFireLock(r, msg, 'hit')) break;
       netMqttDamage(r, target, msg.dmg, msg.weapon, head, netToken(msg.eventId), shot);
+      break;
+    }
+    case 'dragonHit': {
+      const w = WEAPON_BY_ID[msg.weapon], index = msg.dragon, shot = r.shots.get(netToken(msg.shotId));
+      if (!Number.isInteger(index) || !w || !shot || r.hp <= 0 || r.dragon >= 0 || !netMqttWeaponAllowed(msg.weapon) || msg.weapon !== r.weapon ||
+          !Number.isFinite(msg.dmg) || msg.dmg <= 0 || msg.dmg > w.damage || !netMqttFireLock(r, msg, 'hit')) break;
+      if (dragonLifeDamage(index, msg.dmg, r.id, r.name)) {
+        const lease = net.rides.get(index), rider = lease && net.authPlayers.get(lease.id);
+        if (rider) netMqttReleaseRide(rider, 'dragon');
+      }
       break;
     }
     case 'voxelHit': {
@@ -2674,7 +2691,7 @@ function roomInbound(from, text) {
     const packet = msg.packet;
     if (!net.authorityReady || msg.epoch !== net.epoch || msg.generation !== net.generation || !netInboundOK(packet)) return;
     if (!['join', 'state', 'states', 'roster', 'health', 'correction', 'shot', 'hit', 'voxelHit', 'edit', 'edits', 'editAck', 'editReject',
-      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'leave', 'teamSet'].includes(packet.t) ||
+      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'dragonLife', 'leave', 'teamSet'].includes(packet.t) ||
       packet.generation !== net.generation || packet.epoch !== net.epoch) return;
     handleNet(packet, from);
   }

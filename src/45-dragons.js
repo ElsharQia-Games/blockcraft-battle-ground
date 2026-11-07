@@ -19,7 +19,13 @@ const DRAGON_PALETTES = [
     crest: 1.3, hornLength: 1.15, span: 0.99, fin: 0.85 },
   { name: 'Duskmantle', skin: 0x4e3d60, dark: 0x302637, belly: 0xbfa493,
     wing: 0xb4867b, wingDark: 0x855667, horn: 0xe4c9af, spine: 0xca9b73, eye: 0xffbe75,
-    crest: 1.12, hornLength: 0.92, span: 1.07, fin: 1.2 }
+    crest: 1.12, hornLength: 0.92, span: 1.07, fin: 1.2 },
+  { name: 'Frostfang', skin: 0x6c8fb0, dark: 0x3f5874, belly: 0xe2eff5,
+    wing: 0xb8d6e6, wingDark: 0x7fa4bf, horn: 0xf4f8fa, spine: 0xcfe9f4, eye: 0x9fe8ff,
+    crest: 1.2, hornLength: 1.25, span: 1.05, fin: 1.0 },
+  { name: 'Ashmaw', skin: 0x33302f, dark: 0x1e1c1c, belly: 0x8c5a3e,
+    wing: 0x5a4a44, wingDark: 0x3a2f2c, horn: 0xc9bda8, spine: 0xd9622a, eye: 0xff7a2e,
+    crest: 0.9, hornLength: 1.1, span: 1.12, fin: 1.1 }
 ];
 const DRAGON_RULES = typeof window !== 'undefined' ? window.BCDragonRules : null;
 // Retain the original inspection name, but shared rules own every route/scale.
@@ -584,7 +590,7 @@ function dragonSyncCollider(dragon, notify = true) {
 
 function dragonLiveCollider(index) {
   const record = DRAGON_COLLIDERS[index];
-  if (!record || !record.active || record.dragon !== dragons[index] || record.dragon.group.parent !== scene) return null;
+  if (!record || !record.active || record.dragon !== dragons[index] || record.dragon.group.parent !== scene || record.dragon.down) return null;
   const group = record.dragon.group, p = group.position, q = group.quaternion;
   if (record.rootX !== p.x || record.rootY !== p.y || record.rootZ !== p.z ||
       record.rootQX !== q.x || record.rootQY !== q.y || record.rootQZ !== q.z || record.rootQW !== q.w) {
@@ -1029,6 +1035,20 @@ function spawnDragons() {
   return dragons;
 }
 
+// A shot-down dragon tumbles out of the sky, then is gone until it respawns.
+function dragonPoseDown(dragon, dt) {
+  const group = dragon.group;
+  if (!group.visible) return;
+  dragon.fall += dt;
+  group.position.y -= dragon.fall * 26 * dt;
+  group.rotation.x += dt * 0.9;
+  group.rotation.z += dt * 0.5;
+  const ground = terrainHeight(Math.floor(group.position.x), Math.floor(group.position.z)) + 1;
+  if (group.position.y > ground && dragon.fall < 5) return;
+  group.visible = false;
+  BC.emit('sfx', { kind: 'land', position: group.position.clone(), volume: 0.9 });
+}
+
 function updateDragons(dt, now) {
   // Clock/route/phase stay absolute and seeded. Only bounded collision response
   // can delay a body; there is no free-running per-peer velocity/random route.
@@ -1037,6 +1057,7 @@ function updateDragons(dt, now) {
   const motion = DRAGON_MOTION_QUERY && DRAGON_MOTION_QUERY.matches ? 0.28 : 1;
   for (let i = 0; i < dragons.length; i++) {
     const dragon = dragons[i], o = dragon.orbit, parts = dragon.parts;
+    if (dragon.down) { dragonPoseDown(dragon, dt); continue; }
     const ridingApi = (typeof BC !== 'undefined' && BC.api) ? BC.api.riding : null;
     if (ridingApi && ((ridingApi.active && ridingApi.dragon === dragon) ||
         (typeof ridingApi.occupied === 'function' && ridingApi.occupied(dragon)))) {

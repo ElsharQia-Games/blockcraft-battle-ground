@@ -39,7 +39,7 @@
      all of this for 93-connection.js. */
 'use strict';
 
-const ROOM_PROTOCOL = 1;           // bump when old and new builds can't share a room
+const ROOM_PROTOCOL = 2;           // bump when old and new builds can't share a room
 const ROOM_BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884/mqtt',
   'wss://broker-cn.emqx.io:8084/mqtt', 'wss://mqtt-dashboard.com:8884/mqtt'];
 const ROOM_STUN = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];

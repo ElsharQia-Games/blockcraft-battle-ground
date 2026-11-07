@@ -147,6 +147,7 @@ const gun = {
 // a sniper headshot is a one-shot kill.
 const MAX_HEALTH = 150;
 const COMBAT_MAX_HIT = 300;
+const COMBAT_RIDER_REACH = 5;
 function combatRegenAllowed() {
   try {
     const def = BC.api && BC.api.modes && BC.api.modes.activeDef;
@@ -1718,10 +1719,15 @@ function rayBox(ox, oy, oz, dx, dy, dz, minX, minY, minZ, maxX, maxY, maxZ) {
   return tmax < 0 ? -1 : tmin;
 }
 
+function combatPeerRiding(r) {
+  return !!r && (r.dragon >= 0 || (typeof netRiderMounted === 'function' && netRiderMounted(r.id)));
+}
+
 function raycastRemote(ox, oy, oz, dx, dy, dz, maxDist, ignoreDragonIndex) {
   let best = null;
   if (typeof net === 'undefined' || !net || !net.players) return null;
   maxDist = Math.min(COMBAT_MAX_WEAPON_RANGE, Math.max(0, Number(maxDist) || 0));
+  const riderReach = maxDist + COMBAT_RIDER_REACH;
   combatDragonRayOrigin.x = ox; combatDragonRayOrigin.y = oy; combatDragonRayOrigin.z = oz;
   combatDragonRayDir.x = dx; combatDragonRayDir.y = dy; combatDragonRayDir.z = dz;
   const dragon = combatRaycastDragon(combatDragonRayOrigin, combatDragonRayDir, maxDist, ignoreDragonIndex);
@@ -1742,8 +1748,11 @@ function raycastRemote(ox, oy, oz, dx, dy, dz, maxDist, ignoreDragonIndex) {
       pos.x - 0.3, pos.y + 0.05, pos.z - 0.3, pos.x + 0.3, pos.y + headBase, pos.z + 0.3);
     const head = rayBox(ox, oy, oz, dx, dy, dz,
       pos.x - 0.24, pos.y + headBase, pos.z - 0.24, pos.x + 0.24, pos.y + top, pos.z + 0.24);
-    if (body >= 0 && body <= maxDist && (!best || body < best.t)) best = { r, t: body, head: false };
-    if (head >= 0 && head <= maxDist && (!best || head < best.t)) best = { r, t: head, head: true };
+    // A rider sits on the dragon's back, so the body can't shield them from every
+    // angle: shots reach them even when the ray has just touched the dragon.
+    const reach = combatPeerRiding(r) ? riderReach : maxDist;
+    if (body >= 0 && body <= reach && (!best || body < best.t)) best = { r, t: body, head: false };
+    if (head >= 0 && head <= reach && (!best || head < best.t)) best = { r, t: head, head: true };
   }
   return best;
 }
@@ -2124,7 +2133,7 @@ function fireOnce() {
   // Establish this shot's weapon/combat state before its hit messages. This is
   // important for firing immediately after cancelling a combat blueprint.
   netSend({ ...combatNetState('shot'), x: from.x, y: from.y, z: from.z });
-  let hitAny = false, hitHead = false, shotTargetId = '', firstHitName = '', shotEnd = null;
+  let hitAny = false, hitDragon = false, hitHead = false, shotTargetId = '', firstHitName = '', shotEnd = null;
   const impactInfo = { weapon: w.id, silent: false };
   for (let i = 0; i < w.pellets; i++) {
     if (obstruction) {
@@ -2151,7 +2160,7 @@ function fireOnce() {
     // rifle/sniper/LMG hits accepted by the room authority.
     const ent = raycastRemote(from.x, from.y, from.z, dir.x, dir.y, dir.z, solid.distance);
     const liveEnt = ent && combatPeerEligible(ent.r, shotAt) &&
-      (solid.kind === 'none' || ent.t < solid.distance - COMBAT_SOLID_RAY_EPS);
+      (solid.kind === 'none' || ent.t < solid.distance - COMBAT_SOLID_RAY_EPS || (solid.kind === 'dragon' && combatPeerRiding(ent.r)));
     const end = from.clone().addScaledVector(dir, liveEnt ? ent.t : solid.distance);
     addTracer(from, end);
     if (!shotEnd) shotEnd = end.clone();
@@ -2173,8 +2182,10 @@ function fireOnce() {
       addImpact(end, '#b83030', impactInfo);
       impactInfo.silent = true;
     } else if (solid.kind === 'dragon') {
-      // Both classes are indestructible noncombatants. Stop the ray and play
-      // existing impact FX/SFX without a hit packet, HP mutation or kill credit.
+      if (typeof dragonLifeShot === 'function' && dragonLifeShot(solid.dragonIndex, Math.round(w.damage), w.id)) {
+        if (!impactInfo.silent) combatEmit('sfx', { kind: 'dragonHit', position: end.clone(), volume: 0.7 });
+        hitDragon = true;
+      }
       addImpact(end, '#e8af57', impactInfo);
       impactInfo.silent = true;
     } else if (solid.block) {
@@ -2203,7 +2214,7 @@ function fireOnce() {
     hit: hitAny, head: hitHead, targetId: shotTargetId || null
   });
 
-  if (hitAny) flashHitmarker(hitHead);
+  if (hitAny || hitDragon) flashHitmarker(hitHead);
   muzzleBurst(obstruction ? obstruction.from : from);
   const spatialAudio = combatApi('audio');
   if (!(spatialAudio && spatialAudio.available)) playShot(w);
