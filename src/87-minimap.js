@@ -823,7 +823,8 @@
     if (reason) { miniSetShown(false, reason); return false; }
     if (!miniEnsureDOM() || !miniCtx) { miniSetShown(false, 'no-canvas'); return false; }
     if (!miniCacheValid) { miniSetShown(false, miniPending ? 'mapping' : 'no-terrain'); return false; }
-    if (now - miniLastTick < MINI_DRAW_MS) return miniShown;
+    var drawMs = miniBC.api.graphics && miniBC.api.graphics.quality === 'low' ? 100 : MINI_DRAW_MS;
+    if (now - miniLastTick < drawMs) return miniShown;
     if (!miniShown && miniReason === 'space' && !miniLayoutDirty && now - miniLayoutAt < 1000) return false;
     miniLastTick = now;
     if ((miniLayoutDirty || now - miniLayoutAt >= 1000 || !miniShown) && !miniLayout(now)) {

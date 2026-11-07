@@ -120,12 +120,17 @@ function gfxApplyView() {
   sky.scale.setScalar((v.clip * 0.9) / 700);
 }
 
+// Fast draws at about phone-screen size; a 3x phone at full density is 9x the pixels.
+function gfxPixelRatio() {
+  return Math.min(window.devicePixelRatio || 1, gfx.quality === 'high' ? 2 : 1);
+}
+
 function gfxSetQuality(q) {
   gfx.quality = q === 'low' ? 'low' : 'high';
   gfxApplyView();
   try { localStorage.setItem('blockcraft.gfx', gfx.quality); } catch (e) { /* optional */ }
   gfxConfigureShadows(gfx.quality === 'high');
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, gfx.quality === 'high' ? 2 : 1.25));
+  renderer.setPixelRatio(gfxPixelRatio());
   renderer.setSize(window.innerWidth, window.innerHeight);
   return gfx.quality;
 }
@@ -152,5 +157,6 @@ BC.api.graphics = {
   get quality() { return gfx.quality; },
   get shadows() { return gfx.shadows; },
   get envMap() { return gfx.envMap; },
+  pixelRatio: gfxPixelRatio,
   setQuality: gfxSetQuality
 };

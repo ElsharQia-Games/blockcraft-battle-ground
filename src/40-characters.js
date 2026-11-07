@@ -4387,6 +4387,8 @@ function updateCritters(dt) {
     const dx = c.x - px, dz = c.z - pz;
     const far = dx * dx + dz * dz > farSq;
     c.group.visible = !far;
+    // Hidden bodies still cost a matrix walk per joint unless this is off too.
+    c.group.matrixWorldAutoUpdate = !far;
     if (far) continue;
 
     if (!Number.isFinite(c.vx)) c.vx = 0;

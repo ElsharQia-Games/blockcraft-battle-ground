@@ -1031,11 +1031,11 @@ function MODES_buildVisuals(cx, cz, baseY, radius) {
     group.name = 'bc-arena-visuals';
 
     MODES_ringRedMat = new THREE.MeshBasicMaterial({
-      color: 0xff3556, transparent: true, opacity: 0.34, side: THREE.DoubleSide,
+      color: 0xff3556, transparent: true, opacity: 0.34, side: THREE.DoubleSide, forceSinglePass: true,
       depthWrite: false, blending: THREE.AdditiveBlending, fog: false
     });
     MODES_ringBlueMat = new THREE.MeshBasicMaterial({
-      color: 0x3585ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide,
+      color: 0x3585ff, transparent: true, opacity: 0.22, side: THREE.DoubleSide, forceSinglePass: true,
       depthWrite: false, blending: THREE.AdditiveBlending, fog: false
     });
 

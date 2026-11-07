@@ -482,7 +482,7 @@ function jetEnsureRigAssets() {
 function jetCreateFlameMaterial(color, opacity) {
   return new THREE.MeshBasicMaterial({
     color: color, transparent: true, opacity: opacity,
-    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide
+    blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, forceSinglePass: true
   });
 }
 

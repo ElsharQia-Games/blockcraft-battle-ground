@@ -92,12 +92,12 @@ function buildChunkGeometry(cx, cz, pass) {
 const solidMaterial = new THREE.MeshLambertMaterial({ map: atlasTexture, vertexColors: true });
 const glassMaterial = new THREE.MeshPhongMaterial({
   map: atlasTexture, vertexColors: true, transparent: true,
-  side: THREE.DoubleSide, depthWrite: false,
+  side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true,
   specular: 0xffffff, shininess: 120, reflectivity: 0.45, combine: THREE.MixOperation
 });
 const waterMaterial = new THREE.MeshPhongMaterial({
   map: atlasTexture, vertexColors: true, transparent: true, opacity: 0.8,
-  side: THREE.DoubleSide, depthWrite: false,
+  side: THREE.DoubleSide, depthWrite: false, forceSinglePass: true,
   specular: 0xcfe6ff, shininess: 90, reflectivity: 0.38, combine: THREE.MixOperation
 });
 
