@@ -30,6 +30,8 @@
   var MAX_DISTANCE = 90;
   var ROLLOFF = 1.35;
   var MAX_POOL = 20;
+  var LIMITER_TRIM = 1.53;
+  var BASS_HZ = 110;
 
   var ctx = null;
   var master = null;
@@ -174,13 +176,19 @@
         output = outputGuard;
       } catch (guardError) { outputGuard = null; }
       try {
+        // Only catches the loudest peaks, so gunshots keep their punch. The trim
+        // keeps quiet sounds (footsteps, UI) exactly as loud as they were under
+        // the older, tighter settings: the compressor's own makeup gain is lower.
         limiter = ctx.createDynamicsCompressor();
-        limiter.threshold.value = -16;
-        limiter.knee.value = 12;
-        limiter.ratio.value = 8;
-        limiter.attack.value = 0.003;
-        limiter.release.value = 0.18;
-        master.connect(limiter);
+        limiter.threshold.value = -8;
+        limiter.knee.value = 8;
+        limiter.ratio.value = 4;
+        limiter.attack.value = 0.008;
+        limiter.release.value = 0.12;
+        var trim = ctx.createGain();
+        trim.gain.value = LIMITER_TRIM;
+        master.connect(trim);
+        trim.connect(limiter);
         limiter.connect(output);
       } catch (e) {
         limiter = null;
@@ -437,6 +445,14 @@
       chain.filter.Q.value = 0.6;
       chain.filter.frequency.value = 8000;
     } catch (e) { chain.filter = null; }
+    try {
+      // Weight for guns, hits and dragons, set per sound in play().
+      chain.bass = ctx.createBiquadFilter();
+      chain.bass.type = 'lowshelf';
+      chain.bass.frequency.value = BASS_HZ;
+      chain.bass.gain.value = 0;
+      chain.bass.connect(chain.filter || chain.gain);
+    } catch (e) { chain.bass = null; }
 
     if (typeof ctx.createPanner === 'function') {
       try {
@@ -488,6 +504,7 @@
   function destroyChain(chain) {
     try { if (chain.src) { chain.src.onended = null; chain.src.disconnect(); } } catch (e) { /* ignore */ }
     try { if (chain.filter) chain.filter.disconnect(); } catch (e2) { /* ignore */ }
+    try { if (chain.bass) chain.bass.disconnect(); } catch (e2) { /* ignore */ }
     try { if (chain.gain) chain.gain.disconnect(); } catch (e3) { /* ignore */ }
     try { if (chain.panner) chain.panner.disconnect(); } catch (e4) { /* ignore */ }
     try { if (chain.stereo) chain.stereo.disconnect(); } catch (e5) { /* ignore */ }
@@ -621,18 +638,18 @@
   /* vol is the mix level of the levelled recording. The other fields only
      shape the synthesized fallback report. */
   var SHOT_SPEC = {
-    pistol:   { vol: 0.85, dur: 0.32, cut: 6200, thump: 165, decay: 5.0, crack: 0.005, crackAmp: 0.60, thumpAmp: 0.38, drive: 1.35 },
-    rifle:    { vol: 0.77, dur: 0.28, cut: 7200, thump: 155, decay: 6.0, crack: 0.004, crackAmp: 0.58, thumpAmp: 0.28, drive: 1.30 },
-    shotgun:  { vol: 0.94, dur: 0.50, cut: 3100, thump:  88, decay: 3.2, crack: 0.010, crackAmp: 0.58, thumpAmp: 0.60, drive: 1.45 },
-    smg:      { vol: 0.72, dur: 0.21, cut: 7900, thump: 205, decay: 7.2, crack: 0.003, crackAmp: 0.48, thumpAmp: 0.22, drive: 1.20 },
-    sniper:   { vol: 0.95, dur: 0.64, cut: 4300, thump:  76, decay: 3.4, crack: 0.009, crackAmp: 0.80, thumpAmp: 0.65, drive: 1.45 },
-    revolver: { vol: 0.80, dur: 0.40, cut: 5600, thump: 123, decay: 4.2, crack: 0.007, crackAmp: 0.70, thumpAmp: 0.48, drive: 1.40 },
-    lmg:      { vol: 0.79, dur: 0.42, cut: 4800, thump: 102, decay: 4.8, crack: 0.006, crackAmp: 0.62, thumpAmp: 0.46, drive: 1.35 },
-    dmr:      { vol: 0.80, dur: 0.46, cut: 5200, thump: 118, decay: 4.2, crack: 0.006, crackAmp: 0.68, thumpAmp: 0.44, drive: 1.35 },
-    burst:    { vol: 0.74, dur: 0.24, cut: 6800, thump: 150, decay: 6.4, crack: 0.004, crackAmp: 0.58, thumpAmp: 0.28, drive: 1.30 },
-    machinepistol: { vol: 0.62, dur: 0.15, cut: 8400, thump: 225, decay: 8.5, crack: 0.003, crackAmp: 0.46, thumpAmp: 0.18, drive: 1.20 },
-    doublebarrel:  { vol: 0.95, dur: 0.62, cut: 2800, thump:  76, decay: 2.9, crack: 0.012, crackAmp: 0.60, thumpAmp: 0.70, drive: 1.50 },
-    crossbow: { vol: 0.31, dur: 0.30, cut: 2600, thump: 190, decay: 7.0, crack: 0.003, crackAmp: 0.22, thumpAmp: 0.30, drive: 1.10 }
+    pistol:   { vol: 0.85, bass: 5, dur: 0.32, cut: 6200, thump: 165, decay: 5.0, crack: 0.005, crackAmp: 0.60, thumpAmp: 0.38, drive: 1.35 },
+    rifle:    { vol: 0.77, bass: 5, dur: 0.28, cut: 7200, thump: 155, decay: 6.0, crack: 0.004, crackAmp: 0.58, thumpAmp: 0.28, drive: 1.30 },
+    shotgun:  { vol: 0.94, bass: 7, dur: 0.50, cut: 3100, thump:  88, decay: 3.2, crack: 0.010, crackAmp: 0.58, thumpAmp: 0.60, drive: 1.45 },
+    smg:      { vol: 0.72, bass: 3.5, dur: 0.21, cut: 7900, thump: 205, decay: 7.2, crack: 0.003, crackAmp: 0.48, thumpAmp: 0.22, drive: 1.20 },
+    sniper:   { vol: 0.95, bass: 8, dur: 0.64, cut: 4300, thump:  76, decay: 3.4, crack: 0.009, crackAmp: 0.80, thumpAmp: 0.65, drive: 1.45 },
+    revolver: { vol: 0.80, bass: 6.5, dur: 0.40, cut: 5600, thump: 123, decay: 4.2, crack: 0.007, crackAmp: 0.70, thumpAmp: 0.48, drive: 1.40 },
+    lmg:      { vol: 0.79, bass: 6, dur: 0.42, cut: 4800, thump: 102, decay: 4.8, crack: 0.006, crackAmp: 0.62, thumpAmp: 0.46, drive: 1.35 },
+    dmr:      { vol: 0.80, bass: 6, dur: 0.46, cut: 5200, thump: 118, decay: 4.2, crack: 0.006, crackAmp: 0.68, thumpAmp: 0.44, drive: 1.35 },
+    burst:    { vol: 0.74, bass: 4.5, dur: 0.24, cut: 6800, thump: 150, decay: 6.4, crack: 0.004, crackAmp: 0.58, thumpAmp: 0.28, drive: 1.30 },
+    machinepistol: { vol: 0.62, bass: 2.5, dur: 0.15, cut: 8400, thump: 225, decay: 8.5, crack: 0.003, crackAmp: 0.46, thumpAmp: 0.18, drive: 1.20 },
+    doublebarrel:  { vol: 0.95, bass: 8, dur: 0.62, cut: 2800, thump:  76, decay: 2.9, crack: 0.012, crackAmp: 0.60, thumpAmp: 0.70, drive: 1.50 },
+    crossbow: { vol: 0.31, bass: 2, dur: 0.30, cut: 2600, thump: 190, decay: 7.0, crack: 0.003, crackAmp: 0.22, thumpAmp: 0.30, drive: 1.10 }
   };
   var SHOT_IDS = { pistol: 1, rifle: 1, shotgun: 1, smg: 1, sniper: 1, revolver: 1, lmg: 1,
     dmr: 1, burst: 1, machinepistol: 1, doublebarrel: 1, crossbow: 1 };
@@ -666,40 +683,40 @@
      solo: heard only by this player, so it stays centred. priority: bypasses
      the duck bus and dips the rest of the mix to that gain. */
   var KIND_SPEC = {
-    impact:      { playCut: 7000, vol: 0.34, ref: 0.5, variants: 3 },
-    hit:         { playCut: 9000, vol: 0.78, ref: 0.9, variants: 2, solo: 1, priority: 0.62 },
-    reload:      { playCut: 9000, vol: 0.42, ref: 0.5, variants: 2, fixedRate: 1, solo: 1 },
-    pump:        { playCut: 9000, vol: 0.44, ref: 0.36, variants: 2, fixedRate: 1 },
-    bolt:        { playCut: 9000, vol: 0.44, ref: 0.36, variants: 2, fixedRate: 1 },
-    cylinder:    { playCut: 9000, vol: 0.30, ref: 0.24, variants: 2, fixedRate: 1 },
-    death:       { playCut: 6000, vol: 0.62, ref: 0.9, variants: 2 },
-    respawn:     { playCut: 9000, vol: 0.30, ref: 0.5, variants: 2, solo: 1 },
-    splash:      { playCut: 7000, vol: 0.34, ref: 0.55, variants: 2 },
+    impact:      { playCut: 16000, bass: 3, vol: 0.34, ref: 0.5, variants: 3 },
+    hit:         { playCut: 18000, bass: 3, vol: 0.78, ref: 0.9, variants: 2, solo: 1, priority: 0.62 },
+    reload:      { playCut: 18000, vol: 0.42, ref: 0.5, variants: 2, fixedRate: 1, solo: 1 },
+    pump:        { playCut: 18000, vol: 0.44, ref: 0.36, variants: 2, fixedRate: 1 },
+    bolt:        { playCut: 18000, vol: 0.44, ref: 0.36, variants: 2, fixedRate: 1 },
+    cylinder:    { playCut: 18000, vol: 0.30, ref: 0.24, variants: 2, fixedRate: 1 },
+    death:       { playCut: 14000, bass: 3, vol: 0.62, ref: 0.9, variants: 2 },
+    respawn:     { playCut: 18000, vol: 0.30, ref: 0.5, variants: 2, solo: 1 },
+    splash:      { playCut: 16000, bass: 2, vol: 0.34, ref: 0.55, variants: 2 },
     jetpackLoop: { playCut: 1800, vol: 0.40, variants: 1 },
-    dragonRoar:  { playCut: 7000, vol: 0.90, ref: 0.7, variants: 2 },
-    dragonBreath:{ playCut: 7000, vol: 0.74, ref: 0.7, variants: 2 },
-    dragonHit:   { playCut: 9000, vol: 0.40, ref: 0.7, variants: 3 },
-    dragonDeath: { playCut: 8000, vol: 0.95, ref: 1, variants: 1 },
+    dragonRoar:  { playCut: 16000, bass: 6, vol: 0.90, ref: 0.7, variants: 2 },
+    dragonBreath:{ playCut: 16000, bass: 3, vol: 0.74, ref: 0.7, variants: 2 },
+    dragonHit:   { playCut: 18000, bass: 4, vol: 0.40, ref: 0.7, variants: 3 },
+    dragonDeath: { playCut: 16000, bass: 6, vol: 0.95, ref: 1, variants: 1 },
     dragonSpawn: { playCut: 3200, vol: 0.62, ref: 0.6, variants: 1 },
     wingFlap:    { playCut: 5000, vol: 0.52, ref: 0.6, variants: 3 },
-    shield:      { playCut: 9000, vol: 0.13, ref: 0.5, variants: 1, solo: 1 },
-    shieldBlock: { playCut: 12000, vol: 0.32, ref: 0.5, variants: 2 },
-    killcam:     { playCut: 6000, vol: 0.34, ref: 0.9, variants: 1, solo: 1 },
+    shield:      { playCut: 18000, vol: 0.13, ref: 0.5, variants: 1, solo: 1 },
+    shieldBlock: { playCut: 20000, vol: 0.32, ref: 0.5, variants: 2 },
+    killcam:     { playCut: 14000, vol: 0.34, ref: 0.9, variants: 1, solo: 1 },
     heartbeat:   { playCut: 1500, vol: 0.34, ref: 0.16, variants: 1, solo: 1, fixedRate: 1 },
-    confirm:     { playCut: 12000, vol: 0.85, ref: 0.5, variants: 1, solo: 1, priority: 0.56 },
-    headshot:    { playCut: 12000, vol: 0.56, ref: 0.32, variants: 1, solo: 1, priority: 0.62 },
-    hitConfirm:  { playCut: 12000, vol: 0.66, ref: 0.2, variants: 1, solo: 1, priority: 0.74 },
-    swap:        { playCut: 9000, vol: 0.32, ref: 0.4, variants: 2, solo: 1 },
-    combatMode:  { playCut: 9000, vol: 0.20, ref: 0.2, variants: 1, solo: 1 },
-    break:       { playCut: 7000, vol: 0.34, ref: 0.42, variants: 1 },
-    dryfire:     { playCut: 9000, vol: 0.30, ref: 0.3, variants: 1, solo: 1 },
+    confirm:     { playCut: 20000, vol: 0.85, ref: 0.5, variants: 1, solo: 1, priority: 0.56 },
+    headshot:    { playCut: 20000, vol: 0.56, ref: 0.32, variants: 1, solo: 1, priority: 0.62 },
+    hitConfirm:  { playCut: 20000, vol: 0.66, ref: 0.2, variants: 1, solo: 1, priority: 0.74 },
+    swap:        { playCut: 18000, vol: 0.32, ref: 0.4, variants: 2, solo: 1 },
+    combatMode:  { playCut: 18000, vol: 0.20, ref: 0.2, variants: 1, solo: 1 },
+    break:       { playCut: 16000, bass: 3, vol: 0.34, ref: 0.42, variants: 1 },
+    dryfire:     { playCut: 18000, vol: 0.30, ref: 0.3, variants: 1, solo: 1 },
     step:        { playCut: 3800, vol: 0.08, variants: 1 },
     land:        { playCut: 1600, vol: 0.15, variants: 1 },
-    ui:          { playCut: 9000, vol: 0.14, ref: 0.35, variants: 2, solo: 1 },
-    knifeEquip:  { playCut: 9000, vol: 0.30, ref: 0.4, variants: 1, solo: 1 },
-    knifeSlash:  { playCut: 9000, vol: 0.60, ref: 0.5, variants: 3 },
-    knifeStab:   { playCut: 9000, vol: 0.50, ref: 0.5, variants: 2 },
-    knifeHit:    { playCut: 9000, vol: 0.46, ref: 0.5, variants: 2 }
+    ui:          { playCut: 18000, vol: 0.14, ref: 0.35, variants: 2, solo: 1 },
+    knifeEquip:  { playCut: 18000, vol: 0.30, ref: 0.4, variants: 1, solo: 1 },
+    knifeSlash:  { playCut: 18000, vol: 0.60, ref: 0.5, variants: 3 },
+    knifeStab:   { playCut: 18000, vol: 0.50, ref: 0.5, variants: 2 },
+    knifeHit:    { playCut: 18000, bass: 3, vol: 0.46, ref: 0.5, variants: 2 }
   };
 
   var KIND_ALIAS = {
@@ -1458,13 +1475,13 @@
       }
 
       var gainValue = hasPos ? vol * tailFade(spDist) * (spOccluded ? 0.55 : 1) : vol;
-      var playCut = kind === 'shot' ? 9000 : (spec.playCut || 4000);
+      var playCut = kind === 'shot' ? 20000 : (spec.playCut || 4000);
       var cut = playCut;
       if (hasPos) {
         cut = playCut * (0.18 + 0.82 * (1 - Math.min(1, spDist / MAX_DISTANCE)));
         if (spOccluded) cut *= 0.38;
       }
-      cut = clamp(cut, 180, 12000);
+      cut = clamp(cut, 180, 20000);
 
       var team = resolveTeam(info);
       var rate = 1;
@@ -1508,11 +1525,12 @@
       chain.effective = gainValue * (chain.panner && hasPos ?
         REF_DISTANCE / (REF_DISTANCE + ROLLOFF * Math.max(0, spDist - REF_DISTANCE)) : 1);
       chain.stopAt = 0;
-      try { src.connect(chain.filter || chain.gain); } catch (e2) {
+      try { src.connect(chain.bass || chain.filter || chain.gain); } catch (e2) {
         recycleChain(chain);
         return false;
       }
       if (chain.filter) setParam(chain.filter.frequency, cut);
+      if (chain.bass) setParam(chain.bass.gain, spec.bass || 0);
       if (hasPos) setPannerPosition(chain, posX, posY, posZ);
       else setPannerPosition(chain, lx, ly, lz);
       if (chain.stereo) setParam(chain.stereo.pan, hasPos ? spPan : 0);
