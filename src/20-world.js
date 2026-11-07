@@ -157,14 +157,14 @@ function growFlora() {
         continue;
       }
       if (snowy) {
-        if (r > 0.995) { plantTree(x, z, h); dense.add(cell); }
+        if (r > 0.997) { plantTree(x, z, h); dense.add(cell); }
         continue;
       }
-      if (h <= SEA + 3 && b.heat > 0.42 && r < 0.012) {
+      if (h <= SEA + 3 && b.heat > 0.42 && r < 0.006) {
         plantPalm(x, z, h); dense.add(cell); continue;
       }
       // Open ground with the odd clump: forests block sightlines and slow fights.
-      const chance = b.damp > 0.58 ? 0.02 : 0.005;
+      const chance = b.damp > 0.58 ? 0.008 : 0.002;
       if (r > 1 - chance) {
         if (plantTree(x, z, h)) { trees.push({ x, z }); dense.add(cell); }
       }

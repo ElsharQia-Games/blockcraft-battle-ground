@@ -162,6 +162,9 @@ const MODES_arena = {
 let MODES_centreCache = null;
 const MODES_ledger = [];
 const MODES_LEDGER_LIMIT = 40000;
+const MODES_SPAWN_NEAR = 22;      // closer than this to an enemy is never chosen unless forced
+const MODES_SPAWN_IDEAL = 50;     // a short run from the fight
+const MODES_SPAWN_TRIES = 12;
 let MODES_ledgerSeed = -1;
 let MODES_generationSeen = -1;
 let MODES_builtKey = '';
@@ -920,6 +923,21 @@ function MODES_buildArena() {
   MODES_pads = { red: null, blue: null };
   MODES_gates.length = 0;
   MODES_ledgerSeed = SEED;
+  // Start from bare ground: world structures and trees inside would favour one
+  // side, and these lanes are mirrored for fairness.
+  for (let x = cx - outer; x <= cx + outer; x++) {
+    for (let z = cz - outer; z <= cz + outer; z++) {
+      if (Math.hypot(x - cx, z - cz) >= radius - 4.5) continue;
+      const g = terrainHeight(x, z);
+      for (let y = g + 1, top = Math.min(HEIGHT - 1, g + 16); y <= top; y++) {
+        const b = getBlock(x, y, z);
+        if (b === AIR || b === WATER) continue;
+        // The surface can sit one block above the noise height: leave the ground.
+        if (y === g + 1 && (b === GRASS || b === DIRT || b === SAND || b === SNOW || b === STONE)) continue;
+        MODES_edit(x, y, z, AIR);
+      }
+    }
+  }
   // Reserve the safe side spawns first; a bounded ledger can never leave the
   // spawn pads unbuilt after spending its budget on a perimeter foundation.
   const padDist = radius * 0.55;
@@ -1121,21 +1139,85 @@ function MODES_scanGround(px, pz, maxR) {
   return null;
 }
 
+/* ---------------- choosing a safe spawn ---------------- */
+function MODES_livePeers() {
+  const list = [];
+  try {
+    for (const r of net.players.values()) {
+      const pos = r.group && r.group.position;
+      if (!pos || r.hp <= 0 || r.group.visible === false) continue;
+      list.push({ x: pos.x, y: pos.y, z: pos.z, friend: typeof combatIsFriendly === 'function' && combatIsFriendly(r.id, r.name, r) });
+    }
+  } catch (e) { /* net not ready */ }
+  return list;
+}
+
+function MODES_clearSight(ax, ay, az, bx, by, bz) {
+  const dist = Math.hypot(bx - ax, by - ay, bz - az), steps = Math.ceil(dist);
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    if (isOpaque(Math.floor(ax + (bx - ax) * t), Math.floor(ay + (by - ay) * t), Math.floor(az + (bz - az) * t))) return false;
+  }
+  return true;
+}
+
+function MODES_faceFrom(spot, peers) {
+  let tx = WORLD / 2, tz = WORLD / 2, best = Infinity;
+  if (MODES_arena.active) { tx = MODES_arena.cx; tz = MODES_arena.cz; }
+  for (const p of peers) {
+    const d = Math.hypot(p.x - spot.x, p.z - spot.z);
+    if (!p.friend && d < best) { best = d; tx = p.x; tz = p.z; }
+  }
+  spot.yaw = Math.atan2(spot.x - tx, spot.z - tz);
+  return spot;
+}
+
+// Near enough to be back in the fight, never in anyone's sights.
+function MODES_spawnScore(spot, peers) {
+  let nearest = Infinity, score = Math.random() * 6;
+  for (const p of peers) {
+    const d = Math.hypot(p.x - spot.x, p.z - spot.z);
+    if (p.friend) { if (d < 30) score += 8; continue; }
+    nearest = Math.min(nearest, d);
+    if (d < 100 && MODES_clearSight(spot.x, spot.y + 1.6, spot.z, p.x, p.y + 1.6, p.z)) score -= 70;
+  }
+  if (nearest < MODES_SPAWN_NEAR) score -= 200 - nearest;
+  else if (nearest !== Infinity) score -= Math.abs(nearest - MODES_SPAWN_IDEAL) * 0.6;
+  return score;
+}
+
+function MODES_bestSpawn(points) {
+  const peers = MODES_livePeers();
+  let best = null, bestScore = -Infinity;
+  for (let i = points.length - 1, tries = 0; i >= 0 && tries < MODES_SPAWN_TRIES; i--, tries++) {
+    const pick = Math.floor(Math.random() * (i + 1)), point = points[pick];
+    points[pick] = points[i]; points[i] = point;
+    const spot = MODES_scanGround(point.x, point.z, 6);
+    if (!spot) continue;
+    const score = MODES_spawnScore(spot, peers);
+    if (score > bestScore) { bestScore = score; best = spot; }
+  }
+  return best ? MODES_faceFrom(best, peers) : null;
+}
+
 function MODES_respawnPoint(team) {
   if (MODES_arena.active) {
     const serial = MODES_spawnSerial++;
     const wanted = (team === 'red' || team === 'blue') ? team : null;
     let pad = wanted ? MODES_pads[wanted] : null;
     if (!wanted) {
-      let hash = serial;
-      try { if (typeof BC.hashSeed === 'function') hash = BC.hashSeed(MODES_localId() + '|' + serial) >>> 0; }
-      catch (e) { /* alternate when the optional hash is unavailable */ }
-      const pick = (hash & 1) ? MODES_pads.blue : MODES_pads.red;
-      const other = pick === MODES_pads.red ? MODES_pads.blue : MODES_pads.red;
-      pad = MODES_padValid(pick) ? pick : MODES_padValid(other) ? other : null;
+      // Every player for themselves: anywhere around the ring, away from gates.
+      const ring = [];
+      for (let i = 0; i < 12; i++) {
+        const a = (i + 0.5) * Math.PI / 6;
+        ring.push({ x: MODES_arena.cx + Math.cos(a) * MODES_arena.radius * 0.72, z: MODES_arena.cz + Math.sin(a) * MODES_arena.radius * 0.72 });
+      }
+      const spot = MODES_bestSpawn(ring);
+      if (spot) return spot;
+      pad = MODES_padValid(MODES_pads.red) ? MODES_pads.red : MODES_pads.blue;
     }
     if (!MODES_padValid(pad)) pad = null; // scan the correct team side before any central fallback
-    if (pad) return MODES_padSpawn(pad, serial);
+    if (pad) return MODES_faceFrom(MODES_padSpawn(pad, serial), MODES_livePeers());
 
     const angle = wanted === 'blue' ? 0
       : wanted === 'red' ? Math.PI
@@ -1152,6 +1234,10 @@ function MODES_respawnPoint(team) {
     return { x: MODES_arena.cx, y: HEIGHT + 2, z: MODES_arena.cz };
   }
 
+  if (typeof battleSpawnPoints !== 'undefined' && battleSpawnPoints.length) {
+    const spot = MODES_bestSpawn(battleSpawnPoints);
+    if (spot) return spot;
+  }
   if (typeof findSpawn === 'function') {
     try {
       const spawn = findSpawn();

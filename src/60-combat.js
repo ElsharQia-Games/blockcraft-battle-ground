@@ -2329,6 +2329,7 @@ function doRespawn() {
   if (!spawn || !Number.isFinite(spawn.x) || !Number.isFinite(spawn.y) || !Number.isFinite(spawn.z)) spawn = findSpawn();
   player.pos.set(spawn.x, spawn.y, spawn.z);
   player.vel.set(0, 0, 0);
+  if (Number.isFinite(spawn.yaw)) { player.yaw = spawn.yaw; player.pitch = 0; }
   if (typeof resetPlayerMotion === 'function') resetPlayerMotion();
   if (typeof resetBuildingInput === 'function') resetBuildingInput();
   health = MAX_HEALTH;

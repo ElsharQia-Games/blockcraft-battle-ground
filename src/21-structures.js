@@ -1,9 +1,10 @@
 /* Blockcraft Battle Ground — fighting structures.
    21-structures.js (after 20-world.js, whose terrain/hash helpers it uses;
    15-modes.js calls STRUCT_buildArenaCover while building an arena)
-   Every world gets battle sites spread across the map: watchtowers, walled
-   compounds, ruins and sandbag trench lines. Locked-arena modes add a
-   mirror-symmetric cover layout so neither team's side is favoured.
+   Every world gets a planned battlefield: a citadel in the middle, two rings of
+   watchtowers, walled compounds, ruins and trench lines, roads that join them
+   into loops, and scattered cover. Locked-arena modes add a mirror-symmetric
+   three-lane layout so neither team's side is favoured.
    Everything is deterministic from the seed (hash2), so all players in a room
    generate the same structures without sending any edits. Builders take a
    put(x, y, z, type) callback: setBlock for the world, MODES_edit for arenas
@@ -11,10 +12,12 @@
 'use strict';
 
 const STRUCT_SALT = 7919;
-const STRUCT_SITE_COUNT = 8;
-const STRUCT_SITE_SPACING = 40;
-const STRUCT_VILLAGE_CLEARANCE = 30;
+const STRUCT_RING_SITES = 6;
+const STRUCT_INNER_RING = 62;
+const STRUCT_OUTER_RING = 100;
+const STRUCT_VILLAGE_CLEARANCE = 22;
 const battleSites = [];
+const battleSpawnPoints = [];
 
 function structHash(a, b) { return hash2(a * 31 + STRUCT_SALT, b * 17 - STRUCT_SALT); }
 
@@ -38,8 +41,8 @@ function structBase(x0, z0, w, d) {
 /* Two-storey 7×7 tower: doors on two sides, wall-hugging block stairs (one
    block per step, so a normal jump climbs them), a mid floor, a crenellated
    roof and window slits for shooting out. */
-function structWatchtower(put, cx, cz) {
-  const x0 = cx - 3, z0 = cz - 3, w = 7, base = structBase(x0, z0, w, w), H = 9;
+function structWatchtower(put, cx, cz, fixedBase) {
+  const x0 = cx - 3, z0 = cz - 3, w = 7, base = fixedBase || structBase(x0, z0, w, w), H = 9;
   structPrepare(put, x0 - 1, z0 - 1, w + 2, w + 2, base, H + 2, STONE);
   for (let y = base; y < base + H; y++) {
     for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + w; z++) {
@@ -136,77 +139,230 @@ function structTrenches(put, cx, cz) {
   return { x: cx, z: cz, y: terrainHeight(cx, cz) + 1, kind: 'trenches' };
 }
 
-const STRUCT_KINDS = [structWatchtower, structCompound, structRuins, structTrenches];
+/* The centre of the map: a walled yard around a climbable tower. The tallest
+   point is the most exposed one, so it is worth fighting for, not camping. */
+function structCitadel(put, cx, cz) {
+  const R = 12, x0 = cx - R, z0 = cz - R, w = R * 2 + 1, base = structBase(x0, z0, w, w);
+  structPrepare(put, x0, z0, w, w, base, 8, COBBLE);
+  for (let x = x0; x < x0 + w; x++) for (let z = z0; z < z0 + w; z++) {
+    put(x, base - 1, z, GRAVEL);
+    const edge = x === x0 || x === x0 + w - 1 || z === z0 || z === z0 + w - 1;
+    // Three-wide gates on every side, so nobody can be pinned inside.
+    if (!edge || Math.abs(x - cx) <= 1 || Math.abs(z - cz) <= 1) continue;
+    const notch = ((x + z) & 3) === 0;
+    for (let y = base; y < base + 2; y++) put(x, y, z, STONEBRICK);
+    if (!notch) put(x, base + 2, z, STONEBRICK);
+  }
+  for (const [dx, dz] of [[-8, -8], [7, -8], [-8, 7], [7, 7], [-8, 0], [7, -1]]) {
+    for (let x = 0; x < 2; x++) for (let z = 0; z < 2; z++) for (let y = 0; y < 2; y++) put(cx + dx + x, base + y, cz + dz + z, PLANKS);
+  }
+  structWatchtower(put, cx, cz, base);
+  return { x: cx, z: cz, y: base, kind: 'citadel' };
+}
 
-function structFindSite(tries0) {
-  for (let tries = tries0; tries < tries0 + 400; tries++) {
-    const x = 20 + Math.floor(structHash(tries * 13 + 5, tries * 7 + 91) * (WORLD - 40));
-    const z = 20 + Math.floor(structHash(tries * 29 + 77, tries * 3 + 11) * (WORLD - 40));
-    const h = terrainHeight(x, z);
-    if (h < SEA + 2 || h > 40) continue;
-    let min = h, max = h;
-    for (let dx = -8; dx <= 8; dx += 4) for (let dz = -8; dz <= 8; dz += 4) {
-      const hh = terrainHeight(x + dx, z + dz);
-      if (hh <= SEA) { min = -1; break; }
-      min = Math.min(min, hh); max = Math.max(max, hh);
+const STRUCT_KINDS = [structWatchtower, structCompound, structRuins, structTrenches];
+const STRUCT_NATURAL = () => [GRASS, DIRT, SAND, SNOW, STONE, GRAVEL, SANDSTONE, MUD];
+
+function structFree(x, z, spacing) {
+  const h = terrainHeight(x, z);
+  if (h < SEA + 2 || h > 42) return false;
+  let min = h, max = h;
+  for (let dx = -8; dx <= 8; dx += 4) for (let dz = -8; dz <= 8; dz += 4) {
+    const hh = terrainHeight(x + dx, z + dz);
+    if (hh <= SEA) return false;
+    min = Math.min(min, hh); max = Math.max(max, hh);
+  }
+  if (max - min > 5) return false;
+  if (villageSites.some((v) => Math.hypot(v.x - x, v.z - z) < STRUCT_VILLAGE_CLEARANCE)) return false;
+  return !battleSites.some((s) => Math.hypot(s.x - x, s.z - z) < spacing);
+}
+
+// The nearest buildable ground to a planned position.
+function structSpotNear(tx, tz, reach, spacing) {
+  for (let r = 0; r <= reach; r += 3) {
+    const steps = r === 0 ? 1 : Math.round(r * 1.2);
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const x = Math.round(tx + Math.cos(a) * r), z = Math.round(tz + Math.sin(a) * r);
+      if (x >= 20 && z >= 20 && x < WORLD - 20 && z < WORLD - 20 && structFree(x, z, spacing)) return { x, z };
     }
-    if (min < 0 || max - min > 4) continue;
-    if (villageSites.some((v) => Math.hypot(v.x - x, v.z - z) < STRUCT_VILLAGE_CLEARANCE)) continue;
-    if (battleSites.some((s) => Math.hypot(s.x - x, s.z - z) < STRUCT_SITE_SPACING)) continue;
-    return { x, z, tries };
   }
   return null;
 }
 
-// Called by generateTerrain() after villages, before waterfalls/critters.
+// Removes a whole tree, so a road never leaves a canopy floating in the air.
+function structFell(put, x, z, g) {
+  for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) for (let y = g; y <= g + 13; y++) {
+    const b = getBlock(x + dx, y, z + dz);
+    if (b === LOG || b === LEAVES) put(x + dx, y, z + dz, AIR);
+  }
+}
+
+function structRoadTile(put, x, z, natural) {
+  if (x < 2 || z < 2 || x >= WORLD - 2 || z >= WORLD - 2) return;
+  const g = terrainHeight(x, z);
+  if (g <= SEA) { put(x, SEA + 1, z, PLANKS); return; }
+  if (!natural.includes(getBlock(x, g, z))) return;
+  for (let y = g + 1; y <= g + 7; y++) {
+    const b = getBlock(x, y, z);
+    if (b === LOG || b === LEAVES) { structFell(put, x, z, g); break; }
+    if (b === CACTUS) put(x, y, z, AIR);
+  }
+  put(x, g, z, structHash(x, z) < 0.25 ? COBBLE : GRAVEL);
+}
+
+// A slightly wandering road. Returns its points so cover can line it.
+function structRoad(put, a, b, natural) {
+  const length = Math.hypot(b.x - a.x, b.z - a.z), phase = structHash(a.x, b.z) * 6.28;
+  const ux = (b.x - a.x) / length, uz = (b.z - a.z) / length, points = [];
+  for (let d = 0; d <= length; d += 0.5) {
+    const t = d / length, bend = Math.sin(t * Math.PI) * Math.sin(t * 7 + phase) * 4;
+    const x = a.x + ux * d - uz * bend, z = a.z + uz * d + ux * bend;
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) structRoadTile(put, Math.round(x) + i, Math.round(z) + j, natural);
+    if (d % 16 === 0) points.push({ x, z, nx: -uz, nz: ux });
+  }
+  return points;
+}
+
+/* Small cover, about shoulder high with notches to shoot through. It breaks up
+   long sightlines so open ground is crossed in hops, not in one run. */
+function structCover(put, cx, cz, natural) {
+  const column = (x, z, h, type) => {
+    const g = terrainHeight(x, z);
+    if (g <= SEA || !natural.includes(getBlock(x, g, z)) || getBlock(x, g + 1, z) !== AIR) return;
+    for (let y = g + 1; y <= g + h; y++) put(x, y, z, type);
+  };
+  const kind = Math.floor(structHash(cx * 3, cz * 5) * 4), flip = structHash(cx, cz * 3) < 0.5 ? 1 : -1;
+  if (kind === 0) {
+    for (let i = 0; i < 4; i++) column(cx + i * flip, cz, i === 2 ? 1 : 2, COBBLE);
+    for (let i = 1; i < 3; i++) column(cx, cz + i * flip, 2, COBBLE);
+  } else if (kind === 1) {
+    for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) column(cx + i, cz + j, 2, PLANKS);
+    column(cx + 2 * flip, cz, 1, PLANKS);
+  } else if (kind === 2) {
+    for (let i = -2; i <= 2; i++) if (i !== 1) column(cx + i, cz + Math.abs(i) * flip, 2, i === 0 ? GRAVEL : SAND);
+  } else {
+    for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) {
+      if (structHash(cx + i * 7, cz + j * 9) > 0.25) column(cx + i, cz + j, 1 + Math.floor(structHash(cx - i, cz - j) * 3), STONE);
+    }
+  }
+}
+
+function structNearVillage(x, z, reach) { return villageSites.some((v) => Math.hypot(v.x - x, v.z - z) < reach); }
+function structNearSite(x, z, reach) { return battleSites.some((s) => Math.hypot(s.x - x, s.z - z) < reach); }
+
+/* Called by generateTerrain() after villages, before waterfalls/critters.
+   The map is planned, not scattered: a citadel in the middle, two rings of
+   sites and roads that form loops. Every site can be reached two ways, so a
+   fight can always be flanked and players never have to double back. */
 function buildBattleSites() {
   battleSites.length = 0;
+  battleSpawnPoints.length = 0;
   const put = (x, y, z, type) => {
     if (x < 1 || z < 1 || x >= WORLD - 1 || z >= WORLD - 1 || y < 1 || y >= HEIGHT) return;
     setBlock(x, y, z, type);
   };
-  let cursor = 0;
-  for (let i = 0; i < STRUCT_SITE_COUNT; i++) {
-    const site = structFindSite(cursor);
-    if (!site) break;
-    cursor = site.tries + 1;
-    battleSites.push(STRUCT_KINDS[i % STRUCT_KINDS.length](put, site.x, site.z));
+  const mid = WORLD / 2, turn = structHash(11, 23) * Math.PI * 2;
+  const hubSpot = structSpotNear(mid, mid, 30, 0);
+  const hub = hubSpot ? structCitadel(put, hubSpot.x, hubSpot.z) : null;
+  if (hub) battleSites.push(hub);
+  const plant = (radius, angle, kind) => {
+    const spot = structSpotNear(mid + Math.cos(angle) * radius, mid + Math.sin(angle) * radius, 27, 30);
+    if (!spot) return null;
+    const site = STRUCT_KINDS[kind % STRUCT_KINDS.length](put, spot.x, spot.z);
+    battleSites.push(site);
+    return site;
+  };
+  const inner = [], outer = [];
+  for (let i = 0; i < STRUCT_RING_SITES; i++) {
+    const site = plant(STRUCT_INNER_RING, turn + i * Math.PI * 2 / STRUCT_RING_SITES, i);
+    if (site) inner.push(site);
+  }
+  for (let i = 0; i < STRUCT_RING_SITES; i++) {
+    const site = plant(STRUCT_OUTER_RING, turn + (i + 0.5) * Math.PI * 2 / STRUCT_RING_SITES, i + 2);
+    if (site) outer.push(site);
+  }
+
+  const natural = STRUCT_NATURAL(), lanes = [];
+  inner.forEach((site, i) => { if (inner.length > 2) lanes.push(structRoad(put, site, inner[(i + 1) % inner.length], natural)); });
+  if (hub) inner.forEach((site, i) => { if (i % 2 === 0) lanes.push(structRoad(put, hub, site, natural)); });
+  outer.forEach((site) => {
+    const near = inner.slice().sort((a, b) => Math.hypot(a.x - site.x, a.z - site.z) - Math.hypot(b.x - site.x, b.z - site.z));
+    for (const other of near.slice(0, 2)) lanes.push(structRoad(put, site, other, natural));
+  });
+
+  for (const lane of lanes) {
+    lane.forEach((point, i) => {
+      const side = i % 2 ? 1 : -1, x = Math.round(point.x + point.nx * 5 * side), z = Math.round(point.z + point.nz * 5 * side);
+      if (!structNearSite(x, z, 11) && !structNearVillage(x, z, 18)) structCover(put, x, z, natural);
+    });
+  }
+  // Cover in the gaps between roads, so no field is a free shooting gallery.
+  for (let gx = 16; gx < WORLD - 12; gx += 26) for (let gz = 16; gz < WORLD - 12; gz += 26) {
+    const x = gx + Math.floor(structHash(gx, gz) * 12), z = gz + Math.floor(structHash(gz, gx) * 12);
+    if (structHash(gx * 3, gz * 3) < 0.7 && !structNearSite(x, z, 11) && !structNearVillage(x, z, 18)) structCover(put, x, z, natural);
+  }
+
+  // Far more spawn points than players, around every site.
+  for (const site of battleSites) {
+    const reach = site.kind === 'citadel' ? 18 : 13;
+    for (let i = 0; i < 3; i++) {
+      const a = structHash(site.x + i, site.z - i) * Math.PI * 2 + i * 2.1;
+      battleSpawnPoints.push({ x: site.x + Math.cos(a) * reach, z: site.z + Math.sin(a) * reach });
+    }
   }
 }
 
-/* Arena cover, mirror-symmetric across both axes so red (west) and blue
-   (east) get identical sightlines. Spawn pads sit on the x axis at ±0.55r
-   and gates on both axes, so pieces stay on the diagonals and the centre. */
+/* Arena cover: three lanes between the red (west) and blue (east) pads, joined
+   by gaps in the dividers. Mirrored west to east, so neither side is favoured.
+   North is open and long, south is tight and close, and the middle is blocked
+   so neither pad can ever see the other. */
 function STRUCT_buildArenaCover(put, cx, cz, radius) {
-  const placeWall = (x, z, dx, dz, len, h, type) => {
+  const placeWall = (x, z, dx, dz, len, h, type, top) => {
     for (let k = 0; k < len; k++) {
       const px = Math.round(x + dx * k), pz = Math.round(z + dz * k);
       const g = terrainHeight(px, pz);
-      const y0 = Math.max(SEA + 2, g + 1);
+      const y0 = Math.max(SEA + 2, g + 1), end = Math.max(y0 + h, top || 0);
       for (let y = g + 1; y < y0; y++) put(px, y, pz, STONEBRICK);
-      for (let y = y0; y < y0 + h; y++) put(px, y, pz, type);
-      for (let y = y0 + h; y < y0 + h + 4; y++) if (getBlock(px, y, pz) !== AIR) put(px, y, pz, AIR);
+      for (let y = y0; y < end; y++) put(px, y, pz, type);
+      for (let y = end; y < end + 4; y++) if (getBlock(px, y, pz) !== AIR) put(px, y, pz, AIR);
     }
   };
-  // centre: a cross of chest-high walls with a raised plinth
-  const arm = Math.max(3, Math.round(radius * 0.09));
-  placeWall(cx - arm, cz, 1, 0, arm * 2 + 1, 2, STONEBRICK);
-  placeWall(cx, cz - arm, 0, 1, arm * 2 + 1, 2, STONEBRICK);
-  // diagonal L-shaped cover at two rings
-  for (const ring of [0.34, 0.72]) {
-    const r = radius * ring;
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      const x = cx + sx * r * 0.7071, z = cz + sz * r * 0.7071;
-      const len = ring < 0.5 ? 4 : 3;
-      const h = ring < 0.5 ? 3 : 2;
-      placeWall(x, z, -sx, 0, len, h, ring < 0.5 ? COBBLE : PLANKS);
-      placeWall(x, z, 0, -sz, len, h, ring < 0.5 ? COBBLE : PLANKS);
-    }
+  const mirrored = (offset, z, dx, dz, len, h, type) => {
+    for (const side of offset ? [-1, 1] : [1]) placeWall(cx + side * offset, z, dx * side, dz, len, h, type);
+  };
+
+  // Lane dividers, broken by connector gaps.
+  const seg = Math.max(4, Math.round(radius * 0.16)), gap = Math.max(4, Math.round(radius * 0.09)), lane = Math.round(radius * 0.24);
+  for (const side of [-1, 1]) {
+    const z = cz + side * lane;
+    placeWall(cx - Math.floor(seg / 2), z, 1, 0, seg, 3, COBBLE);
+    mirrored(Math.round(seg / 2 + gap), z, 1, 0, seg, 3, COBBLE);
   }
-  // flank crates halfway between the pads and the side walls
-  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    const x = Math.round(cx + sx * radius * 0.42), z = Math.round(cz + sz * radius * 0.3);
-    placeWall(x, z, 1, 0, 2, 2, PLANKS);
-    placeWall(x, z + 1, 1, 0, 2, 2, PLANKS);
+
+  // Middle lane: a wide block at the centre with staggered cover either side.
+  const arm = Math.max(4, Math.round(radius * 0.16));
+  placeWall(cx, cz - arm, 0, 1, arm * 2 + 1, 3, STONEBRICK);
+  mirrored(Math.round(radius * 0.26), cz - 2, 0, 1, 5, 2, STONEBRICK);
+
+  // North lane: long sightlines broken only by two low blocks.
+  const north = cz - Math.round(radius * 0.5), south = cz + Math.round(radius * 0.5);
+  for (const offset of [Math.round(radius * 0.14), Math.round(radius * 0.42)]) {
+    mirrored(offset, north, 1, 0, 3, 2, PLANKS);
+  }
+  // South lane: dense, for shotguns and SMGs.
+  for (const offset of [0, Math.round(radius * 0.2), Math.round(radius * 0.4)]) {
+    mirrored(offset, south - 1, 1, 0, 3, 2, PLANKS);
+    mirrored(offset, south + 2, 0, 1, 3, 2, PLANKS);
+  }
+
+  // Each pad gets a shelter facing the enemy; players leave around either end
+  // or out of the back gate, so it can't be locked down from one spot.
+  const pads = typeof MODES_pads !== 'undefined' ? MODES_pads : null;
+  for (const pad of pads ? [pads.red, pads.blue] : []) {
+    if (!pad) continue;
+    const toward = pad.x < cx ? 1 : -1;
+    // Pads stand proud of the ground, so measure the height from the pad.
+    placeWall(pad.x + toward * 7, pad.z - 5, 0, 1, 11, 3, STONEBRICK, Math.ceil(pad.y) + 3);
   }
 }
