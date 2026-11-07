@@ -579,7 +579,7 @@ document.addEventListener('keydown', (e) => {
   }
   if (isInputEditable(e.target) || isInputEditable(document.activeElement)) return;
   const active = isGameplayInputActive(e);
-  const digit = /^(?:Digit|Numpad)([1-9])$/.exec(e.code);
+  const digit = /^(?:Digit|Numpad)([0-9])$/.exec(e.code);
   const handled = GAMEPLAY_KEYS.has(e.code) || !!digit;
   // DOM cancellation is best-effort for reserved browser shortcuts; fullscreen
   // Keyboard Lock delivers supported Ctrl/Meta combinations to these handlers.
@@ -591,7 +591,7 @@ document.addEventListener('keydown', (e) => {
   keys[e.code] = true;
   inputWasActive = true;
   if (digit) {
-    const index = Number(digit[1]) - 1;
+    const index = digit[1] === '0' ? 9 : Number(digit[1]) - 1;   // 0 is the tenth gun, as on the keyboard
     if (quickBuild.active) {
       if (index < INPUT_BUILD_ORDER.length) inputSelectBuildPiece(INPUT_BUILD_ORDER[index]);
     } else if (combatMode) {
@@ -638,7 +638,7 @@ document.addEventListener('keyup', (e) => {
   keys[e.code] = false;
   if (e.code === 'Tab' && typeof setScoreboardVisible === 'function') setScoreboardVisible(false);
   if (isGameplayInputActive(e) && !e.isComposing &&
-      (GAMEPLAY_KEYS.has(e.code) || /^(?:Digit|Numpad)[1-9]$/.test(e.code) || e.ctrlKey || e.metaKey)) consumeGameplayKey(e);
+      (GAMEPLAY_KEYS.has(e.code) || /^(?:Digit|Numpad)[0-9]$/.test(e.code) || e.ctrlKey || e.metaKey)) consumeGameplayKey(e);
 }, true);
 function inputPauseForFocusLoss() {
   const capturing = document.pointerLockElement === renderer.domElement ||

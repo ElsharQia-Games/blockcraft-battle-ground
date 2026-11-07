@@ -13,13 +13,22 @@ const WEAPONS = [
   { id: 'smg',      name: 'SMG',      damage: 15, rpm: 880, mag: 32, spread: 0.023, recoil: 0.010, range: 70, pellets: 1, head: 1.4, auto: true,  reload: 1.45, sound: 0.34, scopeFov: 66, adsSpread: 0.48, kickBack: 0.038, recover: 30, report: [0.09, 3200, 215, 4.2] },
   { id: 'sniper',   name: 'Sniper',   damage: 115, rpm: 42, mag: 5, spread: 0.032, recoil: 0.095, range: 180, pellets: 1, head: 2.0, auto: false, reload: 2.80, sound: 0.95, scopeFov: 18, adsSpread: 0.025, kickBack: 0.135, recover: 10, report: [0.38, 1450, 84, 2.3] },
   { id: 'revolver', name: 'Revolver', damage: 58, rpm: 170, mag: 6, spread: 0.006, recoil: 0.055, range: 105, pellets: 1, head: 2.0, auto: false, reload: 2.40, sound: 0.73, scopeFov: 60, adsSpread: 0.34, kickBack: 0.100, recover: 15, report: [0.25, 2050, 126, 2.7] },
-  { id: 'lmg',      name: 'LMG',      damage: 21, rpm: 600, mag: 75, spread: 0.022, recoil: 0.021, range: 145, pellets: 1, head: 1.4, auto: true,  reload: 3.60, sound: 0.62, scopeFov: 62, adsSpread: 0.50, kickBack: 0.075, recover: 18, report: [0.19, 1250, 118, 3.2] }
+  { id: 'lmg',      name: 'LMG',      damage: 21, rpm: 600, mag: 75, spread: 0.022, recoil: 0.021, range: 145, pellets: 1, head: 1.4, auto: true,  reload: 3.60, sound: 0.62, scopeFov: 62, adsSpread: 0.50, kickBack: 0.075, recover: 18, report: [0.19, 1250, 118, 3.2] },
+  { id: 'dmr',      name: 'Marksman', damage: 44, rpm: 240, mag: 12, spread: 0.006, recoil: 0.030, range: 150, pellets: 1, head: 1.8, auto: false, reload: 2.20, sound: 0.70, scopeFov: 44, adsSpread: 0.20, kickBack: 0.090, recover: 16, report: [0.22, 1900, 140, 2.8] },
+  { id: 'burst',    name: 'Burst Rifle', damage: 30, rpm: 800, mag: 30, spread: 0.012, recoil: 0.012, range: 120, pellets: 1, head: 1.5, auto: false, burst: 3, burstGap: 0.34, reload: 2.00, sound: 0.46, scopeFov: 56, adsSpread: 0.38, kickBack: 0.046, recover: 26, report: [0.11, 2500, 170, 3.8] },
+  { id: 'machinepistol', name: 'Machine Pistol', damage: 13, rpm: 1050, mag: 28, spread: 0.030, recoil: 0.009, range: 55, pellets: 1, head: 1.3, auto: true, reload: 1.25, sound: 0.30, scopeFov: 68, adsSpread: 0.60, kickBack: 0.032, recover: 32, report: [0.07, 3600, 230, 4.6] },
+  { id: 'doublebarrel', name: 'Double Barrel', damage: 18, rpm: 300, mag: 2, spread: 0.090, recoil: 0.090, range: 24, pellets: 8, head: 1.3, auto: false, reload: 2.60, sound: 0.90, scopeFov: 72, adsSpread: 0.80, kickBack: 0.140, recover: 12, report: [0.34, 760, 92, 1.9] },
+  { id: 'crossbow', name: 'Crossbow', damage: 120, rpm: 60, mag: 1, spread: 0.004, recoil: 0.030, range: 130, pellets: 1, head: 2.0, auto: false, reload: 1.80, sound: 0.14, scopeFov: 46, adsSpread: 0.10, kickBack: 0.050, recover: 14, report: [0.05, 900, 210, 6.0] }
 ];
 const WEAPON_BY_ID = Object.create(null);
 const COMBAT_OPTIC_TYPES = {
   pistol: 'reflex', rifle: 'holo', shotgun: 'spread', smg: 'chevron',
-  sniper: 'mildot', revolver: 'precision', lmg: 'support'
+  sniper: 'mildot', revolver: 'precision', lmg: 'support',
+  dmr: 'holo', burst: 'holo', machinepistol: 'chevron', doublebarrel: 'spread', crossbow: 'holo'
 };
+// Newer guns borrow the reload animation and sights of the gun they work like.
+const COMBAT_FAMILY = { dmr: 'rifle', burst: 'rifle', machinepistol: 'smg', doublebarrel: 'shotgun', crossbow: 'sniper' };
+const COMBAT_OPTIC_FAMILY = { crossbow: 'rifle' };
 /* Keep the old optic tags for integrations; view, not optic, selects geometry.
    ADS times are time to 99.9% settled. These profiles NEVER change the legal
    damage/rpm/mag/range/pellets/reload values used by the room authority. */
@@ -81,7 +90,23 @@ const COMBAT_HANDLING = {
     reloadStages: [[0.10, 'feed cover open'], [0.26, 'box out'], [0.47, 'box in'], [0.57, 'belt seat'], [0.79, 'cover latch'], [0.91, 'charging handle']]
   }
 };
+Object.assign(COMBAT_HANDLING, {
+  dmr: { ...COMBAT_HANDLING.rifle, sight: 'Reflex window', role: 'Accurate mid to long range', adsInMs: 260, adsOutMs: 165, openingShots: 0, openingScale: 1,
+    burstGapMs: 420, bloomPerShot: 0.3, bloomMax: 1.0, bloomRecovery: 1.2, moveSpread: 1.1, adsMoveSpread: 0.9, recoilScale: 0.95, recoilCap: 0.09,
+    yawPattern: [0.35, -0.25, 0.2], viewRise: 1.7, cycle: 0.16 },
+  burst: { ...COMBAT_HANDLING.rifle, sight: 'Reflex window', role: 'Three rounds, then a pause', adsInMs: 215, burstGapMs: 340, bloomPerShot: 0.11, bloomMax: 0.9,
+    bloomRecovery: 1.5, recoilScale: 0.7, yawPattern: [0.15, -0.2, 0.25], cycle: 0.07 },
+  machinepistol: { ...COMBAT_HANDLING.smg, sight: 'CQB hood', role: 'Fastest gun, shortest reach', adsInMs: 105, adsOutMs: 80, bloomPerShot: 0.2, bloomMax: 1.7,
+    recoilScale: 0.62, lateral: 0.6, yawPattern: [-0.8, 0.85, -0.45, 0.7], cycle: 0.05, reloadStages: [[0.14, 'magazine out'], [0.42, 'magazine in'], [0.7, 'bolt release']] },
+  doublebarrel: { ...COMBAT_HANDLING.shotgun, sight: 'Bead', role: 'Two huge close shots', adsInMs: 180, burstGapMs: 500, bloomMax: 0.5, recoilScale: 1, viewRise: 1.6, viewRoll: 0.05,
+    cycle: 0.16, mechanism: 'break', cueAt: -1, reloadStages: [[0.12, 'action open'], [0.3, 'shells out'], [0.62, 'shells in'], [0.86, 'action shut']] },
+  crossbow: { ...COMBAT_HANDLING.rifle, sight: 'Reflex window', role: 'Silent one-shot bolt', adsInMs: 280, adsOutMs: 170, openingShots: 0, openingScale: 1, burstGapMs: 1200,
+    bloomPerShot: 0.2, bloomMax: 0.6, moveSpread: 1.3, adsMoveSpread: 1.5, recoilScale: 0.7, yawPattern: [0.2, -0.2], viewRise: 0.8, viewRoll: 0, cycle: 0.2,
+    mechanism: 'string', cueAt: -1, reloadStages: [[0.2, 'cock string'], [0.6, 'bolt in'], [0.85, 'seat']] }
+});
 for (const w of WEAPONS) {
+  w.family = COMBAT_FAMILY[w.id] || w.id;
+  w.opticFamily = COMBAT_OPTIC_FAMILY[w.id] || w.family;
   w.optic = COMBAT_OPTIC_TYPES[w.id];
   w.handling = COMBAT_HANDLING[w.id];
   w.view = w.handling.view;
@@ -108,6 +133,7 @@ const gun = {
   viewAim: 0,
   equip: 0,
   sway: 0,
+  burstLeft: 0,
   bloom: WEAPONS.map(() => 0),
   shots: WEAPONS.map(() => 0),
   lastSpread: 0,
@@ -658,7 +684,7 @@ function combatAddOptic(root) {
   u.optic = optic;
   u.opticType = type;
   u.adsView = w.view;
-  if (w.id === 'pistol') {
+  if (w.opticFamily === 'pistol') {
     // Square rear notch, paired witness marks and a separate real front blade.
     // Nothing covers peripheral vision; both sights ride the reciprocating slide.
     optic.position.set(0, 0.060, 0);
@@ -673,7 +699,7 @@ function combatAddOptic(root) {
     combatSightLine(root, 0.133, -0.180, 0.100);
     return;
   }
-  if (w.id === 'shotgun') {
+  if (w.opticFamily === 'shotgun') {
     // A vented rib with a single bead, not an optic or a spread-circle overlay.
     optic.position.set(0, 0.090, 0);
     root.add(optic);
@@ -688,7 +714,7 @@ function combatAddOptic(root) {
     combatSightLine(root, 0.103, -0.688, 0.070);
     return;
   }
-  if (w.id === 'revolver') {
+  if (w.opticFamily === 'revolver') {
     // Deep, slightly tapered steel V-notch and a long narrow front blade.
     // Unlike pistol irons this has no pair of glowing rear dots or slide optic.
     optic.position.set(0, 0.085, 0);
@@ -702,7 +728,7 @@ function combatAddOptic(root) {
     combatSightLine(root, 0.121, -0.403, 0.145);
     return;
   }
-  if (w.id === 'sniper') {
+  if (w.opticFamily === 'sniper') {
     // The long tube, objective bell and turrets are authored with the sniper.
     // Add raised mounting rings and an actual rear lens with a fine mil reticle.
     optic.position.set(0, 0.17, 0);
@@ -717,7 +743,7 @@ function combatAddOptic(root) {
     combatSightLine(root, 0.170, -0.311, 0.205);
     return;
   }
-  if (w.id === 'rifle') {
+  if (w.opticFamily === 'rifle') {
     // Compact rectangular reflex window. The only illumination is in its glass.
     optic.position.set(0, 0.114, 0.042);
     root.add(optic);
@@ -731,7 +757,7 @@ function combatAddOptic(root) {
     combatSightLine(root, 0.160, 0.071, 0.042);
     return;
   }
-  if (w.id === 'smg') {
+  if (w.opticFamily === 'smg') {
     // Deeper close-quarters hood, with chamfered shoulders instead of the
     // rifle's flat rectangular roof. This is a small open window, not a tube.
     optic.position.set(0, 0.103, 0.005);
@@ -772,6 +798,7 @@ function makeGunModel(id) {
   const dark = '#20262c', metal = '#59626b', wood = '#765035', brass = '#c3a054';
   const u = root.userData;
   u.weaponId = id;
+  u.family = WEAPON_BY_ID[id].family;
   u.reloadParts = Object.create(null);
   u.reloadNodes = [];
   u.reloadProgress = -1;
@@ -913,6 +940,91 @@ function makeGunModel(id) {
     u.heldScale = 0.78;
     u.viewScale = 0.82;
     muzzleZ = -0.952;
+  } else if (id === 'dmr') {
+    combatMetalBox(root, 0.09, 0.11, 0.42, '#4b5446', 0, 0.015, 0.02);
+    combatCylinder(root, 0.022, 0.72, dark, 0, muzzleY, -0.56);
+    combatMetalBox(root, 0.052, 0.052, 0.12, '#14191e', 0, muzzleY, -0.96);
+    addBox(root, 0.085, 0.095, 0.36, '#5b4632', 0, -0.01, -0.36);
+    addBox(root, 0.09, 0.16, 0.30, '#5b4632', 0, -0.02, 0.36);
+    addBox(root, 0.09, 0.05, 0.16, '#463626', 0, 0.075, 0.34);
+    addBox(root, 0.10, 0.17, 0.035, dark, 0, -0.02, 0.525);
+    addBox(root, 0.065, 0.19, 0.095, '#342920', 0, -0.12, 0.14);
+    const mag = combatPartGroup(root, 'mag', root, 0, -0.12, -0.05);
+    combatMetalBox(mag, 0.06, 0.14, 0.11, dark, 0, -0.02, 0);
+    combatReloadPart(root, 'charging', combatMetalBox(root, 0.09, 0.022, 0.035, '#a6adb1', 0.065, 0.045, 0.055));
+    addBox(root, 0.06, 0.025, 0.24, dark, 0, 0.091, 0.025);
+    u.heldScale = 0.82;
+    u.viewScale = 0.85;
+    muzzleZ = -1.02;
+  } else if (id === 'burst') {
+    combatMetalBox(root, 0.105, 0.135, 0.40, '#2c3238', 0, 0.015, 0.03);
+    combatCylinder(root, 0.026, 0.34, dark, 0, muzzleY, -0.36);
+    combatCylinder(root, 0.042, 0.11, '#101418', 0, muzzleY, -0.56);
+    addBox(root, 0.10, 0.11, 0.26, '#3a4148', 0, -0.005, -0.26);
+    for (let i = 0; i < 4; i++) addBox(root, 0.104, 0.014, 0.03, '#b98a3a', 0, 0.056, -0.16 - i * 0.05);
+    addBox(root, 0.09, 0.15, 0.22, '#2c3238', 0, -0.015, 0.33);
+    addBox(root, 0.10, 0.17, 0.035, dark, 0, -0.015, 0.45);
+    addBox(root, 0.065, 0.19, 0.095, '#1f2428', 0, -0.12, 0.14);
+    addBox(root, 0.055, 0.12, 0.06, '#1f2428', 0, -0.11, -0.28);
+    const mag = combatPartGroup(root, 'mag', root, 0, -0.13, -0.045);
+    combatMetalBox(mag, 0.065, 0.22, 0.105, '#3a4148', 0, -0.025, 0);
+    combatReloadPart(root, 'charging', combatMetalBox(root, 0.09, 0.022, 0.035, '#a6adb1', 0.065, 0.045, 0.055));
+    addBox(root, 0.06, 0.025, 0.22, dark, 0, 0.097, 0.025);
+    muzzleZ = -0.615;
+  } else if (id === 'machinepistol') {
+    combatMetalBox(root, 0.09, 0.11, 0.25, '#3b4348', 0, 0.015, 0.01);
+    combatCylinder(root, 0.022, 0.16, dark, 0, muzzleY, -0.19);
+    addBox(root, 0.072, 0.18, 0.10, dark, 0, -0.10, 0.09);
+    const mag = combatPartGroup(root, 'mag', root, 0, -0.17, 0.09);
+    combatMetalBox(mag, 0.05, 0.27, 0.07, '#596267', 0, -0.03, 0);
+    addBox(mag, 0.06, 0.025, 0.08, dark, 0, -0.17, 0);
+    combatReloadPart(root, 'bolt', combatMetalBox(root, 0.08, 0.022, 0.03, '#aab9b9', -0.05, 0.055, 0));
+    addBox(root, 0.05, 0.06, 0.05, '#596267', 0, -0.05, -0.10);
+    u.grip.z = 0.09;
+    u.support.set(-0.06, -0.12, 0.07);
+    u.heldScale = 0.94;
+    muzzleZ = -0.27;
+  } else if (id === 'doublebarrel') {
+    combatMetalBox(root, 0.125, 0.11, 0.24, '#6b6256', 0, 0.01, 0.03);
+    for (const x of [-0.034, 0.034]) {
+      combatCylinder(root, 0.032, 0.66, dark, x, muzzleY, -0.42);
+      combatCylinder(root, 0.036, 0.015, '#0a0d10', x, muzzleY, -0.75);
+    }
+    addBox(root, 0.05, 0.016, 0.62, '#3a4046', 0, 0.083, -0.41);
+    addBox(root, 0.11, 0.14, 0.31, wood, 0, -0.04, 0.33);
+    addBox(root, 0.115, 0.16, 0.025, '#171c20', 0, -0.04, 0.49);
+    addBox(root, 0.07, 0.17, 0.09, wood, 0, -0.12, 0.12);
+    const pump = combatPartGroup(root, 'pump', root, 0, -0.02, -0.25);
+    addBox(pump, 0.115, 0.075, 0.20, '#815735', 0, 0, 0);
+    combatReloadPart(root, 'gate', combatMetalBox(root, 0.056, 0.012, 0.10, '#8c9295', 0, -0.049, -0.035));
+    const shell = combatPartGroup(root, 'shell', root, -0.18, -0.18, 0.01);
+    combatCylinder(shell, 0.023, 0.095, '#b84432', 0, 0, 0);
+    combatCylinder(shell, 0.025, 0.02, brass, 0, 0, 0.047);
+    shell.visible = shell.userData.combatBase.visible = false;
+    muzzleZ = -0.76;
+  } else if (id === 'crossbow') {
+    addBox(root, 0.08, 0.09, 0.62, wood, 0, 0, -0.05);
+    addBox(root, 0.09, 0.15, 0.26, wood, 0, -0.03, 0.38);
+    addBox(root, 0.07, 0.17, 0.09, '#4d3423', 0, -0.12, 0.14);
+    const stave = combatMetalBox(root, 0.34, 0.03, 0.04, '#3a4046', 0.17, 0.03, -0.36);
+    stave.rotation.y = 0.32;
+    const stave2 = combatMetalBox(root, 0.34, 0.03, 0.04, '#3a4046', -0.17, 0.03, -0.36);
+    stave2.rotation.y = -0.32;
+    for (const side of [-1, 1]) {
+      const cord = addBox(root, 0.34, 0.008, 0.008, '#e6e0cf', side * 0.16, 0.04, -0.17);
+      cord.rotation.y = side * -0.72;
+    }
+    const mag = combatPartGroup(root, 'mag', root, 0, -0.07, -0.16);
+    combatMetalBox(mag, 0.05, 0.05, 0.10, dark, 0, 0, 0);
+    const bolt = combatPartGroup(root, 'bolt', root, 0, 0.056, -0.20);
+    combatCylinder(bolt, 0.009, 0.46, '#c9b48a', 0, 0, 0);
+    combatMetalBox(bolt, 0.022, 0.022, 0.05, '#7c8790', 0, 0, -0.24);
+    const handle = combatPartGroup(root, 'boltHandle', bolt, 0, 0, 0.2);
+    combatMetalBox(handle, 0.05, 0.03, 0.012, '#c04a3a', 0, 0.02, 0);
+    u.grip.z = 0.14;
+    u.heldScale = 0.84;
+    u.viewScale = 0.86;
+    muzzleZ = -0.5;
   } else {
     addBox(root, 0.09, 0.07, 0.30, dark, 0, -0.035, 0.025);
     const slide = combatPartGroup(root, 'slide', root, 0, 0.043, -0.035);
@@ -1000,7 +1112,7 @@ function updateWeaponReload(model, progress, rounds) {
   pose.z = 0.11 * lift;
   u.reloadProgress = p;
 
-  if (u.weaponId === 'pistol') {
+  if (u.family === 'pistol') {
     pose.pitch = 0.24 * lift; pose.roll = -0.32 * lift;
     const mag = combatMagSwap(parts.mag, p, 0.14, 0.32, 0.43, 0.67, 0.26);
     parts.slide.position.z += 0.09 * combatPulse(p, 0.72, 0.82, 0.85, 0.94);
@@ -1010,7 +1122,7 @@ function updateWeaponReload(model, progress, rounds) {
     u.supportTarget.x += (-0.075 - u.supportTarget.x) * rackHand;
     u.supportTarget.y += (0.085 - u.supportTarget.y) * rackHand;
     u.supportTarget.z += (0.055 + parts.slide.position.z - parts.slide.userData.combatBase.position.z - u.supportTarget.z) * rackHand;
-  } else if (u.weaponId === 'rifle') {
+  } else if (u.family === 'rifle') {
     pose.pitch = 0.18 * lift; pose.roll = -0.26 * lift; pose.yaw = 0.12 * lift;
     const mag = combatMagSwap(parts.mag, p, 0.15, 0.34, 0.44, 0.66, 0.29);
     parts.mag.rotation.x -= mag * 0.18;
@@ -1018,7 +1130,7 @@ function updateWeaponReload(model, progress, rounds) {
     u.supportTarget.set(-0.07, -0.19 - mag * 0.25, -0.045);
     if (p > 0.70) u.supportTarget.lerp(u.support, combatStage(p, 0.70, 0.88));
     u.rightTarget.lerp(parts.charging.position, combatPulse(p, 0.69, 0.76, 0.92, 1));
-  } else if (u.weaponId === 'shotgun') {
+  } else if (u.family === 'shotgun') {
     pose.pitch = 0.17 * lift; pose.roll = 0.48 * lift; pose.yaw = -0.10 * lift;
     const count = Math.max(1, Math.min(6, Math.round(Number.isFinite(rounds) ? rounds : 6)));
     if (p >= 0.12 && p < 0.84) {
@@ -1035,14 +1147,14 @@ function updateWeaponReload(model, progress, rounds) {
     }
     parts.pump.position.z += 0.16 * combatPulse(p, 0.82, 0.89, 0.91, 0.98);
     if (p >= 0.79) u.supportTarget.z += parts.pump.position.z - parts.pump.userData.combatBase.position.z;
-  } else if (u.weaponId === 'smg') {
+  } else if (u.family === 'smg') {
     pose.pitch = 0.28 * lift; pose.roll = -0.20 * lift;
     const mag = combatMagSwap(parts.mag, p, 0.12, 0.28, 0.36, 0.57, 0.23);
     parts.bolt.position.z += 0.095 * combatPulse(p, 0.65, 0.76, 0.79, 0.9);
     u.supportTarget.set(-0.07, -0.19 - mag * 0.23, -0.08);
     if (p > 0.60) u.supportTarget.lerp(parts.bolt.position, combatPulse(p, 0.60, 0.68, 0.86, 0.97));
     u.supportTarget.lerp(u.support, combatStage(p, 0.90, 1));
-  } else if (u.weaponId === 'sniper') {
+  } else if (u.family === 'sniper') {
     pose.pitch = 0.13 * lift; pose.roll = -0.22 * lift; pose.yaw = 0.08 * lift;
     const open = combatPulse(p, 0.10, 0.22, 0.84, 0.94);
     parts.boltHandle.rotation.z = 1.18 * open;
@@ -1054,7 +1166,7 @@ function updateWeaponReload(model, progress, rounds) {
     u.rightTarget.x += (0.13 - u.rightTarget.x) * boltHand;
     u.rightTarget.y += (0.055 + open * 0.09 - u.rightTarget.y) * boltHand;
     u.rightTarget.z += (parts.bolt.position.z + 0.06 - u.rightTarget.z) * boltHand;
-  } else if (u.weaponId === 'revolver') {
+  } else if (u.family === 'revolver') {
     pose.pitch = 0.34 * lift; pose.roll = 0.26 * lift;
     const open = combatPulse(p, 0.08, 0.23, 0.79, 0.94);
     parts.cylinderHinge.rotation.z = 0.55 * open;
@@ -1072,7 +1184,7 @@ function updateWeaponReload(model, progress, rounds) {
     parts.hammer.rotation.x = -0.24 * combatPulse(p, 0.91, 0.95, 0.97, 1);
     u.supportTarget.set(-0.20 * open - 0.05, -0.05, 0.18 - combatStage(p, 0.50, 0.70) * 0.14);
     u.supportTarget.lerp(u.support, combatStage(p, 0.76, 1));
-  } else if (u.weaponId === 'lmg') {
+  } else if (u.family === 'lmg') {
     pose.pitch = 0.16 * lift; pose.roll = -0.18 * lift; pose.yaw = 0.14 * lift;
     parts.cover.rotation.x = -1.20 * combatPulse(p, 0.10, 0.25, 0.79, 0.92);
     const mag = combatMagSwap(parts.mag, p, 0.26, 0.42, 0.47, 0.64, 0.30);
@@ -1110,7 +1222,7 @@ function combatSampleShotMechanism(model, age, serial) {
   u.shotProgress = p;
   if (w.id === 'pistol') {
     parts.slide.position.z += 0.085 * combatPulse(p, 0, 0.08, 0.30, 0.76);
-  } else if (w.id === 'rifle') {
+  } else if (w.family === 'rifle') {
     parts.charging.position.z += 0.065 * combatPulse(p, 0, 0.10, 0.25, 0.90);
   } else if (w.id === 'shotgun') {
     const pump = combatPulse(p, 0.26, 0.46, 0.66, 0.95);
@@ -1118,7 +1230,7 @@ function combatSampleShotMechanism(model, age, serial) {
     u.supportTarget.z += 0.17 * pump;
     parts.gate.rotation.x = -0.28 * pump;
     pose.roll = 0.042 * pump; pose.y = -0.009 * pump;
-  } else if (w.id === 'smg') {
+  } else if (w.family === 'smg') {
     parts.bolt.position.z += 0.050 * combatPulse(p, 0, 0.12, 0.25, 0.92);
   } else if (w.id === 'sniper') {
     const lift = combatPulse(p, 0.19, 0.34, 0.85, 0.99);
@@ -1243,7 +1355,12 @@ const COMBAT_HOLD_STANCES = {
   rifle:    { hip: 1.20, ads: 1.36, roll: -0.50, adsRoll: -0.56, kick: 1.0 },
   shotgun:  { hip: 1.12, ads: 1.32, roll: -0.46, adsRoll: -0.54, kick: 1.4 },
   sniper:   { hip: 1.16, ads: 1.40, roll: -0.52, adsRoll: -0.60, kick: 1.2 },
-  lmg:      { hip: 0.98, ads: 1.26, roll: -0.36, adsRoll: -0.50, kick: 0.9 }
+  lmg:      { hip: 0.98, ads: 1.26, roll: -0.36, adsRoll: -0.50, kick: 0.9 },
+  dmr:      { hip: 1.18, ads: 1.40, roll: -0.52, adsRoll: -0.58, kick: 1.2 },
+  burst:    { hip: 1.22, ads: 1.36, roll: -0.48, adsRoll: -0.54, kick: 0.9 },
+  machinepistol: { hip: 1.36, ads: 1.48, roll: -0.20, adsRoll: -0.14, kick: 0.7 },
+  doublebarrel:  { hip: 1.08, ads: 1.30, roll: -0.44, adsRoll: -0.52, kick: 1.7 },
+  crossbow: { hip: 1.14, ads: 1.38, roll: -0.42, adsRoll: -0.52, kick: 0.6 }
 };
 
 const combatPoseEuler = new THREE.Euler(0, 0, 0, 'YXZ');
@@ -2092,6 +2209,10 @@ function fireOnce() {
   if (!(spatialAudio && spatialAudio.available)) playShot(w);
   combatApplyShotRecoil(w, shotAt);
   updateCombatHud();
+  if (w.burst) {
+    gun.burstLeft = gun.burstLeft > 0 ? gun.burstLeft - 1 : w.burst - 1;
+    if (!gun.burstLeft) gun.cooldown = w.burstGap;
+  }
 }
 
 /* ---------------- damage, death & respawn ---------------- */
@@ -2337,6 +2458,7 @@ function doRespawn() {
   gun.ammo = WEAPONS.map((w) => w.mag);
   cancelReload(false);
   gun.cooldown = 0;
+  gun.burstLeft = 0;
   gun.aiming = false;
   gun.trigger = false;
   gun.firePose = gun.kick = gun.viewAim = 0;
@@ -2593,6 +2715,10 @@ function updateCombat(dt, now) {
     } else if (reloadFillEl) {
       reloadFillEl.style.width = getReloadProgress() * 100 + '%';
     }
+  }
+  if (gun.burstLeft > 0) {
+    if (blocked || !currentWeapon().burst || gun.ammo[gun.index] <= 0) gun.burstLeft = 0;
+    else fireOnce();
   }
   if (!blocked && gun.trigger && currentWeapon().auto) {
     const before = gun.ammo[gun.index];

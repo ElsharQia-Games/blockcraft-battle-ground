@@ -28,7 +28,8 @@
    damage   : authority damage multiplier
    regen    : false disables health regeneration
    ladder   : Gun Game: each kill advances you to the next weapon */
-const MODES_GUN_LADDER = Object.freeze(['pistol', 'smg', 'shotgun', 'rifle', 'lmg', 'revolver', 'sniper']);
+// Strong guns first and the hardest last, so a leader has to earn the win.
+const MODES_GUN_LADDER = Object.freeze(['rifle', 'smg', 'shotgun', 'burst', 'lmg', 'machinepistol', 'doublebarrel', 'dmr', 'revolver', 'sniper', 'crossbow', 'pistol']);
 const MODES = Object.freeze([
   Object.freeze({
     id: 'tdm', name: 'Team Deathmatch', short: 'TDM',
@@ -44,7 +45,7 @@ const MODES = Object.freeze([
   }),
   Object.freeze({
     id: 'gungame', name: 'Gun Game', short: 'GUN GAME',
-    desc: 'Every kill swaps you to the next gun: pistol up to the sniper. First through all seven wins.',
+    desc: 'Every kill swaps you to the next gun, ending on the pistol. First through all twelve wins.',
     teams: false, weapons: null, ladder: MODES_GUN_LADDER, arenaRadius: 60, locked: true,
     scoreToWin: MODES_GUN_LADDER.length, respawnMs: 2600
   }),
@@ -63,25 +64,25 @@ const MODES = Object.freeze([
   Object.freeze({
     id: 'snipers', name: 'Snipers Only', short: 'SNIPERS',
     desc: 'Sniper rifles only inside a long arena. First to 15 kills.',
-    teams: false, weapons: Object.freeze(['sniper']), arenaRadius: 64, locked: true,
+    teams: false, weapons: Object.freeze(['sniper', 'dmr', 'crossbow']), arenaRadius: 64, locked: true,
     scoreToWin: 15, respawnMs: 3200
   }),
   Object.freeze({
     id: 'shotguns', name: 'Shotguns Only', short: 'SHOTGUNS',
     desc: 'Shotguns only inside a tight arena. First to 15 kills.',
-    teams: false, weapons: Object.freeze(['shotgun']), arenaRadius: 42, locked: true,
+    teams: false, weapons: Object.freeze(['shotgun', 'doublebarrel']), arenaRadius: 42, locked: true,
     scoreToWin: 15, respawnMs: 2600
   }),
   Object.freeze({
     id: 'sidearms', name: 'Sidearms', short: 'SIDEARMS',
     desc: 'Pistols and revolvers only in a compact arena. Aim for the head. First to 15.',
-    teams: false, weapons: Object.freeze(['pistol', 'revolver']), arenaRadius: 44, locked: true,
+    teams: false, weapons: Object.freeze(['pistol', 'revolver', 'machinepistol']), arenaRadius: 44, locked: true,
     scoreToWin: 15, respawnMs: 2600
   }),
   Object.freeze({
     id: 'lockdown', name: 'Lockdown', short: 'LOCKDOWN',
     desc: 'Red vs Blue in a tight arena with rifles, SMGs, shotguns and revolvers. First to 25.',
-    teams: true, weapons: Object.freeze(['rifle', 'smg', 'shotgun', 'revolver']),
+    teams: true, weapons: Object.freeze(['rifle', 'smg', 'shotgun', 'revolver', 'burst']),
     arenaRadius: 36, locked: true, scoreToWin: 25, respawnMs: 3200
   })
 ]);

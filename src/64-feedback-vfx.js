@@ -18,7 +18,12 @@ const VFX_WEAPON = {
   rifle:    [0.13,  0.85,  3.4,   1.0],
   lmg:      [0.15,  0.95,  3.8,   1.1],
   shotgun:  [0.42,  1.35,  5.2,   1.6],
-  sniper:   [0.55,  1.30,  5.6,   1.3]
+  sniper:   [0.55,  1.30,  5.6,   1.3],
+  dmr:      [0.30,  1.05,  4.4,   1.2],
+  burst:    [0.14,  0.80,  3.2,   0.9],
+  machinepistol: [0.07, 0.55, 2.2, 0.6],
+  doublebarrel:  [0.55, 1.60, 6.0, 0.0],
+  crossbow: [0.05,  0.0,   0.0,   0.0]
 };
 const VFX_MAX_CASINGS = 24;
 const VFX_MAX_PUFFS = 24;

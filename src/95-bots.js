@@ -10,7 +10,7 @@
 
 (function () {
   const NAMES = ['Rook', 'Ember', 'Slate', 'Moss', 'Flint', 'Cobalt', 'Birch', 'Onyx', 'Sable', 'Quartz', 'Ash', 'Basalt'];
-  const WEAPON_POOL = ['rifle', 'smg', 'shotgun', 'pistol', 'lmg', 'revolver'];
+  const WEAPON_POOL = ['rifle', 'smg', 'shotgun', 'pistol', 'lmg', 'revolver', 'dmr', 'burst', 'machinepistol', 'doublebarrel'];
   const SKILLS = {
     easy: { reaction: 800, aim: 0.14, head: 0.04, speed: 4.2, sight: 45 },
     normal: { reaction: 450, aim: 0.26, head: 0.1, speed: 5, sight: 70 },

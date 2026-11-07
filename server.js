@@ -67,8 +67,8 @@ const ALLOW_FORCE_RIDEABLE = process.env.BC_ALLOW_FORCE_RIDEABLE === '1';
 const SERVER_EPOCH = Date.now() - nodePerformance.now();
 const SERVER_SESSION = crypto.randomBytes(8).toString('hex');
 const SERVER_MODES = {
-  tdm: null, ffa: null, gungame: null, moon: null, hardcore: null, snipers: ['sniper'], shotguns: ['shotgun'],
-  sidearms: ['pistol', 'revolver'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver']
+  tdm: null, ffa: null, gungame: null, moon: null, hardcore: null, snipers: ['sniper', 'dmr', 'crossbow'], shotguns: ['shotgun', 'doublebarrel'],
+  sidearms: ['pistol', 'revolver', 'machinepistol'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver', 'burst']
 };
 // Keep in sync with MODES (src/15-modes.js) and src/90-net.js.
 const SERVER_TEAM_MODES = new Set(['tdm', 'lockdown', 'moon', 'hardcore']);
@@ -84,7 +84,7 @@ const SERVER_DRAGON_CATALOG_BOUNDS = ['minCX', 'maxCX', 'minCZ', 'maxCZ', 'minAl
    is a slow fallback only: these are fire cadences, not reload durations. */
 const SERVER_FIRE_MS = {
   pistol: 167, rifle: 94, shotgun: 800, smg: 68,
-  sniper: 1430, revolver: 353, lmg: 100
+  sniper: 1430, revolver: 353, lmg: 100, dmr: 250, burst: 75, machinepistol: 57, doublebarrel: 200, crossbow: 1000
 };
 const MAX_HP = 150; // keep in sync with MAX_HEALTH in src/60-combat.js
 const SPAWN_SHIELD_MS = 3000; // keep in sync with src/61-spawn-shield.js
@@ -681,7 +681,12 @@ const SERVER_WEAPONS = {
   smg: { reload: 1.45, mag: 32, damage: 15, pellets: 1, range: 70, head: 1.4 },
   sniper: { reload: 2.80, mag: 5, damage: 115, pellets: 1, range: 180, head: 2.0 },
   revolver: { reload: 2.40, mag: 6, damage: 58, pellets: 1, range: 105, head: 2.0 },
-  lmg: { reload: 3.60, mag: 75, damage: 21, pellets: 1, range: 145, head: 1.4 }
+  lmg: { reload: 3.60, mag: 75, damage: 21, pellets: 1, range: 145, head: 1.4 },
+  dmr: { reload: 2.20, mag: 12, damage: 44, pellets: 1, range: 150, head: 1.8 },
+  burst: { reload: 2.00, mag: 30, damage: 30, pellets: 1, range: 120, head: 1.5 },
+  machinepistol: { reload: 1.25, mag: 28, damage: 13, pellets: 1, range: 55, head: 1.3 },
+  doublebarrel: { reload: 2.60, mag: 2, damage: 18, pellets: 8, range: 24, head: 1.3 },
+  crossbow: { reload: 1.80, mag: 1, damage: 120, pellets: 1, range: 130, head: 2.0 }
 };
 
 function cleanWeapon(value, fallback) {

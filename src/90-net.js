@@ -9,9 +9,10 @@ const NET_SEND_MS = 50;
 const NET_MAX_QUEUE = 48;
 const NET_MAX_EDITS = 6000;
 const NET_MAX_PEERS = 32;
-const NET_FIRE_MS = { pistol: 167, rifle: 94, shotgun: 800, smg: 68, sniper: 1430, revolver: 353, lmg: 100 };
-const NET_MODE_WEAPONS = { tdm: null, ffa: null, gungame: null, moon: null, hardcore: null, snipers: ['sniper'],
-  shotguns: ['shotgun'], sidearms: ['pistol', 'revolver'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver'] };
+const NET_FIRE_MS = { pistol: 167, rifle: 94, shotgun: 800, smg: 68, sniper: 1430, revolver: 353, lmg: 100,
+  dmr: 250, burst: 75, machinepistol: 57, doublebarrel: 200, crossbow: 1000 };
+const NET_MODE_WEAPONS = { tdm: null, ffa: null, gungame: null, moon: null, hardcore: null, snipers: ['sniper', 'dmr', 'crossbow'],
+  shotguns: ['shotgun', 'doublebarrel'], sidearms: ['pistol', 'revolver', 'machinepistol'], lockdown: ['rifle', 'smg', 'shotgun', 'revolver', 'burst'] };
 // Authority-side mode rules; keep in sync with MODES (15-modes.js) and server.js.
 const NET_TEAM_MODES = new Set(['tdm', 'lockdown', 'moon', 'hardcore']);
 const NET_MODE_DAMAGE = { hardcore: 1.5 };
