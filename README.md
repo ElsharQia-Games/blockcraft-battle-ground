@@ -25,7 +25,8 @@ are in the menu below Play. **Esc** pauses.
 Turn the phone sideways. The movement stick appears wherever your left thumb lands: push to
 the rim to sprint, or pull well past the top to lock sprint on. Drag anywhere on the right to
 look; the fire button also steers while held, and there is a second fire button for the left
-thumb. Buttons are icons and only show when they do something: building swaps in Rotate, and
+thumb. The gun switch is the pill at the bottom centre, with the knife beside it. Buttons
+are icons and only show when they do something: building swaps in Rotate, and
 near a dragon a Ride button appears; on a dragon you get Up, Down and fire breath.
 
 The pencil at the top right (or **Edit touch controls** in Pause) opens the layout editor:

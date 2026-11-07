@@ -22,45 +22,49 @@ const TOUCH_REF_W = 844, TOUCH_REF_H = 390;   // a typical phone held sideways
 
 /* Each control: where it sits (pixels from the right/left and bottom of a
    reference phone, scaled to the screen) and when it shows. */
+/* Built around where a right thumb rests: fire under it, aim and reload a
+   short reach up, jump and crouch a short reach down, so the common moves
+   never need the thumb to travel far. The gun switch sits at the bottom
+   centre like other mobile shooters, where either thumb can tap it. */
 const TOUCH_CONTROLS = [
-  { id: 'fire', label: 'Fire', size: 88, x: -64, y: 120, side: 'r', when: 'always', main: true },
-  { id: 'aim', label: 'Aim', size: 60, x: -160, y: 196, side: 'r', when: 'gun' },
-  { id: 'jump', label: 'Jump', size: 70, x: -150, y: 54, side: 'r', when: 'onfoot' },
-  { id: 'crouch', label: 'Crouch', size: 58, x: -236, y: 44, side: 'r', when: 'onfoot' },
-  { id: 'reload', label: 'Reload', size: 50, x: -40, y: 232, side: 'r', when: 'gun' },
-  { id: 'swap', label: 'Next gun', size: 54, x: -250, y: 128, side: 'r', when: 'gun' },
-  { id: 'knife', label: 'Knife', size: 46, x: -326, y: 52, side: 'r', when: 'gun' },
-  { id: 'build', label: 'Build', size: 50, x: -40, y: 44, side: 'r', when: 'onfoot' },
-  { id: 'rotate', label: 'Rotate', size: 48, x: -250, y: 128, side: 'r', when: 'building' },
-  { id: 'ride', label: 'Ride', size: 60, x: -150, y: 290, side: 'r', when: 'mount' },
-  { id: 'rise', label: 'Up', size: 62, x: -150, y: 54, side: 'r', when: 'riding' },
-  { id: 'dive', label: 'Down', size: 56, x: -236, y: 44, side: 'r', when: 'riding' },
-  { id: 'fireLeft', label: 'Fire', size: 58, x: 176, y: 250, side: 'l', when: 'gun' },
-  { id: 'jetpack', label: 'Jetpack', size: 48, x: 48, y: 170, side: 'l', when: 'onfoot' }
+  { id: 'fire', label: 'Fire', size: 90, x: -118, y: 128, side: 'r', when: 'always', main: true },
+  { id: 'aim', label: 'Aim', size: 62, x: -212, y: 192, side: 'r', when: 'gun' },
+  { id: 'reload', label: 'Reload', size: 50, x: -108, y: 232, side: 'r', when: 'gun' },
+  { id: 'jump', label: 'Jump', size: 70, x: -54, y: 50, side: 'r', when: 'onfoot' },
+  { id: 'crouch', label: 'Crouch', size: 58, x: -146, y: 40, side: 'r', when: 'onfoot' },
+  { id: 'build', label: 'Build', size: 52, x: -232, y: 96, side: 'r', when: 'onfoot' },
+  { id: 'rotate', label: 'Rotate', size: 56, x: -212, y: 192, side: 'r', when: 'building' },
+  { id: 'jetpack', label: 'Jetpack', size: 50, x: -42, y: 232, side: 'r', when: 'onfoot' },
+  { id: 'ride', label: 'Ride', size: 60, x: -300, y: 232, side: 'r', when: 'mount' },
+  { id: 'rise', label: 'Up', size: 70, x: -54, y: 50, side: 'r', when: 'riding' },
+  { id: 'dive', label: 'Down', size: 58, x: -146, y: 40, side: 'r', when: 'riding' },
+  { id: 'fireLeft', label: 'Fire', size: 62, x: 152, y: 178, side: 'l', when: 'gun' },
+  { id: 'swap', label: 'Next gun', size: 44, w: 150, x: 0, y: 28, side: 'c', when: 'gun', pill: true },
+  { id: 'knife', label: 'Knife', size: 44, x: 112, y: 28, side: 'c', when: 'gun' }
 ];
 const TOUCH_TOP = [['pause', 'Pause'], ['score', 'Scores'], ['view', 'Camera'], ['edit', 'Edit layout']];
 
-/* Line icons, drawn at 24x24, so a button reads without text. */
+/* Solid 24x24 glyphs, readable at a glance under a thumb. */
 const TOUCH_ICONS = {
-  fire: '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
-  fireLeft: '<circle cx="12" cy="12" r="7"/><path d="M12 2v5M12 17v5M2 12h5M17 12h5"/>',
-  aim: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/>',
-  jump: '<path d="M5 13l7-7 7 7M12 6v13"/>',
-  crouch: '<path d="M5 11l7 7 7-7M12 18V5"/>',
-  reload: '<path d="M19 12a7 7 0 1 1-2.1-5"/><path d="M19 4v4h-4"/>',
-  swap: '<path d="M4 8h14l-3-3M20 16H6l3 3"/>',
-  knife: '<path d="M4 20l5-5M9 15l9-9c1-1 2 0 1 1l-7 9z"/>',
-  build: '<rect x="4" y="4" width="16" height="16" rx="1"/><path d="M4 12h16M12 4v16"/>',
-  rotate: '<path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M17 3v4h-4"/>',
-  ride: '<path d="M3 15c3-6 7-8 9-8s6 2 9 8M8 11l-2-5M16 11l2-5M12 13v6"/>',
-  rise: '<path d="M6 15l6-6 6 6"/>',
-  dive: '<path d="M6 9l6 6 6-6"/>',
-  jetpack: '<path d="M12 3c3 4 4 7 4 10a4 4 0 0 1-8 0c0-3 1-6 4-10z"/><path d="M10 21h4"/>',
-  pause: '<path d="M8 5v14M16 5v14"/>',
-  score: '<path d="M5 6h14M5 12h14M5 18h9"/>',
-  view: '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-  edit: '<path d="M4 20h4L19 9l-4-4L4 16z"/>',
-  breath: '<path d="M4 12h9M4 8h6M4 16h6"/><path d="M13 7l7 5-7 5z"/>'
+  fire: '<path d="M9 21h6v-2.2H9z"/><path d="M9 17.6h6V9c0-3-1.4-5.6-3-7.2C10.4 3.4 9 6 9 9z"/>',
+  fireLeft: '<path d="M9 21h6v-2.2H9z"/><path d="M9 17.6h6V9c0-3-1.4-5.6-3-7.2C10.4 3.4 9 6 9 9z"/>',
+  aim: '<path fill-rule="evenodd" d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18zm0 2.3a6.7 6.7 0 1 0 0 13.4 6.7 6.7 0 0 0 0-13.4z"/><path d="M11 1h2v6h-2zM11 17h2v6h-2zM1 11h6v2H1zM17 11h6v2h-6z"/><circle cx="12" cy="12" r="1.7"/>',
+  jump: '<path d="M12 2.5l7.5 8.5H15v5.5H9V11H4.5z"/><path d="M4 19h16v2.5H4z"/>',
+  crouch: '<path d="M12 18.5L4.5 10H9V3h6v7h4.5z"/><path d="M4 19.5h16V22H4z"/>',
+  reload: '<path d="M17.8 6.2A8.2 8.2 0 1 0 20.2 12h-2.4a5.8 5.8 0 1 1-1.7-4.1L13 11h8.2V2.8z"/>',
+  swap: '<path d="M2.5 7h17v4.5h-6.4l-1.1 2h-2.4l-.7 2.5-1.9 5H3.6l2.5-7.6L2.5 11.5z"/><path d="M19.5 8h2v2.5h-2z"/>',
+  knife: '<path d="M3 21.6l4.8-4.8 1.7 1.7-4.8 4.8z"/><path d="M8.7 15.5L19.6 4.6c.9-.9 2.2.4 1.3 1.3L13.4 16l-3.1 1z"/>',
+  build: '<path d="M2.5 4.5h9v4.5h-9zM12.5 4.5h9v4.5h-9zM2.5 10h4.5v4.5H2.5zM8 10h8v4.5H8zM17 10h4.5v4.5H17zM2.5 15.5h9V20h-9zM12.5 15.5h9V20h-9z"/>',
+  rotate: '<path d="M6.2 6.2A8.2 8.2 0 1 1 3.8 12h2.4a5.8 5.8 0 1 0 1.7-4.1L11 11H2.8V2.8z"/>',
+  ride: '<path d="M1.5 15c4.5-1 7-4.5 8-10 1 3.2 2.3 5.4 4.4 6.6C15 8.4 17.4 6 21 5c-.5 3.4-1.6 6-3.4 7.7 2.2 0 4.2.6 5.9 2-3.3 1.4-6.8 1.4-10.3.3-3.6 1.3-7.8 1.3-11.7 0z"/>',
+  rise: '<path d="M12 4.5l9.5 9.5-2.7 2.7L12 9.9l-6.8 6.8L2.5 14z"/>',
+  dive: '<path d="M12 19.5L2.5 10l2.7-2.7 6.8 6.8 6.8-6.8 2.7 2.7z"/>',
+  jetpack: '<rect x="4.5" y="2.5" width="6.5" height="12.5" rx="3"/><rect x="13" y="2.5" width="6.5" height="12.5" rx="3"/><path d="M5.5 16h4.5l-2.25 6zM14 16h4.5l-2.25 6z"/>',
+  pause: '<path d="M6 4h4.2v16H6zM13.8 4H18v16h-4.2z"/>',
+  score: '<path d="M4 4.5h16v3.2H4zM4 10.4h16v3.2H4zM4 16.3h10.5v3.2H4z"/>',
+  view: '<path fill-rule="evenodd" d="M4 7h3l1.6-2.2h6.8L17 7h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1zm8 2.6a3.9 3.9 0 1 0 0 7.8 3.9 3.9 0 0 0 0-7.8z"/>',
+  edit: '<path d="M3 17.3V21h3.7L17.8 9.9l-3.7-3.7zM20.7 7.1c.4-.4.4-1 0-1.4l-2.4-2.4a1 1 0 0 0-1.4 0l-1.8 1.8 3.8 3.8z"/>',
+  breath: '<path d="M12 1.5c1.2 4.2 5.5 6.4 5.5 11.7a5.5 5.5 0 0 1-11 0c0-2.8 1.6-4.4 2.7-5.5.3 2.2 1.4 3.3 2.5 3.6-.7-3.4-.6-6.6.3-9.8z"/>'
 };
 
 const touchState = {
@@ -265,25 +269,26 @@ function touchPlacement(def) {
   const w = window.innerWidth, h = window.innerHeight;
   const fit = Math.min(1.25, Math.max(0.7, Math.min(w / TOUCH_REF_W, h / TOUCH_REF_H)));
   const size = Math.round(def.size * fit * touchPrefs.scale * (Number.isFinite(saved.scale) ? saved.scale : 1));
+  const width = def.w ? Math.round(def.w * fit * touchPrefs.scale * (Number.isFinite(saved.scale) ? saved.scale : 1)) : size;
   let cx, cy;
   if (Number.isFinite(saved.fx) && Number.isFinite(saved.fy)) { cx = saved.fx * w; cy = saved.fy * h; }
   else {
-    cx = def.side === 'r' ? w + def.x * fit : def.x * fit;
+    cx = def.side === 'r' ? w + def.x * fit : def.side === 'c' ? w / 2 + def.x * fit : def.x * fit;
     cy = h - def.y * fit;
   }
-  const half = size / 2;
-  cx = Math.max(half + 4, Math.min(w - half - 4, cx));
-  cy = Math.max(half + 4, Math.min(h - half - 4, cy));
-  return { cx, cy, size };
+  cx = Math.max(width / 2 + 4, Math.min(w - width / 2 - 4, cx));
+  cy = Math.max(size / 2 + 4, Math.min(h - size / 2 - 4, cy));
+  return { cx, cy, size, width };
 }
 
 function touchLayout() {
   if (!touchUI.root) return;
   for (const def of TOUCH_CONTROLS) {
     const btn = touchUI.buttons[def.id], p = touchPlacement(def);
-    btn.style.left = (p.cx - p.size / 2) + 'px';
+    btn.style.left = (p.cx - p.width / 2) + 'px';
     btn.style.top = (p.cy - p.size / 2) + 'px';
-    btn.style.width = btn.style.height = p.size + 'px';
+    btn.style.width = p.width + 'px';
+    btn.style.height = p.size + 'px';
   }
   touchUI.root.style.setProperty('--tc-opacity', String(touchPrefs.opacity));
 }
@@ -301,7 +306,7 @@ function touchBuildUI() {
   touchUI.stickBase = root.querySelector('.tc-stick');
   touchUI.stickKnob = touchUI.stickBase.querySelector('i');
   for (const def of TOUCH_CONTROLS) {
-    touchUI.buttons[def.id] = touchButton(root, def.id, def.label, 'tc-' + def.id + (def.main ? ' tc-main' : ''));
+    touchUI.buttons[def.id] = touchButton(root, def.id, def.label, 'tc-' + def.id + (def.main ? ' tc-main' : '') + (def.pill ? ' tc-pill' : ''));
   }
   touchUI.fire = touchUI.buttons.fire;
   const top = root.querySelector('.tc-top');
@@ -328,21 +333,29 @@ function touchBuildUI() {
     #touchControls .tc-stick i { position: absolute; left: 50%; top: 50%; width: 46px; height: 46px; margin: -23px;
       border-radius: 50%; background: rgba(242, 241, 238, .85); }
     #touchControls .tc-btn { pointer-events: auto; touch-action: none; position: absolute; display: none;
-      place-items: center; border-radius: 50%; border: 2px solid rgba(242, 241, 238, .22); padding: 0;
-      background: rgba(14, 16, 19, .55); color: #f2f1ee; opacity: var(--tc-opacity); }
+      place-items: center; border-radius: 50%; border: 1.5px solid rgba(242, 241, 238, .28); padding: 0;
+      background: rgba(10, 12, 15, .5); color: #f2f1ee; opacity: var(--tc-opacity); }
     #touchControls .tc-btn.show { display: grid; }
-    #touchControls .tc-btn svg { width: 46%; height: 46%; fill: none; stroke: currentColor; stroke-width: 2.2;
-      stroke-linecap: round; stroke-linejoin: round; }
+    #touchControls .tc-btn svg { width: 50%; height: 50%; fill: currentColor; }
+    #touchControls .tc-main svg { width: 44%; height: 44%; }
+    #touchControls .tc-pill { border-radius: 22px; grid-auto-flow: column; gap: 8px; padding: 0 14px; justify-content: center; }
+    #touchControls .tc-pill svg { width: 22px; height: 22px; }
+    #touchControls .tc-btn.tc-pill span { position: static; width: auto; height: auto; overflow: visible; clip-path: none;
+      font: 700 13px/1 system-ui, sans-serif; letter-spacing: .02em; white-space: nowrap; }
     #touchControls .tc-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
     /* No backdrop-filter: a blur behind every button is re-composited each
        frame and is expensive on phone GPUs. */
     #touchControls .tc-btn.held { background: rgba(242, 241, 238, .4); }
     #touchControls .tc-btn.on { background: #f2f1ee; color: #101113; border-color: #f2f1ee; }
-    #touchControls .tc-main { background: rgba(232, 64, 63, .78); border-color: rgba(255, 210, 205, .5); }
+    #touchControls .tc-main { background: rgba(214, 48, 49, .72); border: 2px solid rgba(255, 220, 215, .55); }
     #touchControls .tc-main.held { background: #e8403f; }
     #touchControls .tc-top { position: absolute; right: max(12px, env(safe-area-inset-right)); top: max(8px, env(safe-area-inset-top));
       display: flex; gap: 8px; }
     #touchControls .tc-top .tc-btn { position: static; display: grid; width: 44px; height: 44px; border-radius: 10px; }
+    #touchControls .tc-top .tc-btn svg { width: 46%; height: 46%; }
+    /* The pill shows the gun; ping moves up out of its way. */
+    body.touch-playing .hud-net { bottom: auto !important; top: 58px !important; right: max(12px, env(safe-area-inset-right)) !important;
+      left: auto !important; transform: none !important; }
     #touchRotate { display: none; }
     @media (orientation: portrait) {
       body.touch-ui #touchRotate { display: grid; place-items: center; position: fixed; inset: 0; z-index: 9000;
@@ -400,7 +413,7 @@ function touchRefreshButtons(force) {
   const canMount = !riding && api && typeof api.canMount === 'function' && api.canMount();
   const aimOn = gunOut && gun.aiming;
   const knifeOut = gunOut && currentWeapon().melee;
-  const key = [!!riding, building, quickBuild.active, quickBuild.kind, combatMode, aimOn, !!keys.KeyC, canMount, knifeOut,
+  const key = [!!riding, building, quickBuild.active, quickBuild.kind, combatMode, aimOn, !!keys.KeyC, canMount, knifeOut, gun.index,
     touchPrefs.leftFire, touchState.editing].join('|');
   if (key === touchButtonsKey && !force) return;
   touchButtonsKey = key;
@@ -421,6 +434,8 @@ function touchRefreshButtons(force) {
   touchUI.buttons.knife.classList.toggle('on', !!knifeOut);
   touchUI.buttons.build.classList.toggle('on', !!quickBuild.active);
   touchUI.buttons.ride.classList.toggle('on', !!riding);
+  const name = touchUI.buttons.swap.querySelector('span'), gunName = currentWeapon().name;
+  if (name.textContent !== gunName) name.textContent = gunName;
 }
 
 /* ---------------- touch input ---------------- */
@@ -567,7 +582,13 @@ function touchInstall() {
   window.addEventListener('orientationchange', touchLayout);
   BC.on('death', () => touchReleaseAll(), -50);
   BC.on('worldWillReset', () => touchReleaseAll(), -50);
-  BC.on('frame', () => { if (touchState.playing) touchRefreshButtons(); }, 90);
+  let touchRefreshAt = 0;
+  BC.on('frame', () => {
+    const now = performance.now();
+    if (!touchState.playing || now < touchRefreshAt) return;
+    touchRefreshAt = now + 120;
+    touchRefreshButtons();
+  }, 90);
   touchLayout();
 }
 

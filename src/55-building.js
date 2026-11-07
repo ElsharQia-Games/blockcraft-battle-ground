@@ -557,7 +557,9 @@ function updateBuildingHud(plan) {
   text(h.cost, plan.cost + ' voxel' + (plan.cost === 1 ? '' : 's') + ' · ' + blockName(plan.material) + ' · ' +
     (plan.available === Infinity ? '∞' : plan.available) + ' available' +
     (plan.reused ? ' · ' + plan.reused + ' reused' : ''));
-  text(h.hint, plan.reason + ' · 1 wall · 2 floor · 3 ramp · R rotate · Shift+wheel material · Q gun');
+  // Phones have buttons for all of this; only the reason makes sense there.
+  text(h.hint, BC.api.touch && BC.api.touch.enabled ? plan.reason
+    : plan.reason + ' · 1 wall · 2 floor · 3 ramp · R rotate · Shift+wheel material · Q gun');
   h.root.classList.add('show');
   h.root.classList.toggle('ready', plan.ok);
   h.root.classList.toggle('complete', plan.code === 'complete');
