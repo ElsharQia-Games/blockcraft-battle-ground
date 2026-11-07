@@ -1517,6 +1517,9 @@ function handleNet(msg, from, nested) {
     case 'dragonLife':
       dragonLifeReceive(msg);
       break;
+    case 'matchEnd':
+      matchEndReceive(msg);
+      break;
     case 'leave':
       net.authPlayers.delete(msg.id);
       for (const [index, lease] of net.rides) if (lease.id === msg.id) net.rides.delete(index);
@@ -2691,7 +2694,7 @@ function roomInbound(from, text) {
     const packet = msg.packet;
     if (!net.authorityReady || msg.epoch !== net.epoch || msg.generation !== net.generation || !netInboundOK(packet)) return;
     if (!['join', 'state', 'states', 'roster', 'health', 'correction', 'shot', 'hit', 'voxelHit', 'edit', 'edits', 'editAck', 'editReject',
-      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'dragonLife', 'leave', 'teamSet'].includes(packet.t) ||
+      'died', 'respawn', 'ride', 'rideGrant', 'rideDenied', 'breath', 'dragons', 'dragonLife', 'matchEnd', 'leave', 'teamSet'].includes(packet.t) ||
       packet.generation !== net.generation || packet.epoch !== net.epoch) return;
     handleNet(packet, from);
   }

@@ -235,7 +235,7 @@ function combatActionBlocked() {
     const riding = combatApi('riding'), killcam = combatApi('killcam');
     return combatWorldBusy() || !!(riding && riding.active) || !!(killcam && killcam.active) ||
       !!(typeof loading !== 'undefined' && loading) || !!(typeof craftOpen !== 'undefined' && craftOpen) ||
-      !!(typeof BC !== 'undefined' && BC && BC.flags && (BC.flags.paused || BC.flags.playerRepairBlocked)) ||
+      !!(typeof BC !== 'undefined' && BC && BC.flags && (BC.flags.paused || BC.flags.playerRepairBlocked || BC.flags.matchOver)) ||
       !!(typeof document !== 'undefined' && document.hidden);
   } catch (e) { return true; } // Later classic-script globals may still be in their TDZ.
 }
