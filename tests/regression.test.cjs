@@ -196,7 +196,7 @@ test('audio: seven verified CC0 payloads, file-safe decode, unique reports and b
       const b = window.__blockcraft;
       b.settings.set('muted', false); await b.audio.resume();
     });
-    await page.wait('all seven embedded samples decoded once', () => window.__blockcraft.audio.stats().sampledWeapons === 7,
+    await page.wait('all twelve embedded samples decoded once', () => window.__blockcraft.audio.stats().sampledWeapons === 12,
       undefined, { timeout: 20_000 });
     return page.evaluate(audioProbe);
   }, { base: lab.fileURL, play: true });

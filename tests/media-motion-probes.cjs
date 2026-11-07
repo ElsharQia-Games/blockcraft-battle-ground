@@ -2,7 +2,7 @@
 
 function audioProbe() {
   const k = window.__bcTest, { b, check } = k, engine = b.audio;
-  check(engine.stats().sampledWeapons === 7 && engine.stats().sampleFailures === 0, 'Recorded samples did not decode');
+  check(engine.stats().sampledWeapons === 12 && engine.stats().sampleFailures === 0, 'Recorded samples did not decode');
   const ctx = engine.getContext();
   check(ctx && ctx.state === 'running', 'Spatial audio does not share the running combat context');
   const oldSource = ctx.createBufferSource, oldPanner = ctx.createPanner;
@@ -30,12 +30,12 @@ function audioProbe() {
       }
       check(peak > 0.01 && peak <= 1, 'Weapon sample is silent or clips', { id, peak });
       const source = engine.weaponSource(id);
-      check(source.playback === 'recording + procedural layers' && source.licence === 'CC0-1.0',
+      check(source.playback === 'recording' && source.licence === 'CC0-1.0',
         'Audio provenance does not reflect the played recording', source);
       signatures.push(`${buffer.length}:${hash >>> 0}`);
       rows.push({ id, duration: buffer.duration, peak, source, position: from.toArray() });
     }
-    check(new Set(signatures).size === 7, 'Weapon reports reuse one indistinguishable sound buffer');
+    check(new Set(signatures).size === 12, 'Weapon reports reuse one indistinguishable sound buffer');
     check(panners.length > 0 && panners.every((p) => p.panningModel === 'HRTF' && p.distanceModel === 'inverse' &&
       p.refDistance === 6 && p.maxDistance === 90), 'Weapon reports lack directional/distance panners');
     const origins = panners.map((p) => [p.positionX.value, p.positionY.value, p.positionZ.value]);

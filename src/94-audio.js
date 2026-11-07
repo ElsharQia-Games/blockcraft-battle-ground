@@ -3,13 +3,19 @@
    Loads after 90-net.js (and after 60-combat.js so the shared audio() context
    can be reused). Builds a WebAudio graph:
      BufferSource -> BiquadFilter -> Gain -> PannerNode -> master -> limiter
-   CC0 firearm excerpts come from assets/audio/weapon-samples.js, a classic
-   script containing base64 audio, not runtime fetches (including on file://).
-   Decode once after a user gesture; bake small procedural transient/body/
-   mechanism layers into cached mono buffers, so each round uses ONE voice.
-   Reloads, actions and other game sounds are procedural, not sourced recordings.
-   See assets/audio/LICENCES.md for provenance and the AK-47-to-LMG adaptation.
-   Without assets/decoding/WebAudio, the existing procedural/no-op fallback stays. */
+   Recordings come from assets/audio/weapon-samples.js (gunshots) and
+   assets/audio/sfx-bank.js (everything else): classic scripts holding base64
+   audio, so nothing is fetched at runtime, including on file://. They decode
+   once after a user gesture and each event uses ONE voice.
+   Reloads are assembled from recordings of each gun's own handling, placed on
+   that weapon's reload stages. See assets/audio/LICENCES.md for provenance.
+   The synthesized builders below are only the fallback when a clip is missing
+   or fails to decode; the heartbeat is the one sound that is always synthesized.
+
+   Mix: every clip is levelled in the asset build, so spec.vol is the mix level
+   and a caller's volume only scales it against spec.ref. Priority sounds (hit
+   and kill confirms, damage taken) bypass duckBus and briefly dip everything
+   else, so they stay clear of gunfire. */
 'use strict';
 
 (function () {
@@ -27,6 +33,7 @@
 
   var ctx = null;
   var master = null;
+  var duckBus = null;
   var limiter = null;
   var outputGuard = null;
   var graphReady = false;
@@ -65,6 +72,10 @@
   var lastRespawnSfx = -1e9;
 
   var jetpackLoop = null;
+  var localReload = null;
+  var shotChoke = Object.create(null);
+  var CHOKE_SECONDS = { machinepistol: 0.018, smg: 0.022, burst: 0.024, rifle: 0.03, lmg: 0.034 };
+  var OWN_SOUND_METRES = 2.5;
 
   /* ------------------------------------------------------------------ utils */
 
@@ -145,6 +156,8 @@
     try {
       master = ctx.createGain();
       master.gain.value = targetMasterGain();
+      duckBus = ctx.createGain();
+      duckBus.connect(master);
       var output = ctx.destination;
       try {
         // Transparent through ordinary levels; bound stacked transients even
@@ -349,7 +362,7 @@
       var entry = asset && asset.entries && asset.entries[id];
       return {
         weapon: id,
-        playback: recordedBuffers[id] ? 'recording + procedural layers' : 'procedural fallback',
+        playback: recordedBuffers[id] ? 'recording' : 'procedural fallback',
         title: entry ? entry.title : null,
         creator: entry ? asset.creator : null,
         source: entry ? asset.sourceUrl : null,
@@ -357,7 +370,7 @@
         licence: entry ? asset.licence : null,
         licenceUrl: entry ? asset.licenceUrl : null,
         sha256: entry ? entry.sha256 : null,
-        adapted: id === 'lmg' ? 'AK-47 recording, processed as an LMG; not an original LMG recording' : null
+        adapted: entry && entry.adapted || null
       };
     },
     getContext: function () { return ctx || null; },
@@ -415,7 +428,7 @@
   }
 
   function makeChain() {
-    var chain = { src: null, gain: null, filter: null, panner: null, stereo: null, stopAt: 0, effective: 0 };
+    var chain = { src: null, gain: null, filter: null, panner: null, stereo: null, out: null, bus: null, stopAt: 0, effective: 0 };
     chain.gain = ctx.createGain();
     chain.gain.gain.value = 0.0001;
     try {
@@ -444,16 +457,32 @@
     }
 
     if (chain.filter) chain.filter.connect(chain.gain);
-    if (chain.panner) {
-      chain.gain.connect(chain.panner);
-      chain.panner.connect(master);
-    } else if (chain.stereo) {
-      chain.gain.connect(chain.stereo);
-      chain.stereo.connect(master);
-    } else {
-      chain.gain.connect(master);
-    }
+    if (chain.panner) chain.gain.connect(chain.panner);
+    else if (chain.stereo) chain.gain.connect(chain.stereo);
+    chain.out = chain.panner || chain.stereo || chain.gain;
+    routeChain(chain, duckBus);
     return chain;
+  }
+
+  function routeChain(chain, bus) {
+    if (chain.bus === bus) return;
+    try {
+      if (chain.bus) chain.out.disconnect(chain.bus);
+      chain.out.connect(bus);
+      chain.bus = bus;
+    } catch (e) { /* keeps its previous route */ }
+  }
+
+  /* A short dip of everything except the priority sounds. It restores itself. */
+  function duckOthers(depth) {
+    if (!duckBus) return;
+    var t = ctx.currentTime, g = duckBus.gain;
+    try {
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.setTargetAtTime(depth, t, 0.006);
+      g.setTargetAtTime(1, t + 0.11, 0.07);
+    } catch (e) { /* cosmetic */ }
   }
 
   function destroyChain(chain) {
@@ -589,42 +618,88 @@
 
   /* --------------------------------------------------------- buffer specs */
 
+  /* vol is the mix level of the levelled recording. The other fields only
+     shape the synthesized fallback report. */
   var SHOT_SPEC = {
-    pistol:   { dur: 0.32, cut: 6200, thump: 165, decay: 5.0, crack: 0.005, crackAmp: 0.60, thumpAmp: 0.38, drive: 1.35, vol: 0.55 },
-    rifle:    { dur: 0.28, cut: 7200, thump: 155, decay: 6.0, crack: 0.004, crackAmp: 0.58, thumpAmp: 0.28, drive: 1.30, vol: 0.42 },
-    shotgun:  { dur: 0.50, cut: 3100, thump:  88, decay: 3.2, crack: 0.010, crackAmp: 0.58, thumpAmp: 0.60, drive: 1.45, vol: 0.80 },
-    smg:      { dur: 0.21, cut: 7900, thump: 205, decay: 7.2, crack: 0.003, crackAmp: 0.48, thumpAmp: 0.22, drive: 1.20, vol: 0.34 },
-    sniper:   { dur: 0.64, cut: 4300, thump:  76, decay: 3.4, crack: 0.009, crackAmp: 0.80, thumpAmp: 0.65, drive: 1.45, vol: 0.95 },
-    revolver: { dur: 0.40, cut: 5600, thump: 123, decay: 4.2, crack: 0.007, crackAmp: 0.70, thumpAmp: 0.48, drive: 1.40, vol: 0.73 },
-    lmg:      { dur: 0.42, cut: 4800, thump: 102, decay: 4.8, crack: 0.006, crackAmp: 0.62, thumpAmp: 0.46, drive: 1.35, vol: 0.62 }
+    pistol:   { vol: 0.85, dur: 0.32, cut: 6200, thump: 165, decay: 5.0, crack: 0.005, crackAmp: 0.60, thumpAmp: 0.38, drive: 1.35 },
+    rifle:    { vol: 0.77, dur: 0.28, cut: 7200, thump: 155, decay: 6.0, crack: 0.004, crackAmp: 0.58, thumpAmp: 0.28, drive: 1.30 },
+    shotgun:  { vol: 0.94, dur: 0.50, cut: 3100, thump:  88, decay: 3.2, crack: 0.010, crackAmp: 0.58, thumpAmp: 0.60, drive: 1.45 },
+    smg:      { vol: 0.72, dur: 0.21, cut: 7900, thump: 205, decay: 7.2, crack: 0.003, crackAmp: 0.48, thumpAmp: 0.22, drive: 1.20 },
+    sniper:   { vol: 0.95, dur: 0.64, cut: 4300, thump:  76, decay: 3.4, crack: 0.009, crackAmp: 0.80, thumpAmp: 0.65, drive: 1.45 },
+    revolver: { vol: 0.80, dur: 0.40, cut: 5600, thump: 123, decay: 4.2, crack: 0.007, crackAmp: 0.70, thumpAmp: 0.48, drive: 1.40 },
+    lmg:      { vol: 0.79, dur: 0.42, cut: 4800, thump: 102, decay: 4.8, crack: 0.006, crackAmp: 0.62, thumpAmp: 0.46, drive: 1.35 },
+    dmr:      { vol: 0.80, dur: 0.46, cut: 5200, thump: 118, decay: 4.2, crack: 0.006, crackAmp: 0.68, thumpAmp: 0.44, drive: 1.35 },
+    burst:    { vol: 0.74, dur: 0.24, cut: 6800, thump: 150, decay: 6.4, crack: 0.004, crackAmp: 0.58, thumpAmp: 0.28, drive: 1.30 },
+    machinepistol: { vol: 0.62, dur: 0.15, cut: 8400, thump: 225, decay: 8.5, crack: 0.003, crackAmp: 0.46, thumpAmp: 0.18, drive: 1.20 },
+    doublebarrel:  { vol: 0.95, dur: 0.62, cut: 2800, thump:  76, decay: 2.9, crack: 0.012, crackAmp: 0.60, thumpAmp: 0.70, drive: 1.50 },
+    crossbow: { vol: 0.31, dur: 0.30, cut: 2600, thump: 190, decay: 7.0, crack: 0.003, crackAmp: 0.22, thumpAmp: 0.30, drive: 1.10 }
   };
-  var SHOT_IDS = { pistol: 1, rifle: 1, shotgun: 1, smg: 1, sniper: 1, revolver: 1, lmg: 1 };
+  var SHOT_IDS = { pistol: 1, rifle: 1, shotgun: 1, smg: 1, sniper: 1, revolver: 1, lmg: 1,
+    dmr: 1, burst: 1, machinepistol: 1, doublebarrel: 1, crossbow: 1 };
   var WEAPON_IDS = Object.keys(SHOT_IDS);
   var ACTION_IDS = { pump: 1, bolt: 1, cylinder: 1 };
   var SURFACES = { grass: 1, stone: 1, wood: 1, snow: 1, soft: 1, metal: 1, glass: 1 };
+  // Beyond FAR_SHOT_METRES a shot is the distant report of its weapon family.
+  var FAR_SHOT_METRES = 45;
+  var FAR_FAMILY = { pistol: 'light', smg: 'light', machinepistol: 'light', revolver: 'light',
+    rifle: 'rifle', burst: 'rifle', dmr: 'rifle', lmg: 'heavy', sniper: 'heavy',
+    shotgun: 'shotgun', doublebarrel: 'shotgun' };
+  // Reload timing for a gun whose handling table is not available.
+  var RELOAD_FALLBACK = {
+    pistol: [1.15, [[0.14, 'out'], [0.43, 'in'], [0.72, 'rack']]],
+    rifle: [1.85, [[0.15, 'out'], [0.44, 'in'], [0.74, 'rack']]],
+    shotgun: [2.35, [[0.12, 'open'], [0.17, 'shell'], [0.82, 'rack']]],
+    smg: [1.45, [[0.12, 'out'], [0.36, 'in'], [0.65, 'rack']]],
+    sniper: [2.8, [[0.10, 'open'], [0.21, 'rack'], [0.34, 'out'], [0.52, 'in'], [0.74, 'close']]],
+    revolver: [2.4, [[0.08, 'open'], [0.25, 'out'], [0.50, 'in'], [0.79, 'close']]],
+    lmg: [3.6, [[0.10, 'open'], [0.26, 'out'], [0.47, 'in'], [0.57, 'shell'], [0.79, 'close'], [0.91, 'rack']]],
+    dmr: [2.2, [[0.14, 'out'], [0.44, 'in'], [0.74, 'rack']]],
+    burst: [2.0, [[0.15, 'out'], [0.44, 'in'], [0.74, 'rack']]],
+    machinepistol: [1.25, [[0.14, 'out'], [0.42, 'in'], [0.7, 'rack']]],
+    doublebarrel: [2.6, [[0.12, 'open'], [0.34, 'out'], [0.55, 'shell'], [0.85, 'close']]],
+    crossbow: [1.8, [[0.2, 'open'], [0.6, 'in'], [0.85, 'close']]]
+  };
 
+  /* vol: mix level. ref: the volume emitters normally pass, so a caller's
+     volume scales relative to the mix. Kinds without ref use the caller's
+     volume directly; footsteps and landings keep their exact tuned levels.
+     solo: heard only by this player, so it stays centred. priority: bypasses
+     the duck bus and dips the rest of the mix to that gain. */
   var KIND_SPEC = {
-    impact:      { playCut: 2200, vol: 0.50, variants: 3 },
-    hit:         { playCut: 4500, vol: 0.55, variants: 2 },
-    reload:      { playCut: 5000, vol: 0.45, variants: 2 },
-    pump:        { playCut: 4800, vol: 0.34, variants: 2 },
-    bolt:        { playCut: 6200, vol: 0.30, variants: 2 },
-    cylinder:    { playCut: 6500, vol: 0.32, variants: 2 },
-    death:       { playCut: 2600, vol: 0.80, variants: 2 },
-    respawn:     { playCut: 5000, vol: 0.50, variants: 2 },
-    splash:      { playCut: 3200, vol: 0.50, variants: 2 },
-    jetpackOn:   { playCut: 4000, vol: 0.50, variants: 2 },
+    impact:      { playCut: 7000, vol: 0.34, ref: 0.5, variants: 3 },
+    hit:         { playCut: 9000, vol: 0.78, ref: 0.9, variants: 2, solo: 1, priority: 0.62 },
+    reload:      { playCut: 9000, vol: 0.42, ref: 0.5, variants: 2, fixedRate: 1, solo: 1 },
+    pump:        { playCut: 9000, vol: 0.44, ref: 0.36, variants: 2, fixedRate: 1 },
+    bolt:        { playCut: 9000, vol: 0.44, ref: 0.36, variants: 2, fixedRate: 1 },
+    cylinder:    { playCut: 9000, vol: 0.30, ref: 0.24, variants: 2, fixedRate: 1 },
+    death:       { playCut: 6000, vol: 0.62, ref: 0.9, variants: 2 },
+    respawn:     { playCut: 9000, vol: 0.30, ref: 0.5, variants: 2, solo: 1 },
+    splash:      { playCut: 7000, vol: 0.34, ref: 0.55, variants: 2 },
     jetpackLoop: { playCut: 1800, vol: 0.40, variants: 1 },
-    dragonRoar:  { playCut: 2200, vol: 0.85, variants: 2 },
-    dragonBreath:{ playCut: 4200, vol: 0.80, variants: 2 },
-    killcam:     { playCut: 1500, vol: 0.55, variants: 2 },
-    confirm:     { playCut: 9000, vol: 0.38, variants: 1 },
-    headshot:    { playCut: 9000, vol: 0.32, variants: 1 },
-    break:       { playCut: 6000, vol: 0.42, variants: 1 },
-    dryfire:     { playCut: 6000, vol: 0.30, variants: 1 },
+    dragonRoar:  { playCut: 7000, vol: 0.90, ref: 0.7, variants: 2 },
+    dragonBreath:{ playCut: 7000, vol: 0.74, ref: 0.7, variants: 2 },
+    dragonHit:   { playCut: 9000, vol: 0.40, ref: 0.7, variants: 3 },
+    dragonDeath: { playCut: 8000, vol: 0.95, ref: 1, variants: 1 },
+    dragonSpawn: { playCut: 3200, vol: 0.62, ref: 0.6, variants: 1 },
+    wingFlap:    { playCut: 5000, vol: 0.52, ref: 0.6, variants: 3 },
+    shield:      { playCut: 9000, vol: 0.13, ref: 0.5, variants: 1, solo: 1 },
+    shieldBlock: { playCut: 12000, vol: 0.32, ref: 0.5, variants: 2 },
+    killcam:     { playCut: 6000, vol: 0.34, ref: 0.9, variants: 1, solo: 1 },
+    heartbeat:   { playCut: 1500, vol: 0.34, ref: 0.16, variants: 1, solo: 1, fixedRate: 1 },
+    confirm:     { playCut: 12000, vol: 0.85, ref: 0.5, variants: 1, solo: 1, priority: 0.56 },
+    headshot:    { playCut: 12000, vol: 0.56, ref: 0.32, variants: 1, solo: 1, priority: 0.62 },
+    hitConfirm:  { playCut: 12000, vol: 0.66, ref: 0.2, variants: 1, solo: 1, priority: 0.74 },
+    swap:        { playCut: 9000, vol: 0.32, ref: 0.4, variants: 2, solo: 1 },
+    combatMode:  { playCut: 9000, vol: 0.20, ref: 0.2, variants: 1, solo: 1 },
+    break:       { playCut: 7000, vol: 0.34, ref: 0.42, variants: 1 },
+    dryfire:     { playCut: 9000, vol: 0.30, ref: 0.3, variants: 1, solo: 1 },
     step:        { playCut: 3800, vol: 0.08, variants: 1 },
     land:        { playCut: 1600, vol: 0.15, variants: 1 },
-    ui:          { playCut: 6000, vol: 0.35, variants: 2 }
+    ui:          { playCut: 9000, vol: 0.14, ref: 0.35, variants: 2, solo: 1 },
+    knifeEquip:  { playCut: 9000, vol: 0.30, ref: 0.4, variants: 1, solo: 1 },
+    knifeSlash:  { playCut: 9000, vol: 0.60, ref: 0.5, variants: 3 },
+    knifeStab:   { playCut: 9000, vol: 0.50, ref: 0.5, variants: 2 },
+    knifeHit:    { playCut: 9000, vol: 0.46, ref: 0.5, variants: 2 }
   };
 
   var KIND_ALIAS = {
@@ -636,25 +711,21 @@
     death: 'death', died: 'death', kill: 'death', eliminated: 'death',
     respawn: 'respawn', spawn: 'respawn',
     splash: 'splash', water: 'splash', swim: 'splash',
-    jetpack: 'jetpackOn', jetpackon: 'jetpackOn', jetpackloop: 'jetpackLoop',
+    jetpackloop: 'jetpackLoop',
     dragonroar: 'dragonRoar', roar: 'dragonRoar', growl: 'dragonRoar',
     dragonbreath: 'dragonBreath', breath: 'dragonBreath', firebreath: 'dragonBreath',
-    killcam: 'killcam', heartbeat: 'killcam',
+    dragonhit: 'dragonHit', dragondeath: 'dragonDeath', dragonspawn: 'dragonSpawn',
+    wingflap: 'wingFlap', wings: 'wingFlap', dragonflap: 'wingFlap',
+    shield: 'shield', spawnshield: 'shield', shieldblock: 'shieldBlock', deflect: 'shieldBlock',
+    killcam: 'killcam', heartbeat: 'heartbeat',
+    knifeequip: 'knifeEquip', knifeslash: 'knifeSlash', knifestab: 'knifeStab', knifehit: 'knifeHit',
     ui: 'ui', blip: 'ui', click: 'ui', beep: 'ui',
     confirm: 'confirm', killconfirm: 'confirm', step: 'step', footstep: 'step', land: 'land', landing: 'land',
-    headshot: 'headshot', break: 'break', blockbreak: 'break', dryfire: 'dryfire', empty: 'dryfire'
+    headshot: 'headshot', break: 'break', blockbreak: 'break', dryfire: 'dryfire', empty: 'dryfire',
+    hitconfirm: 'hitConfirm', swap: 'swap', combatmode: 'combatMode'
   };
-
-  function weaponReport(id) {
-    try {
-      if (typeof WEAPONS !== 'undefined' && WEAPONS) {
-        for (var i = 0; i < WEAPONS.length; i++) {
-          if (WEAPONS[i] && WEAPONS[i].id === id) return WEAPONS[i];
-        }
-      }
-    } catch (e) { /* ignore */ }
-    return null;
-  }
+  // ui events carry the real sound in their action.
+  var UI_ACTIONS = { hitconfirm: 'hitConfirm', swap: 'swap', combatmode: 'combatMode' };
 
   function newBuffer(seconds) {
     var len = Math.max(1, Math.floor(ctx.sampleRate * Math.max(0.02, seconds)));
@@ -921,24 +992,6 @@
     return buf;
   }
 
-  function buildJetpackOn() {
-    var buf = newBuffer(0.62);
-    var sr = ctx.sampleRate;
-    var d = buf.getChannelData(0);
-    var n = d.length;
-    var lp = 0;
-    for (var i = 0; i < n; i++) {
-      var p = i / n;
-      var cut = 420 + 2300 * p;
-      var a = 1 - Math.exp(-6.283185307179586 * cut / sr);
-      lp += ((Math.random() * 2 - 1) - lp) * a;
-      var env = Math.pow(Math.sin(Math.PI * p), 0.8);
-      var v = lp * env * 1.3 + Math.sin(6.283185307179586 * (70 + 110 * p) * (i / sr)) * env * 0.18;
-      d[i] = Math.tanh(v * 1.2) * 0.85;
-    }
-    return buf;
-  }
-
   function buildJetpackLoop() {
     var dur = 1.2;
     var buf = newBuffer(dur);
@@ -1014,18 +1067,14 @@
     return buf;
   }
 
-  function buildKillcam() {
-    var buf = newBuffer(2.4);
-    var sr = ctx.sampleRate;
-    var d = buf.getChannelData(0);
-    var beats = [
-      [0.05, 0.75], [0.30, 0.55], [1.05, 0.66], [1.30, 0.48]
-    ];
-    for (var i = 0; i < beats.length; i++) {
-      addOsc(d, sr, beats[i][0], 0.22, 64, 30, beats[i][1], 'sine', false);
-      addOsc(d, sr, beats[i][0], 0.06, 120, 60, beats[i][1] * 0.35, 'sine', false);
-    }
-    return buf;
+  // One lub-dub, always synthesized: a filtered sine is what a heartbeat is.
+  function buildHeartbeat() {
+    var buf = newBuffer(0.46);
+    var sr = ctx.sampleRate, d = buf.getChannelData(0);
+    addOsc(d, sr, 0.004, 0.17, 66, 34, 0.74, 'sine', false);
+    addOsc(d, sr, 0.004, 0.05, 124, 62, 0.25, 'sine', false);
+    addOsc(d, sr, 0.20, 0.20, 56, 30, 0.52, 'sine', false);
+    return finishBuffer(buf);
   }
 
   function buildUi() {
@@ -1078,11 +1127,10 @@
     if (kind === 'death') return buildDeath();
     if (kind === 'respawn') return buildRespawn();
     if (kind === 'splash') return buildSplash();
-    if (kind === 'jetpackOn') return buildJetpackOn();
     if (kind === 'jetpackLoop') return buildJetpackLoop();
     if (kind === 'dragonRoar') return buildDragonRoar();
     if (kind === 'dragonBreath') return buildDragonBreath();
-    if (kind === 'killcam') return buildKillcam();
+    if (kind === 'heartbeat') return buildHeartbeat();
     if (kind === 'ui') return buildUi();
     return null;
   }
@@ -1090,6 +1138,7 @@
   function bufferFor(kind, weapon) {
     var recorded = recordedBank[kind === 'reload' ? 'reload:' + (weapon || 'rifle')
       : kind === 'step' || kind === 'impact' || kind === 'break' ? kind + ':' + weapon : kind];
+    if (!recorded && kind === 'break') recorded = recordedBank['break:stone'];
     if (kind !== 'shot' && recorded && recorded.length) return recorded[(Math.random() * recorded.length) | 0];
     if (kind === 'shot' && recordedBuffers[weapon]) {
       var samples = recordedBuffers[weapon];
@@ -1113,66 +1162,48 @@
 
   /* ---------------------------------------------------- local CC0 samples */
 
-  function buildRecordedShot(weapon, decoded) {
-    var spec = SHOT_SPEC[weapon];
-    var sr = decoded.sampleRate;
-    var source = decoded.getChannelData(0);
-    var scan = Math.min(source.length, Math.floor(sr * 0.12));
-    var peak = 0, offset = 0, i;
+  /* Sound lands on the frame of the action: drop whatever precedes the first
+     transient (silence plus MP3 encoder delay, which decoders treat differently)
+     down to 2 ms before it. Done once at decode, never on a firing tick. */
+  function tightenClip(decoded) {
+    var sr = decoded.sampleRate, source = decoded.getChannelData(0);
+    var scan = Math.min(source.length, Math.floor(sr * 0.2)), peak = 0, onset = -1, i;
     for (i = 0; i < scan; i++) if (Math.abs(source[i]) > peak) peak = Math.abs(source[i]);
-    // MP3 decoders differ in their handling of encoder delay. Align the first
-    // transient once, not on every trigger; retain 0.8 ms before the onset.
-    if (peak > 0.001) {
-      for (i = 0; i < scan; i++) {
-        if (Math.abs(source[i]) >= peak * 0.07) {
-          offset = Math.max(0, i - Math.floor(sr * 0.0008));
-          break;
-        }
-      }
+    if (peak < 0.001) return decoded;
+    for (i = 0; i < scan; i++) {
+      if (Math.abs(source[i]) >= peak * 0.06) { onset = i; break; }
     }
-    var length = Math.max(1, Math.floor(sr * spec.dur));
-    var buf = ctx.createBuffer(1, length, sr);
-    var d = buf.getChannelData(0);
-    var lp = 0, alpha = 1 - Math.exp(-6.283185307179586 * spec.cut / sr);
-    for (i = 0; i < length; i++) {
-      var s = i + offset < source.length ? source[i + offset] : 0;
-      lp += (s - lp) * alpha;
-      d[i] = s * 0.82 + lp * 0.12;
-    }
-    addShotLayers(d, sr, weapon, 1);
-    return finishBuffer(buf);
+    var offset = Math.max(0, onset - Math.floor(sr * 0.002));
+    if (offset < 8) return decoded;
+    var buf = ctx.createBuffer(1, source.length - offset, sr), d = buf.getChannelData(0);
+    d.set(source.subarray(offset));
+    var fade = Math.min(d.length, Math.floor(sr * 0.0005));
+    for (i = 0; i < fade; i++) d[i] *= i / fade;
+    return buf;
   }
 
-  function decodeWeapon(weapon, entry) {
-    var settled = false;
-    function complete(decoded) {
-      if (settled) return;
-      settled = true;
-      try {
-        if (!decoded || decoded.numberOfChannels !== 1 || decoded.duration > 1.5 || decoded.duration < 0.03) {
-          throw new Error('Invalid local firearm sample');
-        }
-        var variants = [buildRecordedShot(weapon, decoded), buildRecordedShot(weapon, decoded)];
-        recordedBuffers[weapon] = variants;
-        buffers.delete('shot|' + weapon); // release warmed fallback buffers
-        sampleReady++;
-      } catch (e) { sampleFailed++; }
-      samplePending--;
-      if (!samplePending) sampleState = sampleReady === WEAPON_IDS.length ? 'ready' : sampleReady ? 'partial' : 'failed';
-    }
-    try {
-      if (!entry || typeof entry.base64 !== 'string' || entry.base64.length > 32000) {
-        complete(null);
-        return;
-      }
-      var binary = window.atob(entry.base64);
-      var bytes = new Uint8Array(binary.length);
-      for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-      // Callback + Promise overloads are both supported; complete() is guarded
-      // because some engines deliver both. There is no local XHR/fetch/CORS.
-      var pending = ctx.decodeAudioData(bytes.buffer, complete, function () { complete(null); });
-      if (pending && typeof pending.then === 'function') pending.then(complete, function () { complete(null); });
-    } catch (e) { complete(null); }
+  function settleSamples() {
+    if (!samplePending) sampleState = sampleReady === WEAPON_IDS.length ? 'ready' : sampleReady ? 'partial' : 'failed';
+  }
+
+  // Every take is kept so consecutive shots alternate between real recordings.
+  function decodeWeaponTakes(weapon, entry) {
+    var takes = [entry && entry.base64].concat(entry && entry.takes || []).filter(Boolean);
+    var left = takes.length, list = [];
+    if (!left) { sampleFailed++; samplePending--; settleSamples(); return; }
+    takes.forEach(function (base64) {
+      decodeClip({ base64: base64 }, function (buf) {
+        if (buf) list.push(tightenClip(buf));
+        if (--left) return;
+        if (list.length) {
+          recordedBuffers[weapon] = list;
+          buffers.delete('shot|' + weapon); // release warmed fallback buffers
+          sampleReady++;
+        } else sampleFailed++;
+        samplePending--;
+        settleSamples();
+      });
+    });
   }
 
   function prepareAudio() {
@@ -1209,63 +1240,48 @@
     }
     sampleState = 'loading';
     samplePending = WEAPON_IDS.length;
-    var sfx = window.BCSfxBank && window.BCSfxBank.version >= 1 && window.BCSfxBank.licence === 'CC0-1.0'
+    var sfx = window.BCSfxBank && window.BCSfxBank.version >= 1 && window.BCSfxBank.licence === 'CC0-PD'
       ? window.BCSfxBank.entries : null;
-    for (var n = 0; n < WEAPON_IDS.length; n++) {
-      var id = WEAPON_IDS[n], takes = sfx && sfx['shot:' + id];
-      if (takes && takes.length) decodeWeaponTakes(id, takes);
-      else decodeWeapon(id, asset.entries[id]);
-    }
+    for (var n = 0; n < WEAPON_IDS.length; n++) decodeWeaponTakes(WEAPON_IDS[n], asset.entries[WEAPON_IDS[n]]);
     if (sfx) decodeBank(sfx);
   }
 
-  /* Recorded effects bank (assets/audio/sfx-bank.js): real CC0 recordings for
-     impacts, body hits, handling, UI ticks, footsteps and landings. Each
-     weapon's reload is assembled from real magazine/rack/pump/bolt clips
-     placed at that weapon's reload stages, so it lines up with the animation. */
+  /* Recorded effects bank (assets/audio/sfx-bank.js). Each weapon's reload is
+     assembled from recordings of that gun's handling (rl:<weapon>:<role>),
+     placed on the weapon's reload stages so it lines up with the animation. */
   var recordedBank = Object.create(null);
-  var RELOAD_CLIPS = [
-    [/out/, 'magOut'], [/gate|feed|shell|in\b|insert/, 'magIn'], [/pump/, 'pump'], [/bolt/, 'bolt'],
-    [/cylinder|eject|ejector/, 'cylinder'], [/slide/, 'slide'], [/charg|rack|release|handle/, 'rack']
+  var RELOAD_ROLES = [
+    [/shell feed|belt seat/, 'shell'], [/out|eject|extract/, 'out'], [/speedloader|\bin\b|insert/, 'in'],
+    [/open|unlock|gate|cock/, 'open'], [/close|shut|latch|seat|lock/, 'close'],
+    [/rack|pump|charg|handle|release|back|slide|bolt/, 'rack']
   ];
+  var RELOAD_SHARED = { dmr: 'sniper' };
+  // Clips whose first sound must not be trimmed: they are loops or tuned as they are.
+  var UNTOUCHED = /^(jetpackLoop$|step:|land$)/;
 
   function decodeClip(entry, done) {
     var settled = false;
-    function finish(buf) { if (!settled) { settled = true; done(buf && buf.duration > 0.01 && buf.duration < 6 ? buf : null); } }
+    function finish(buf) { if (!settled) { settled = true; done(buf && buf.duration > 0.01 && buf.duration < 12 ? buf : null); } }
     try {
-      if (!entry || typeof entry.base64 !== 'string' || entry.base64.length > 40000) { finish(null); return; }
+      if (!entry || typeof entry.base64 !== 'string' || entry.base64.length > 160000) { finish(null); return; }
       var binary = window.atob(entry.base64), bytes = new Uint8Array(binary.length);
       for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      // Callback + Promise overloads are both supported; finish() is guarded
+      // because some engines deliver both. There is no local XHR/fetch/CORS.
       var pending = ctx.decodeAudioData(bytes.buffer, finish, function () { finish(null); });
       if (pending && typeof pending.then === 'function') pending.then(finish, function () { finish(null); });
     } catch (e) { finish(null); }
   }
 
-  // Recorded gunshots play as recorded: full tail, no synthetic layers. Every
-  // take is kept so consecutive shots alternate between real recordings.
-  function decodeWeaponTakes(weapon, takes) {
-    var left = takes.length, list = [];
-    takes.forEach(function (entry) {
-      decodeClip(entry, function (buf) {
-        if (buf) list.push(buf);
-        if (--left) return;
-        if (list.length) { recordedBuffers[weapon] = list; buffers.delete('shot|' + weapon); sampleReady++; }
-        else sampleFailed++;
-        samplePending--;
-        if (!samplePending) sampleState = sampleReady === WEAPON_IDS.length ? 'ready' : sampleReady ? 'partial' : 'failed';
-      });
-    });
-  }
-
   function decodeBank(entries) {
-    var keys = Object.keys(entries).filter(function (k) { return k.indexOf('shot:') !== 0; });
+    var keys = Object.keys(entries);
     var waiting = 0;
     keys.forEach(function (key) {
       var list = Array.isArray(entries[key]) ? entries[key] : [];
       list.forEach(function (entry) {
         waiting++;
         decodeClip(entry, function (buf) {
-          if (buf) (recordedBank[key] = recordedBank[key] || []).push(buf);
+          if (buf) (recordedBank[key] = recordedBank[key] || []).push(UNTOUCHED.test(key) ? buf : tightenClip(buf));
           if (--waiting === 0) {
             assembleReloads();
             // The loop may have started procedurally before the bank decoded.
@@ -1290,28 +1306,44 @@
     }
   }
 
+  function reloadRole(name) {
+    var text = String(name || '').toLowerCase();
+    if (/^(out|in|shell|open|close|rack)$/.test(text)) return text;
+    for (var k = 0; k < RELOAD_ROLES.length; k++) if (RELOAD_ROLES[k][0].test(text)) return RELOAD_ROLES[k][1];
+    return '';
+  }
+
   function assembleReloads() {
     var handling = typeof COMBAT_HANDLING !== 'undefined' ? COMBAT_HANDLING : null;
     for (var n = 0; n < WEAPON_IDS.length; n++) {
       var id = WEAPON_IDS[n], w = typeof WEAPON_BY_ID !== 'undefined' ? WEAPON_BY_ID[id] : null;
       var stages = handling && handling[id] && handling[id].reloadStages;
-      if (!w || !Array.isArray(stages) || !stages.length) continue;
-      var seconds = Math.min(4, Math.max(0.5, w.reload));
+      if (!Array.isArray(stages) && w && w.handling) stages = w.handling.reloadStages;
+      var fallback = RELOAD_FALLBACK[id];
+      if (!Array.isArray(stages) || !stages.length) stages = fallback[1];
+      var seconds = Math.min(4, Math.max(0.5, w && isFinite(w.reload) ? w.reload : fallback[0]));
       var out = ctx.createBuffer(1, Math.ceil(seconds * ctx.sampleRate), ctx.sampleRate), placed = 0;
       for (var s2 = 0; s2 < stages.length; s2++) {
-        var name = String(stages[s2][1] || '').toLowerCase(), clipKey = null;
-        for (var k = 0; k < RELOAD_CLIPS.length && !clipKey; k++) if (RELOAD_CLIPS[k][0].test(name)) clipKey = RELOAD_CLIPS[k][1];
-        if (id === 'revolver' && clipKey === 'magOut') clipKey = 'cylinder';
-        if (id === 'pistol' && clipKey === 'rack') clipKey = 'slide';
-        var own = recordedBank['rl:' + id + ':' + s2];
-        var clips = own && own.length ? own : clipKey && recordedBank[clipKey];
+        var role = reloadRole(stages[s2][1]);
+        var clips = recordedBank['rl:' + id + ':' + role] || recordedBank['rl:' + (RELOAD_SHARED[id] || id) + ':' + role];
+        var at = stages[s2][0] * seconds;
         if (!clips || !clips.length) continue;
-        // Mechanism stages are cued slightly before the stage mark so the
-        // transient lands on the visible motion.
-        mixInto(out, clips[0], Math.max(0, stages[s2][0] * seconds - 0.04), 0.9);
+        // Shell feeds keep inserting until the next stage instead of playing once.
+        var repeat = role === 'shell' && id === 'shotgun' ? stages[s2 + 1] : null;
+        if (repeat) {
+          var until = repeat[0] * seconds - 0.22, gap = Math.max(0.2, clips[0].duration + 0.06);
+          for (var shell = 0, tick = at; tick < until && shell < 5; tick += gap, shell++) {
+            mixInto(out, clips[shell % clips.length], tick, 0.9);
+          }
+        } else mixInto(out, clips[s2 % clips.length], Math.max(0, at), 0.9);
         placed++;
       }
-      if (placed) recordedBank['reload:' + id] = [out];
+      if (placed) {
+        var d = out.getChannelData(0), peak = 0;
+        for (var i = 0; i < d.length; i++) if (Math.abs(d[i]) > peak) peak = Math.abs(d[i]);
+        if (peak > 0.95) for (i = 0; i < d.length; i++) d[i] *= 0.95 / peak;
+        recordedBank['reload:' + id] = [out];
+      }
     }
   }
 
@@ -1321,6 +1353,7 @@
     var k = String(kind == null ? '' : kind).toLowerCase();
     var action = info && String(info.action || '').toLowerCase();
     if ((k === 'action' || k === 'mechanism' || k === 'ui') && ACTION_IDS[action] === 1) return action;
+    if (k === 'ui' && UI_ACTIONS[action]) return UI_ACTIONS[action];
     if (!k && info && info.weapon) k = 'shot';
     if (SHOT_IDS[k] === 1) return 'shot';
     return Object.prototype.hasOwnProperty.call(KIND_ALIAS, k) ? KIND_ALIAS[k] : '';
@@ -1341,6 +1374,38 @@
       }
     }
     return t === 'red' || t === 'blue' ? t : null;
+  }
+
+  /* Each take carries its full tail so the LAST round rings out. A following
+     round from the same gun cuts the previous one, so 1000 rpm stays tight and
+     does not smear or burn through voices. */
+  function fadeVoice(chain, seconds) {
+    if (!chain || !chain.src) return;
+    var t = ctx.currentTime, g = chain.gain.gain, src = chain.src;
+    try {
+      g.cancelScheduledValues(t);
+      g.setValueAtTime(g.value, t);
+      g.linearRampToValueAtTime(0.0001, t + seconds);
+      src.stop(t + seconds + 0.01);
+      chain.stopAt = t + seconds + 0.02;
+    } catch (e) { /* it ends by itself */ }
+  }
+
+  function chokeShot(weapon, hasPos) {
+    var last = shotChoke[weapon];
+    if (!last || last.src !== last.chain.src) return;
+    var near = !hasPos && !last.hasPos;
+    if (hasPos && last.hasPos) {
+      var dx = last.x - posX, dy = last.y - posY, dz = last.z - posZ;
+      near = dx * dx + dy * dy + dz * dz < 9;
+    }
+    if (near) fadeVoice(last.chain, CHOKE_SECONDS[weapon] || 0.03);
+  }
+
+  function rememberShot(weapon, chain, hasPos) {
+    var last = shotChoke[weapon] || (shotChoke[weapon] = {});
+    last.chain = chain; last.src = chain.src; last.hasPos = hasPos;
+    last.x = posX; last.y = posY; last.z = posZ;
   }
 
   function play(info) {
@@ -1372,19 +1437,25 @@
 
       if (!listenerLive) updateListener(false);
       readPosition(info.position);
+      // The player's own sounds sit in the head, not in one ear beside the muzzle.
+      if (spHasPos && spec.solo) spHasPos = false;
+      if (spHasPos) {
+        var ox = posX - lx, oy = posY - ly, oz = posZ - lz;
+        if (ox * ox + oy * oy + oz * oz < OWN_SOUND_METRES * OWN_SOUND_METRES) spHasPos = false;
+      }
       var hasPos = spHasPos;
       if (!computeSpatial(!!info.occluded)) return false;
-      if (kind === 'shot' && hasPos && spDist > 45) {
-        var far = recordedBank['shotFar:' + weapon];
+      if (kind === 'shot' && hasPos && spDist > FAR_SHOT_METRES) {
+        var far = recordedBank['shotFar:' + FAR_FAMILY[weapon]];
         if (far && far.length) buf = far[(Math.random() * far.length) | 0];
       }
 
+      // The panner owns distance, so a shot's level is its gun's mix level,
+      // never the shooter-supplied volume on top of the distance model.
       var vol = spec.vol;
-      if (kind === 'shot') {
-        var rp = weaponReport(weapon);
-        if (rp && isFinite(rp.sound)) vol = clamp(rp.sound, 0.2, 1);
+      if (kind !== 'shot' && info.volume != null && isFinite(Number(info.volume))) {
+        vol = spec.ref ? spec.vol * clamp(info.volume / spec.ref, 0, 1.6) : clamp(info.volume, 0, 1.5);
       }
-      if (info.volume != null && isFinite(Number(info.volume))) vol = clamp(info.volume, 0, 1.5);
 
       var gainValue = hasPos ? vol * tailFade(spDist) * (spOccluded ? 0.55 : 1) : vol;
       var playCut = kind === 'shot' ? 9000 : (spec.playCut || 4000);
@@ -1401,13 +1472,16 @@
         if (team === 'red') rate = 0.94;
         else if (team === 'blue') rate = 1.06;
       }
-      rate *= kind === 'shot' ? 0.985 + Math.random() * 0.03 : 0.96 + Math.random() * 0.08;
+      // Stage-timed sounds keep their exact length.
+      if (!spec.fixedRate) rate *= kind === 'shot' ? 0.985 + Math.random() * 0.03 : 0.96 + Math.random() * 0.08;
       if (info.rate != null && isFinite(Number(info.rate))) rate *= clamp(info.rate, 0.5, 2);
       rate = clamp(rate, 0.5, 2);
 
       pruneVoices();
       if (voices.length >= MAX_VOICES - (jetpackLoop ? 1 : 0)) stealVoice();
+      if (kind === 'shot') chokeShot(weapon, hasPos);
       var chain = acquireChain();
+      routeChain(chain, spec.priority ? master : duckBus);
       if (!chain.panner && hasPos) {
         gainValue *= REF_DISTANCE / (REF_DISTANCE + ROLLOFF * Math.max(0, spDist - REF_DISTANCE));
       }
@@ -1483,7 +1557,10 @@
       }
       voices.push(chain);
       playCount++;
+      if (spec.priority) duckOthers(spec.priority);
+      if (kind === 'reload' && !hasPos) localReload = chain;
       if (kind === 'shot') {
+        rememberShot(weapon, chain, hasPos);
         if (recordedBuffers[weapon]) samplePlayCount++;
         else proceduralShotCount++;
       }
@@ -1501,7 +1578,7 @@
     try {
       var kind = normalizeKind(info.kind, info);
       if (!kind) return;
-      if (info.action === 'hitConfirm' && info.head) play({ kind: 'headshot', volume: 0.32 });
+      if (info.action === 'hitConfirm' && info.head) { play({ kind: 'headshot' }); return; }
       if (kind === 'respawn') lastRespawnSfx = now();
       // sfx is authoritative for local AND remote audio. A shot+shot-hook or
       // packet+firePose inference must not double it; no global time gate may
@@ -1566,9 +1643,53 @@
 
   /* --------------------------------------------------------------- frames */
 
+  // A reload that was cancelled stops with it, instead of playing on after a swap.
+  function followLocalReload() {
+    if (!localReload) return;
+    var reloading = false;
+    try { reloading = typeof gun !== 'undefined' && gun && gun.reloading > 0; } catch (e) { reloading = true; }
+    if (reloading) return;
+    if (localReload.src) fadeVoice(localReload, 0.05);
+    localReload = null;
+  }
+
+  /* Other players' footsteps, positional: a stride of ground covered, like the
+     local player's. Interpolated positions only, so no packets are added. */
+  var peerSteps = new Map();
+  var PEER_STEP_METRES = 2.3, PEER_STEP_RANGE = 34;
+
+  function updatePeerSteps(dt) {
+    if (typeof net === 'undefined' || !net || !net.players || !isFinite(dt) || dt <= 0) return;
+    var seen = 0;
+    net.players.forEach(function (r, id) {
+      if (!r || !isFinite(r.x)) return;
+      seen++;
+      var s = peerSteps.get(id);
+      if (!s) { peerSteps.set(id, { x: r.x, z: r.z, walked: 0 }); return; }
+      var dx = r.x - s.x, dz = r.z - s.z, moved = Math.sqrt(dx * dx + dz * dz);
+      s.x = r.x; s.z = r.z;
+      var speed = moved / dt;
+      var grounded = r.onGround !== 0 && r.onGround !== false && !r.fly && r.dragon < 0 && !(r.hp <= 0);
+      // A teleport or a respawn is not a walk; nor is standing still.
+      if (!grounded || speed < 1.2 || speed > 14) { s.walked = Math.min(s.walked, 1); return; }
+      s.walked += moved;
+      if (s.walked < PEER_STEP_METRES) return;
+      s.walked -= PEER_STEP_METRES;
+      var ox = r.x - lx, oy = r.y - ly, oz = r.z - lz;
+      if (ox * ox + oy * oy + oz * oz > PEER_STEP_RANGE * PEER_STEP_RANGE) return;
+      var block = 0;
+      try { block = getBlock(Math.floor(r.x), Math.floor(r.y - 0.2), Math.floor(r.z)); } catch (e) { block = 0; }
+      play({ kind: 'step', surface: blockSurface(block, true), position: { x: r.x, y: r.y + 0.1, z: r.z },
+        volume: r.crouch ? 0.08 : speed > 7 ? 0.36 : 0.26 });
+    });
+    if (peerSteps.size > seen) peerSteps.forEach(function (s, id) { if (!net.players.has(id)) peerSteps.delete(id); });
+  }
+
   function onFrame(dt) {
     updateListener(false);
     updateJetpackLoop();
+    followLocalReload();
+    try { updatePeerSteps(dt); } catch (e) { /* footsteps are cosmetic */ }
     syncReady();
   }
 
@@ -1666,14 +1787,16 @@
   BCR.on('killfeed', function (killer, victim, info) {
     try {
       var self = typeof net !== 'undefined' && net ? net.id : '';
-      var mine = info && (info.killerId === self || info.byId === self) && info.victimId !== self;
+      var name = typeof playerName !== 'undefined' ? playerName : null;
+      var mine = info && ((self && (info.killerId === self || info.byId === self)) || (name && killer === name)) &&
+        victim !== name && (!self || info.victimId !== self);
       if (mine && info.confirmed !== false) play({ kind: 'confirm', volume: 0.5 });
     } catch (e) { /* optional */ }
   }, 40);
   BCR.on('respawn', function () {
     if (now() - lastRespawnSfx < 50) return;
     lastRespawnSfx = now();
-    play({ kind: 'respawn', volume: 1 });
+    play({ kind: 'respawn', volume: 0.5 });
   });
   BCR.on('settingsChanged', function (key) {
     if (key === 'muted') setMuted(readSetting('muted'), false);

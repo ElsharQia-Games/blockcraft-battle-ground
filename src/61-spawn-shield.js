@@ -50,7 +50,10 @@ function spawnShieldPeerActive(peer) { return !!peer && performance.now() < (pee
     holder.shieldMesh.visible = true;
   }
 
-  BC.on('respawn', function () { spawnShieldUntil = performance.now() + SPAWN_SHIELD_MS; }, 0);
+  BC.on('respawn', function () {
+    spawnShieldUntil = performance.now() + SPAWN_SHIELD_MS;
+    BC.emit('sfx', { kind: 'shield', volume: 0.5 });
+  }, 0);
   BC.on('shot', function () { spawnShieldUntil = 0; }, 0);
 
   BC.on('frame', function () {
